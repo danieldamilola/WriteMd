@@ -19,13 +19,13 @@ interface ThemeDefinition {
 }
 
 const THEME_PREVIEWS: ThemeDefinition[] = [
-  { id: 'dark', name: 'Dark', bg: '#1a1b1e', elevated: '#212226', text: '#e8e8e8', accent: '#4a9eff' },
-  { id: 'light', name: 'Light', bg: '#fafafa', elevated: '#ffffff', text: '#1a1a1a', accent: '#2a7de1' },
-  { id: 'paper', name: 'Paper', bg: '#fdf6e3', elevated: '#fefbf3', text: '#3d3a2e', accent: '#b58900' },
-  { id: 'dracula', name: 'Dracula', bg: '#282a36', elevated: '#343746', text: '#f8f8f2', accent: '#bd93f9' },
-  { id: 'nord', name: 'Nord', bg: '#2e3440', elevated: '#3b4252', text: '#eceff4', accent: '#88c0d0' },
-  { id: 'graphite', name: 'Graphite', bg: '#1e1e1e', elevated: '#252526', text: '#cccccc', accent: '#007acc' },
-  { id: 'midnight', name: 'Midnight', bg: '#0f1419', elevated: '#151d25', text: '#cdd6da', accent: '#599cb9' }
+  { id: 'dark', name: 'Dark', bg: '#1a1b1e', elevated: '#212226', text: '#e8e8e8', accent: '#ffffff' },
+  { id: 'light', name: 'Light', bg: '#fafafa', elevated: '#ffffff', text: '#1a1a1a', accent: '#1a1a1a' },
+  { id: 'paper', name: 'Paper', bg: '#fdf6e3', elevated: '#fefbf3', text: '#3d3a2e', accent: '#3d3a2e' },
+  { id: 'dracula', name: 'Dracula', bg: '#282a36', elevated: '#343746', text: '#f8f8f2', accent: '#ffffff' },
+  { id: 'nord', name: 'Nord', bg: '#2e3440', elevated: '#3b4252', text: '#eceff4', accent: '#ffffff' },
+  { id: 'graphite', name: 'Graphite', bg: '#1e1e1e', elevated: '#252526', text: '#cccccc', accent: '#ffffff' },
+  { id: 'midnight', name: 'Midnight', bg: '#0f1419', elevated: '#151d25', text: '#cdd6da', accent: '#ffffff' }
 ]
 
 const FONT_FAMILIES = [
