@@ -34,8 +34,8 @@ export function getTableTooltip(state: EditorState): Tooltip | null {
       dom.className = 'cm-table-toolbar'
       
       const btnAddRow = document.createElement('button')
-      btnAddRow.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg> Row`
-      btnAddRow.title = 'Add Row Below'
+      btnAddRow.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg> Col`
+      btnAddRow.title = 'Add Column Right'
       btnAddRow.onclick = (e) => {
         e.preventDefault()
         // Simple append logic: just simulate pressing Enter at the end of the line
@@ -52,8 +52,8 @@ export function getTableTooltip(state: EditorState): Tooltip | null {
       }
       
       const btnAddCol = document.createElement('button')
-      btnAddCol.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg> Col`
-      btnAddCol.title = 'Add Column Right'
+      btnAddCol.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg> Row`
+      btnAddCol.title = 'Add Row Below'
       btnAddCol.onclick = (e) => {
         e.preventDefault()
         const tableRange = getTableRange(view.state, view.state.selection.main.head)

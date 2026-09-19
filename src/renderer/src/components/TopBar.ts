@@ -158,7 +158,9 @@ export class WriteMDTopBar extends LitElement {
               const fs = await import('../state/file-state').then(m => m.FileState);
               const state = fs.getInstance().getState();
               if (state.dirty || state.secondaryDoc?.dirty) {
-                if (!confirm('You have unsaved changes. Close anyway?')) return;
+                const ConfirmDialog = await import('./ConfirmDialog');
+                const ok = await ConfirmDialog.showConfirm('You have unsaved changes. Close anyway?');
+                if (!ok) return;
               }
               void api()?.window?.close?.()
             }}

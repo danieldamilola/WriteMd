@@ -1,5 +1,6 @@
 import { SettingsStore } from './settings'
 import type { ElectronAPI } from '../../../shared/electron-api'
+import { showConfirm } from '../components/ConfirmDialog'
 
 function api(): ElectronAPI | undefined {
   return typeof window !== 'undefined' ? window.electronAPI : undefined
@@ -88,7 +89,10 @@ export class FileState {
   }
 
   async newFile(): Promise<void> {
-    if (this.state.dirty && !confirm('You have unsaved changes. Create new file anyway?')) return
+    if (this.state.dirty) {
+      const ok = await showConfirm('You have unsaved changes. Create new file anyway?')
+      if (!ok) return
+    }
     const vaultPath = await api()
       ?.vault?.getPath?.()
       .catch(() => undefined)
@@ -152,12 +156,10 @@ export class FileState {
   }
 
   async openFile(path: string): Promise<void> {
-    if (
-      this.state.dirty &&
-      this.state.path !== path &&
-      !confirm('You have unsaved changes. Open another file anyway?')
-    )
-      return
+    if (this.state.dirty && this.state.path !== path) {
+      const ok = await showConfirm('You have unsaved changes. Open another file anyway?')
+      if (!ok) return
+    }
     try {
       const result = await api()?.file?.read?.(path)
       if (!result) throw new Error('Failed to read file')
