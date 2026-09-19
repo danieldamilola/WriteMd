@@ -78,17 +78,57 @@ export function getTableTooltip(state: EditorState): Tooltip | null {
         view.focus()
       }
 
+      const setColumnAlignment = (align: 'left' | 'center' | 'right') => {
+        const pos = view.state.selection.main.head
+        const tableRange = getTableRange(view.state, pos)
+        if (!tableRange) return
+        
+        const doc = view.state.doc
+        const startLine = doc.lineAt(tableRange.from)
+        
+        const currentLine = doc.lineAt(pos)
+        const prefix = currentLine.text.substring(0, pos - currentLine.from)
+        let colIdx = (prefix.match(/\|/g) || []).length - 1
+        if (colIdx < 0) colIdx = 0
+
+        const sepLine = doc.line(startLine.number + 1)
+        const cells = sepLine.text.split('|')
+        
+        let actualColIdx = colIdx
+        if (sepLine.text.trim().startsWith('|')) {
+          actualColIdx += 1
+        }
+        
+        if (actualColIdx >= cells.length - 1) return
+
+        let newCell = ' -------- '
+        if (align === 'left') newCell = ' :------- '
+        if (align === 'center') newCell = ' :------: '
+        if (align === 'right') newCell = ' -------: '
+
+        cells[actualColIdx] = newCell
+        const newSepText = cells.join('|')
+
+        view.dispatch({
+          changes: { from: sepLine.from, to: sepLine.to, insert: newSepText }
+        })
+        view.focus()
+      }
+
       const btnAlignLeft = document.createElement('button')
       btnAlignLeft.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="21" y1="6" x2="3" y2="6"></line><line x1="15" y1="12" x2="3" y2="12"></line><line x1="17" y1="18" x2="3" y2="18"></line></svg>`
       btnAlignLeft.title = 'Align Left'
+      btnAlignLeft.onclick = (e) => { e.preventDefault(); setColumnAlignment('left') }
       
       const btnAlignCenter = document.createElement('button')
       btnAlignCenter.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="21" y1="6" x2="3" y2="6"></line><line x1="19" y1="12" x2="5" y2="12"></line><line x1="19" y1="18" x2="5" y2="18"></line></svg>`
       btnAlignCenter.title = 'Align Center'
+      btnAlignCenter.onclick = (e) => { e.preventDefault(); setColumnAlignment('center') }
       
       const btnAlignRight = document.createElement('button')
       btnAlignRight.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="21" y1="6" x2="3" y2="6"></line><line x1="21" y1="12" x2="9" y2="12"></line><line x1="21" y1="18" x2="7" y2="18"></line></svg>`
       btnAlignRight.title = 'Align Right'
+      btnAlignRight.onclick = (e) => { e.preventDefault(); setColumnAlignment('right') }
 
       // We just do a simple Add Row for MVP
       dom.appendChild(btnAddRow)
