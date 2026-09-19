@@ -42,7 +42,7 @@ export function getTableTooltip(state: EditorState): Tooltip | null {
         const line = view.state.doc.lineAt(pos)
         // Check how many pipes
         const pipes = line.text.split('|').length - 1
-        let newRow = '\\n|' + Array(Math.max(1, pipes - 1)).fill('          ').join('|') + '|'
+        let newRow = '\n|' + Array(Math.max(1, pipes - 1)).fill('          ').join('|') + '|'
         view.dispatch({
           changes: { from: line.to, insert: newRow },
           selection: { anchor: line.to + 3 }

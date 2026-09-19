@@ -95,7 +95,7 @@ function handleTab(view: EditorView, shift: boolean): boolean {
     // No next line, or next line is not a table row -> insert new row
     // Count columns from the first line of the table
     const cols = pipes.length - 1
-    let newRowText = '\\n|'
+    let newRowText = '\n|'
     for (let i = 0; i < cols; i++) {
       newRowText += '          |'
     }
