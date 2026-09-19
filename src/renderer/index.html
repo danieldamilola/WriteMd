@@ -1,0 +1,24 @@
+<!doctype html>
+<html data-theme="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <title>WriteMD</title>
+    <link rel="icon" type="image/png" href="./assets/logo.png" />
+    <!-- https://developer.mozilla.org/en-US/docs/Web/HTTP/CSP -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' https://fonts.gstatic.com"
+    />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&family=Source+Serif+Pro:ital,wght@0,400;0,600;1,400&family=Geist+Mono:wght@400;500;600&family=Gochi+Hand&display=swap"
+      rel="stylesheet"
+    />
+  </head>
+
+  <body>
+    <writemd-app></writemd-app>
+    <script type="module" src="./src/renderer.ts"></script>
+  </body>
+</html>
