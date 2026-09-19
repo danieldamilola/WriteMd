@@ -1,9 +1,9 @@
 import { autocompletion, type CompletionContext, type CompletionResult } from '@codemirror/autocomplete'
 
 function slashCompletions(context: CompletionContext): CompletionResult | null {
-  const word = context.matchBefore(/^\/\w*/)
+  const word = context.matchBefore(/^\/\w*$/)
   if (!word) return null
-  if (word.from !== word.to && !context.explicit) return null
+  if (word.from === word.to && !context.explicit) return null
 
   return {
     from: word.from,
