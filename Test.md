@@ -1,5 +1,8 @@
 ---
-title: Test File
+name: appllama-app-design-skill
+description: Build native-feeling, benchmark-quality mobile app screens (Expo / React Native). Use when designing or implementing any mobile UI — screens, flows, onboarding, paywalls, tab bars, sheets, settings, empty states.
+license: MIT
+metadata: {"author":"Appllama (appllama.io)","version":"1.3.0"}
 tags: [markdown, test]
 ---
 
