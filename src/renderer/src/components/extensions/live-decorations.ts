@@ -124,8 +124,23 @@ export function buildInlineDecorations(view: EditorView): DecorationSet {
   const tree = ensureSyntaxTree(state, state.doc.length, 200) ?? syntaxTree(state)
   const activeLinkStarts = new Set<number>()
 
+  let frontmatterEnd = 0
+  const text = doc.toString()
+  if (text.startsWith('---\n')) {
+    let endMatch = text.indexOf('\n---\n', 4)
+    if (endMatch === -1 && text.endsWith('\n---')) {
+      endMatch = text.length - 4
+    }
+    if (endMatch !== -1) {
+      frontmatterEnd = endMatch + 5
+    }
+  }
+
   tree.iterate({
     enter: (node) => {
+      // Skip everything inside the frontmatter block, as it is managed by frontmatter-plugin
+      if (node.to <= frontmatterEnd) return
+
       if (node.name === 'FencedCode') {
         const firstLine = doc.lineAt(node.from).number
         const lastLine = doc.lineAt(node.to).number
