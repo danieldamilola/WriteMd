@@ -279,7 +279,7 @@ export class Editor extends LitElement {
   @state() private leftPaneWidth = 50 // percentage
   @state() private isDraggingResizer = false
   @state() private isAiConfigured = false
-  @state() private aiMessages: {role: 'user' | 'assistant', content: string}[] = []
+  @state() private aiMessages: {role: 'user' | 'assistant', content: string, filePath?: string}[] = []
   @state() private aiIsLoading = false
   
   private settingsStore: any = null
@@ -386,7 +386,8 @@ export class Editor extends LitElement {
   private async handleAiSubmit(input: string) {
     if (!input.trim() || this.aiIsLoading || !this.settingsStore) return
     
-    this.aiMessages = [...this.aiMessages, { role: 'user', content: input }]
+    const currentPath = this.filePath || 'Untitled'
+    this.aiMessages = [...this.aiMessages, { role: 'user', content: input, filePath: currentPath }]
     this.aiIsLoading = true
     
     const electron = api()
@@ -403,7 +404,8 @@ export class Editor extends LitElement {
       // Construct system prompt with current document content
       const systemPrompt = `CRITICAL INSTRUCTION: You are a helpful AI assistant operating directly inside the WriteMd application interface. You must strictly adhere to the "unslop" communication style. Never use filler phrases like "Here is...", "This will...", "I'll help...", "Let me...", "Great!", "Excellent!", or "Perfect!". No preamble, no postamble, no summaries unless asked. Deliver direct, concise, and human-sounding output. Format your responses in markdown.
 
-The user is currently editing a file. Here is the current content of the active file:
+The user is currently editing the file: ${currentPath}
+Here is the current content of the active file:
 
 \`\`\`markdown
 ${this.content}
@@ -415,14 +417,21 @@ CRITICAL INSTRUCTION FOR FILE EDITS: If the user asks you to modify, rewrite, or
 \`\`\`writemd-replace
 (the new content goes here)
 \`\`\`
-The application will intercept this block and automatically apply the changes to the user's document.`
+The application will intercept this block and automatically apply the changes to the user's document.
+
+CRITICAL INSTRUCTION FOR FILE TRACKING: You MUST check which file you started the conversation from and keep that in mind. Each user message will specify the active file at the time they sent the message. Before taking action or making any edits on a request, CHECK if the active file is still the same file. If the user changed files and you notice they are now in a new file compared to the previous context, you MUST immediately inform the user that they are in a new file, and ask them if they want to continue the request in this new file before making any edits.`
 
       // We bypass the ipc.ts system prompt handling completely to avoid needing an app restart.
       // We inject the system context as a 'user' message at the very beginning of the payload.
       const payloadMessages = [
         { role: 'user', content: systemPrompt },
-        { role: 'assistant', content: 'Acknowledged. I am operating within WriteMd and can see the file content. I will adhere to the unslop style and use the writemd-replace block if requested to modify the file.' },
-        ...this.aiMessages
+        { role: 'assistant', content: 'Acknowledged. I am operating within WriteMd and can see the file content. I will adhere to the unslop style, track file changes, and use the writemd-replace block if requested to modify the file.' },
+        ...this.aiMessages.map(m => {
+          if (m.role === 'user') {
+            return { role: m.role, content: `[Context: The user is currently in file: ${m.filePath}]\n\n${m.content}` }
+          }
+          return { role: m.role, content: m.content }
+        })
       ]
 
       // Send chat request
