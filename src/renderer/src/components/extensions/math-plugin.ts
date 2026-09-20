@@ -22,6 +22,7 @@ function getMathDecorations(view: EditorView) {
   const blockRegex = /\$\$([\s\S]*?)\$\$/g
   let match
   const blockMatches: {from: number, to: number}[] = []
+  const decos: {from: number, to: number, deco: Decoration}[] = []
   
   while ((match = blockRegex.exec(text)) !== null) {
     const from = match.index
@@ -37,10 +38,13 @@ function getMathDecorations(view: EditorView) {
     }
     
     if (!active || readOnly) {
-      builder.add(from, to, Decoration.replace({
-        widget: new MathWidget(content, true),
-        block: true
-      }))
+      decos.push({
+        from, to,
+        deco: Decoration.replace({
+          widget: new MathWidget(content, true),
+          block: true
+        })
+      })
     }
   }
 
@@ -49,17 +53,25 @@ function getMathDecorations(view: EditorView) {
   while ((match = inlineRegex.exec(text)) !== null) {
     const from = match.index
     const to = from + match[0].length
-    const content = match[1]
+    const content = match[1].trim()
     
     // Ensure it doesn't overlap with block matches
     if (blockMatches.some(m => from >= m.from && to <= m.to)) continue
     
     const line = view.state.doc.lineAt(from).number
     if (!activeLines.has(line) || readOnly) {
-      builder.add(from, to, Decoration.replace({
-        widget: new MathWidget(content, false)
-      }))
+      decos.push({
+        from, to,
+        deco: Decoration.replace({
+          widget: new MathWidget(content, false)
+        })
+      })
     }
+  }
+  
+  decos.sort((a, b) => a.from - b.from)
+  for (const d of decos) {
+    builder.add(d.from, d.to, d.deco)
   }
   
   return builder.finish()
