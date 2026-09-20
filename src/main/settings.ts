@@ -37,6 +37,8 @@ export interface WriteMDSettings {
     vaultPath: string
     recentFilesMax: number
     recentFiles: string[]
+    openTabs: string[]
+    activeTabPath: string | null
     imageFolderName: string
     cleanupUnusedImages: string
     defaultNewFileContent: string
@@ -53,6 +55,14 @@ export interface WriteMDSettings {
     enableWikiLinks: boolean
     spellCheck: boolean
     portableMode: boolean
+  }
+  shortcuts: {
+    bindings: Record<string, string>
+  }
+  ai: {
+    provider: string
+    model: string
+    apiKey: string
   }
 }
 
@@ -88,6 +98,8 @@ const DEFAULT_SETTINGS: WriteMDSettings = {
     vaultPath: '',
     recentFilesMax: 10,
     recentFiles: [],
+    openTabs: [],
+    activeTabPath: null,
     imageFolderName: '_assets',
     cleanupUnusedImages: 'prompt',
     defaultNewFileContent: '',
@@ -104,6 +116,14 @@ const DEFAULT_SETTINGS: WriteMDSettings = {
     enableWikiLinks: false,
     spellCheck: false,
     portableMode: false
+  },
+  shortcuts: {
+    bindings: {}
+  },
+  ai: {
+    provider: 'OpenAI',
+    model: 'gpt-4o',
+    apiKey: ''
   }
 }
 

@@ -7,14 +7,14 @@ function api(): ElectronAPI | undefined {
   return typeof window !== 'undefined' ? window.electronAPI : undefined
 }
 
-@customElement('writemd-top-bar')
+  @customElement('writemd-top-bar')
 export class WriteMDTopBar extends LitElement {
   static styles = css`
     :host {
       display: flex;
-      align-items: flex-end;
-      height: 43px;
-      padding: 0 12px 6px 12px;
+      align-items: center;
+      height: 56px;
+      padding: 12px 0 12px 28px;
       flex-shrink: 0;
       -webkit-app-region: drag;
       user-select: none;
@@ -25,7 +25,7 @@ export class WriteMDTopBar extends LitElement {
     .left-group {
       display: flex;
       align-items: center;
-      gap: 4px;
+      gap: 8px;
       -webkit-app-region: no-drag;
       flex-shrink: 0;
     }
@@ -36,27 +36,64 @@ export class WriteMDTopBar extends LitElement {
       flex: 1;
       min-width: 0;
       overflow: hidden;
-      -webkit-app-region: no-drag;
-      margin-left: 4px;
+      -webkit-app-region: drag;
+      margin-left: 21px;
+    }
+
+    .tabs-slot > ::slotted(*) {
+      -webkit-app-region: drag;
     }
 
     .right-group {
       display: flex;
       align-items: center;
-      gap: 8px;
+      gap: 16px;
       margin-left: auto;
       flex-shrink: 0;
       -webkit-app-region: no-drag;
+      align-self: stretch;
     }
 
     .window-controls {
       display: flex;
-      gap: 4px;
+      gap: 0;
+      align-self: stretch;
+      margin: -12px 0;
     }
   `
 
   @property({ type: Boolean }) showSplitButton = true
   @property({ type: Boolean }) splitActive = false
+  @property({ type: Boolean }) updateAvailable = false
+  @property({ type: Boolean }) downloadingUpdate = false
+  
+  private unsubs: Array<() => void> = []
+
+  connectedCallback(): void {
+    super.connectedCallback()
+    
+    // Call updater check after 3 seconds
+    setTimeout(() => {
+      void api()?.updater?.check?.()
+    }, 3000)
+
+    const onAvail = api()?.updater?.onUpdateAvailable?.(() => {
+      this.updateAvailable = true
+      this.downloadingUpdate = true
+    })
+    const onDownloaded = api()?.updater?.onUpdateDownloaded?.(() => {
+      this.downloadingUpdate = false
+      this.updateAvailable = true
+    })
+    
+    if (onAvail) this.unsubs.push(onAvail)
+    if (onDownloaded) this.unsubs.push(onDownloaded)
+  }
+
+  disconnectedCallback(): void {
+    super.disconnectedCallback()
+    this.unsubs.forEach((unsub) => unsub())
+  }
 
   private emit(event: string): void {
     this.dispatchEvent(new CustomEvent(event, { bubbles: true, composed: true }))
@@ -106,7 +143,7 @@ export class WriteMDTopBar extends LitElement {
                   ${
                     this.splitActive
                       ? html`
-                          <svg width="17" height="17" viewBox="0 0 17 17" fill="none">
+                          <svg width="17" height="17" viewBox="-2.5 -2.5 22 22" fill="none">
                             <!-- Filled right pane -->
                             <path
                               d="M15 0C16.1046 0 17 0.895431 17 2V15C17 16.0357 16.2128 16.887 15.2041 16.9893L15 17H2L1.7959 16.9893C0.854346 16.8938 0.1062 16.1457 0.0107422 15.2041L0 15V2C0 0.895431 0.895431 4.0266e-09 2 0H15ZM2 1C1.44772 1 1 1.44772 1 2V15C1 15.5523 1.44772 16 2 16H6V1H2ZM8 15V2C8 1.44772 8.44772 1 9 1H15C15.5523 1 16 1.44772 16 2V15C16 15.5523 15.5523 16 15 16H9C8.44772 16 8 15.5523 8 15Z"
@@ -115,7 +152,7 @@ export class WriteMDTopBar extends LitElement {
                           </svg>
                         `
                       : html`
-                          <svg width="17" height="17" viewBox="0 0 17 17" fill="none">
+                          <svg width="17" height="17" viewBox="-2.5 -2.5 22 22" fill="none">
                             <!-- Outline pane -->
                             <path
                               d="M15 0C16.1046 0 17 0.895431 17 2V15C17 16.0357 16.2128 16.887 15.2041 16.9893L15 17H2L1.7959 16.9893C0.854346 16.8938 0.1062 16.1457 0.0107422 15.2041L0 15V2C0 0.895431 0.895431 4.0266e-09 2 0H15ZM2 1C1.44772 1 1 1.44772 1 2V15C1 15.5523 1.44772 16 2 16H6V1H2ZM7 16H15C15.5523 16 16 15.5523 16 15V2C16 1.44772 15.5523 1 15 1H7V16Z"
@@ -123,35 +160,48 @@ export class WriteMDTopBar extends LitElement {
                             />
                           </svg>
                         `
-                  }
+          }
                 </writemd-icon-button>
+              `
+            : ''
+        }
+        
+        ${
+          this.updateAvailable
+            ? html`
+                <button
+                  style="background: var(--accent); color: var(--accent-text); border: none; border-radius: 4px; padding: 4px 8px; font-size: 11px; font-weight: 500; cursor: pointer; -webkit-app-region: no-drag;"
+                  @click=${() => this.downloadingUpdate ? null : api()?.updater?.install?.()}
+                >
+                  ${this.downloadingUpdate ? 'Downloading update...' : 'Restart to update'}
+                </button>
               `
             : ''
         }
 
         <div class="window-controls">
           <writemd-icon-button
-            size="md"
+            size="caption"
             title="Minimize"
             @click=${() => void api()?.window?.minimize?.()}
           >
-            <svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5">
-              <line x1="2" y1="6" x2="10" y2="6" />
+            <svg viewBox="0 0 10 10" fill="none">
+              <path d="M0 5H10" stroke="currentColor" stroke-width="1" />
             </svg>
           </writemd-icon-button>
 
           <writemd-icon-button
-            size="md"
+            size="caption"
             title="Maximize"
             @click=${() => void api()?.window?.maximize?.()}
           >
-            <svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5">
-              <rect x="2" y="2" width="8" height="8" rx="1" />
+            <svg viewBox="0 0 10 10" fill="none">
+              <rect x="0.5" y="0.5" width="9" height="9" stroke="currentColor" stroke-width="1" />
             </svg>
           </writemd-icon-button>
 
           <writemd-icon-button
-            size="md"
+            size="caption"
             variant="close"
             title="Close"
             @click=${async () => {
@@ -165,9 +215,8 @@ export class WriteMDTopBar extends LitElement {
               void api()?.window?.close?.()
             }}
           >
-            <svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5">
-              <line x1="3" y1="3" x2="9" y2="9" />
-              <line x1="9" y1="3" x2="3" y2="9" />
+            <svg viewBox="0 0 10 10" fill="none">
+              <path d="M0.5 0.5L9.5 9.5M9.5 0.5L0.5 9.5" stroke="currentColor" stroke-width="1" />
             </svg>
           </writemd-icon-button>
         </div>

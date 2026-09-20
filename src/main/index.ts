@@ -5,6 +5,7 @@ import icon from '../../resources/icon.png?asset'
 import { setupIpc } from './ipc'
 import { ensureVaultExists } from './vault'
 import { registerFileAssociations } from './file-associations'
+import { setupUpdater } from './updater'
 
 let mainWindow: BrowserWindow | null = null
 
@@ -66,6 +67,7 @@ app.whenReady().then(() => {
   ensureVaultExists()
   registerFileAssociations()
   setupIpc(() => mainWindow)
+  setupUpdater(() => mainWindow)
 
   createWindow()
 

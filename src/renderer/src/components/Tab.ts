@@ -23,7 +23,7 @@ export class WriteMDTab extends LitElement {
       width: 100%;
       height: 100%;
       border-radius: 5px;
-      padding: 0 11px;
+      padding: 0 7px 0 11px;
       cursor: pointer;
       gap: 8px;
       box-sizing: border-box;
@@ -67,10 +67,11 @@ export class WriteMDTab extends LitElement {
     .label {
       white-space: nowrap;
       overflow: hidden;
-      text-overflow: ellipsis;
       flex: 1;
       min-width: 0;
       text-align: left;
+      -webkit-mask-image: linear-gradient(to right, black 80%, transparent 100%);
+      mask-image: linear-gradient(to right, black 80%, transparent 100%);
     }
 
     .close-btn {
@@ -112,10 +113,14 @@ export class WriteMDTab extends LitElement {
     this.dispatchEvent(new CustomEvent('close', { bubbles: true, composed: true }))
   }
 
+  private handleSelect(): void {
+    this.dispatchEvent(new CustomEvent('select', { bubbles: true, composed: true }))
+  }
+
   render(): unknown {
     return html`
       <span class="separator"></span>
-      <button class="tab-btn" type="button">
+      <button class="tab-btn" type="button" @click=${this.handleSelect}>
         <span class="label">${this.label}</span>
         ${this.dirty ? html`<span class="dirty-dot" title="Unsaved changes"></span>` : ''}
         ${

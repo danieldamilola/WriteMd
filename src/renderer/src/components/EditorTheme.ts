@@ -19,18 +19,25 @@ export const writeMDTheme: Extension = EditorView.theme({
     justifyContent: 'center'
   },
   '.cm-scroller::-webkit-scrollbar': {
-    width: '4px',
-    height: '4px'
+    width: '8px',
+    height: '8px'
   },
   '.cm-scroller::-webkit-scrollbar-track': {
     background: 'transparent'
   },
+  '.cm-scroller::-webkit-scrollbar-button': {
+    display: 'none'
+  },
   '.cm-scroller::-webkit-scrollbar-thumb': {
-    background: 'var(--border-subtle)',
-    borderRadius: '2px'
+    background: 'var(--border)',
+    borderRadius: '4px',
+    border: '2px solid transparent',
+    backgroundClip: 'padding-box'
   },
   '.cm-scroller::-webkit-scrollbar-thumb:hover': {
-    background: 'var(--border)'
+    background: 'var(--text-muted)',
+    border: '2px solid transparent',
+    backgroundClip: 'padding-box'
   },
   '.cm-content': {
     caretColor: 'var(--text)',
@@ -115,28 +122,23 @@ export const writeMDTheme: Extension = EditorView.theme({
     borderLeft: '3px solid var(--border) !important',
     color: 'var(--text-muted) !important'
   },
-  /* Fenced code */
+  /* Fenced code - transparent like table, no box */
   '.cm-line.cm-live-fenced-code': {
-    background: 'var(--code-bg) !important',
+    background: 'transparent !important',
     fontFamily: 'var(--font-mono, monospace) !important',
     fontSize: '13px !important',
     paddingLeft: '14px !important',
     paddingRight: '14px !important',
-    borderLeft: '1px solid var(--border-subtle) !important',
-    borderRight: '1px solid var(--border-subtle) !important',
+    border: 'none !important',
     boxShadow: 'none !important'
   },
   '.cm-line.cm-live-code-first': {
-    borderTop: '1px solid var(--border-subtle) !important',
-    borderTopLeftRadius: '6px !important',
-    borderTopRightRadius: '6px !important',
+    border: 'none !important',
     marginTop: '6px !important',
     overflow: 'hidden !important'
   },
   '.cm-line.cm-live-code-last': {
-    borderBottom: '1px solid var(--border-subtle) !important',
-    borderBottomLeftRadius: '6px !important',
-    borderBottomRightRadius: '6px !important',
+    border: 'none !important',
     marginBottom: '6px !important',
     paddingBottom: '6px !important'
   },
@@ -165,8 +167,8 @@ export const writeMDTheme: Extension = EditorView.theme({
     display: 'flex',
     gap: '4px',
     padding: '4px',
-    backgroundColor: '#1e1e1e',
-    border: '1px solid #333',
+    backgroundColor: '#141414',
+    border: '1px solid #2e2e32',
     borderRadius: '6px',
     boxShadow: '0 4px 12px rgba(0,0,0,0.5)',
     zIndex: '100'
@@ -193,8 +195,8 @@ export const writeMDTheme: Extension = EditorView.theme({
     border: 'none !important'
   },
   '.cm-tooltip-autocomplete': {
-    backgroundColor: '#1e1e1e !important',
-    border: '1px solid #333 !important',
+    backgroundColor: '#141414 !important',
+    border: '1px solid #2e2e32 !important',
     borderRadius: '6px',
     boxShadow: '0 4px 12px rgba(0,0,0,0.5)'
   },
@@ -232,24 +234,28 @@ export const writeMDTheme: Extension = EditorView.theme({
   '.cm-frontmatter-dim': {
     color: 'var(--text-muted)'
   },
-  /* Math and Code Widgets */
+  /* Math and Code Widgets - transparent like table, no box */
   '.cm-live-math': {
     display: 'inline-block',
     cursor: 'pointer',
-    padding: '1px 6px',
+    padding: '1px 4px',
     borderRadius: '4px',
-    background: 'var(--code-bg)',
-    border: '1px solid var(--border-subtle)'
+    background: 'transparent',
+    border: 'none',
+    color: 'inherit'
   },
   '.cm-live-math-block': {
     display: 'flex',
     justifyContent: 'center',
-    padding: '16px',
+    alignItems: 'center',
+    padding: '16px 8px',
     margin: '8px 0',
-    background: 'var(--code-bg)',
-    border: '1px solid var(--border-subtle)',
-    borderRadius: '6px',
-    position: 'relative'
+    background: 'transparent',
+    border: 'none',
+    borderRadius: '0',
+    position: 'relative',
+    fontSize: '1.15em',
+    color: 'var(--text)'
   },
   '.cm-math-copy-btn': {
     position: 'absolute',
@@ -268,6 +274,21 @@ export const writeMDTheme: Extension = EditorView.theme({
   },
   '.cm-math-copy-btn:hover': {
     color: 'var(--text)'
+  },
+  '.cm-math-render': {
+    background: 'transparent !important',
+    border: 'none !important',
+    color: 'inherit'
+  },
+  '.cm-math-render .katex': {
+    color: 'var(--text)',
+    background: 'transparent',
+    fontSize: '1.05em'
+  },
+  '.cm-math-render .katex-display': {
+    background: 'transparent',
+    margin: '0',
+    padding: '0'
   },
   '.cm-live-link::after': {
     content: "''",

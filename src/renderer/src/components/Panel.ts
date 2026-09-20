@@ -1,5 +1,6 @@
 import { html, css, LitElement } from 'lit'
 import { customElement, property } from 'lit/decorators.js'
+import { scrollbarStyles } from './scrollbars'
 
 @customElement('writemd-panel')
 export class WriteMDPanel extends LitElement {
@@ -56,6 +57,7 @@ export class WriteMDPanel extends LitElement {
       z-index: 3;
       overflow: auto;
     }
+    ${scrollbarStyles}
   `
 
   @property({ type: Boolean }) showFade = false

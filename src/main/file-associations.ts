@@ -20,7 +20,7 @@ function registerWindowsAssociations(): void {
   try {
     const exePath = process.execPath
     for (const ext of ['.md', '.markdown', '.mdown', '.mkd']) {
-      const progId = `WriteMD${ext.slice(1)}`
+      const progId = `WriteMd${ext.slice(1)}`
       try {
         execSync(`reg add "HKCU\\Software\\Classes\\${ext}" /ve /d "${progId}" /f`, {
           stdio: 'ignore'
@@ -53,7 +53,7 @@ function registerLinuxAssociations(): void {
     if (!existsSync(desktopDir)) mkdirSync(desktopDir, { recursive: true })
     writeFileSync(
       join(desktopDir, 'writemd.desktop'),
-      `[Desktop Entry]\nName=WriteMD\nExec=${process.execPath} %F\nTerminal=false\nType=Application\nMimeType=text/markdown;text/x-markdown;\n`
+      `[Desktop Entry]\nName=WriteMd\nExec=${process.execPath} %F\nTerminal=false\nType=Application\nMimeType=text/markdown;text/x-markdown;\n`
     )
     try {
       execSync('update-desktop-database ~/.local/share/applications', { stdio: 'ignore' })

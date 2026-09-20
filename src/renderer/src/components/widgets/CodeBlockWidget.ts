@@ -20,10 +20,10 @@ export class CodeBlockWidget extends WidgetType {
     container.style.alignItems = 'center'
     container.style.padding = '4px 14px'
     container.style.margin = '0 -14px'
-    container.style.background = 'var(--code-bg)'
-    container.style.borderTopLeftRadius = '6px'
-    container.style.borderTopRightRadius = '6px'
-    container.style.borderBottom = '1px solid var(--border-subtle)'
+    container.style.background = 'transparent'
+    container.style.borderTopLeftRadius = '0'
+    container.style.borderTopRightRadius = '0'
+    container.style.borderBottom = 'none'
     container.style.userSelect = 'none'
     
     // Language picker (simplified to just display for now, could be a select later)

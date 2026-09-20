@@ -1,6 +1,14 @@
 import { html, css, LitElement, unsafeCSS } from 'lit'
 import { customElement, state } from 'lit/decorators.js'
+import { unsafeHTML } from 'lit/directives/unsafe-html.js'
+import MarkdownIt from 'markdown-it'
+
+const md = new MarkdownIt({ breaks: true, linkify: true })
 import katexCss from 'katex/dist/katex.min.css?inline'
+import { findNext, findPrevious } from '@codemirror/search'
+import { menuStyles, menuIcon, menuCheck } from './menu-styles'
+import { scrollbarStyles } from './scrollbars'
+import './FindPanel'
 import {
   EditorView,
   keymap,
@@ -8,14 +16,15 @@ import {
   highlightActiveLineGutter,
   highlightActiveLine
 } from '@codemirror/view'
-import { EditorState, Extension, Compartment } from '@codemirror/state'
+import { EditorState, Extension, Compartment, Prec } from '@codemirror/state'
 import { markdown } from '@codemirror/lang-markdown'
 import { languages } from '@codemirror/language-data'
 import { unifiedMergeView } from '@codemirror/merge'
 import { GFM } from '@lezer/markdown'
 import { defaultKeymap, history, historyKeymap } from '@codemirror/commands'
-import { search, searchKeymap } from '@codemirror/search'
+import { search } from '@codemirror/search'
 import { writeMDTheme } from './EditorTheme'
+import { vscodeHighlight } from './CodeHighlight'
 import { livePreviewPlugin, readOnlyExtension, documentPathFacet, tableLinePlugin } from './LivePreview'
 import { mathPlugin } from './extensions/math-plugin'
 import { frontmatterPlugin } from './extensions/frontmatter-plugin'
@@ -27,6 +36,7 @@ import { FileState, ViewMode, SplitSurface, SecondaryDocState } from '../state/f
 import './Panel'
 import './InfoPill'
 import './SurfaceLauncher'
+import './TextMenu'
 import './VaultExplorer'
 import type { ElectronAPI } from '../../../shared/electron-api'
 
@@ -38,6 +48,8 @@ function api(): ElectronAPI | undefined {
 export class Editor extends LitElement {
   static styles = [
     unsafeCSS(katexCss),
+    menuStyles,
+    scrollbarStyles,
     css`
     :host {
       display: flex;
@@ -50,27 +62,12 @@ export class Editor extends LitElement {
       padding: 0 5px 5px 5px;
     }
 
-    ::-webkit-scrollbar {
-      width: 4px;
-      height: 4px;
-    }
-    ::-webkit-scrollbar-track {
-      background: transparent;
-    }
-    ::-webkit-scrollbar-thumb {
-      background: #262626;
-      border-radius: 2px;
-    }
-    ::-webkit-scrollbar-thumb:hover {
-      background: #3a3a3a;
-    }
-
     .workspace {
       display: flex;
       flex: 1;
       min-height: 0;
       min-width: 0;
-      gap: 8px;
+      gap: 0;
       position: relative;
       height: 100%;
     }
@@ -106,8 +103,9 @@ export class Editor extends LitElement {
       color: #595959;
       font-size: 13px;
       overflow: hidden;
-      text-overflow: ellipsis;
       white-space: nowrap;
+      -webkit-mask-image: linear-gradient(to right, black 80%, transparent 100%);
+      mask-image: linear-gradient(to right, black 80%, transparent 100%);
       flex: 1;
     }
 
@@ -118,8 +116,21 @@ export class Editor extends LitElement {
       text-align: center;
       flex: 1;
       overflow: hidden;
-      text-overflow: ellipsis;
       white-space: nowrap;
+      -webkit-mask-image: linear-gradient(to right, transparent 0%, black 15%, black 85%, transparent 100%);
+      mask-image: linear-gradient(to right, transparent 0%, black 15%, black 85%, transparent 100%);
+    }
+
+    .resizer {
+      width: 5px;
+      cursor: col-resize;
+      background: transparent;
+      transition: background 150ms;
+      flex-shrink: 0;
+      z-index: 10;
+    }
+    .resizer:hover, .resizer:active, .resizer.dragging {
+      background: rgba(255, 255, 255, 0.1);
     }
 
     input.title-input {
@@ -172,6 +183,30 @@ export class Editor extends LitElement {
     .icon-action svg {
       width: 14px;
       height: 14px;
+    }
+
+    .icon-action.faint {
+      opacity: 0.35;
+    }
+
+    .icon-action.faint:hover {
+      opacity: 1;
+    }
+
+    .menu-wrap {
+      position: relative;
+    }
+
+    .menu-backdrop {
+      position: fixed;
+      inset: 0;
+      z-index: 90;
+    }
+
+    .m-panel.note-menu {
+      top: 28px;
+      right: 0;
+      min-width: 230px;
     }
 
     /* Editor body area */
@@ -235,9 +270,29 @@ export class Editor extends LitElement {
   @state() private splitActive = false
   @state() private splitSurface: SplitSurface = 'launcher'
   @state() private secondaryDoc: SecondaryDocState | null = null
+  @state() private showMoreMenu = false
+  @state() private textMenu: { x: number; y: number } | null = null
+  @state() private findOpen = false
+  @state() private findMode: 'find' | 'replace' = 'find'
+  @state() private findQuery = ''
+  
+  @state() private leftPaneWidth = 50 // percentage
+  @state() private isDraggingResizer = false
+  @state() private isAiConfigured = false
+  @state() private aiMessages: {role: 'user' | 'assistant', content: string}[] = []
+  @state() private aiIsLoading = false
+  
+  private settingsStore: any = null
+  private settingsUnsubs: Array<() => void> = []
 
   connectedCallback(): void {
     super.connectedCallback()
+    import('../state/settings').then(m => {
+      this.settingsStore = m.SettingsStore.getInstance()
+      this.checkAiConfigured()
+      this.settingsUnsubs.push(this.settingsStore.subscribe('ai.apiKey', () => this.checkAiConfigured()))
+      this.settingsUnsubs.push(this.settingsStore.subscribe('ai.provider', () => this.checkAiConfigured()))
+    })
     const current = this.fileState.getState()
     this.content = current.content
     this.filePath = current.path
@@ -309,7 +364,7 @@ export class Editor extends LitElement {
       if (secondaryModeChanged && this.secondaryEditorView && s.secondaryDoc) {
         this.secondaryEditorView.dispatch({
           effects: this.secondaryModeCompartment.reconfigure(
-            this.getModeExtensions(s.secondaryDoc.viewMode)
+            this.getModeExtensions(s.secondaryDoc.viewMode === 'wysiwyg' ? 'live' : s.secondaryDoc.viewMode)
           )
         })
         requestAnimationFrame(() => {
@@ -321,12 +376,100 @@ export class Editor extends LitElement {
     })
   }
 
+  private checkAiConfigured() {
+    if (!this.settingsStore) return
+    const provider = this.settingsStore.get('ai.provider', 'OpenAI')
+    const key = this.settingsStore.get('ai.apiKey', '')
+    this.isAiConfigured = provider === 'Ollama' || key.length > 0
+  }
+
+  private async handleAiSubmit(input: string) {
+    if (!input.trim() || this.aiIsLoading || !this.settingsStore) return
+    
+    this.aiMessages = [...this.aiMessages, { role: 'user', content: input }]
+    this.aiIsLoading = true
+    
+    const electron = api()
+    if (!electron) {
+      this.aiIsLoading = false
+      return
+    }
+
+    try {
+      const provider = this.settingsStore.get('ai.provider', 'OpenAI')
+      const model = this.settingsStore.get('ai.model', '')
+      const key = this.settingsStore.get('ai.apiKey', '')
+
+      // Construct system prompt with current document content
+      const systemPrompt = `CRITICAL INSTRUCTION: You are a helpful AI assistant operating directly inside the WriteMd application interface. You must strictly adhere to the "unslop" communication style. Never use filler phrases like "Here is...", "This will...", "I'll help...", "Let me...", "Great!", "Excellent!", or "Perfect!". No preamble, no postamble, no summaries unless asked. Deliver direct, concise, and human-sounding output. Format your responses in markdown.
+
+The user is currently editing a file. Here is the current content of the active file:
+
+\`\`\`markdown
+${this.content}
+\`\`\`
+
+If the user asks questions about their file, use the above content to answer.
+
+CRITICAL INSTRUCTION FOR FILE EDITS: If the user asks you to modify, rewrite, or clear the file, you MUST output the completely updated file content wrapped exactly in a \`\`\`writemd-replace\`\`\` code block. For example:
+\`\`\`writemd-replace
+(the new content goes here)
+\`\`\`
+The application will intercept this block and automatically apply the changes to the user's document.`
+
+      // We bypass the ipc.ts system prompt handling completely to avoid needing an app restart.
+      // We inject the system context as a 'user' message at the very beginning of the payload.
+      const payloadMessages = [
+        { role: 'user', content: systemPrompt },
+        { role: 'assistant', content: 'Acknowledged. I am operating within WriteMd and can see the file content. I will adhere to the unslop style and use the writemd-replace block if requested to modify the file.' },
+        ...this.aiMessages
+      ]
+
+      // Send chat request
+      const response = await electron.net.chat(provider, model, key, payloadMessages, '')
+      
+      const replaceRegex = /```writemd-replace\s*\n([\s\S]*?)```/
+      const match = response.match(replaceRegex)
+      
+      if (match) {
+        const newContent = match[1]
+        // Apply changes to the editor
+        if (this.editorView) {
+          this.editorView.dispatch({
+            changes: { from: 0, to: this.editorView.state.doc.length, insert: newContent }
+          })
+        }
+        // Save to state
+        this.content = newContent
+        this.fileState.setContent(newContent)
+        
+        // Force an immediate save to disk so the 'dirty' flag is cleared.
+        // This prevents the OS file watcher from firing while dirty=true and popping the conflict modal.
+        await this.fileState.save()
+        
+        // Remove the block from the chat response so it doesn't clutter the UI
+        const cleanResponse = response.replace(replaceRegex, '').trim() || 'I have updated the document.'
+        this.aiMessages = [...this.aiMessages, { role: 'assistant', content: cleanResponse }]
+      } else {
+        this.aiMessages = [...this.aiMessages, { role: 'assistant', content: response }]
+      }
+      
+      // Auto-scroll logic could go here
+    } catch (e: any) {
+      this.aiMessages = [...this.aiMessages, { role: 'assistant', content: `Error: ${e.message || 'Failed to chat'}` }]
+    } finally {
+      this.aiIsLoading = false
+    }
+  }
+
   disconnectedCallback(): void {
     this.unsubscribe?.()
     this.editorView?.destroy()
     this.secondaryEditorView?.destroy()
     this.editorView = null
     this.secondaryEditorView = null
+    this.settingsUnsubs.forEach(u => u())
+    this.settingsUnsubs = []
     super.disconnectedCallback()
   }
 
@@ -381,16 +524,37 @@ export class Editor extends LitElement {
 
     const exts = [
       writeMDTheme,
+      vscodeHighlight,
       EditorView.lineWrapping,
       history(),
-      search({top: true}),
+      search(),
+      Prec.high(
+        keymap.of([
+          {
+            key: 'Mod-f',
+            run: () => {
+              this.openFind('find')
+              return true
+            }
+          },
+          {
+            key: 'Mod-h',
+            run: () => {
+              this.openFind('replace')
+              return true
+            }
+          },
+          { key: 'F3', run: findNext },
+          { key: 'Shift-F3', run: findPrevious }
+        ])
+      ),
       mathPlugin,
       frontmatterPlugin,
       wikiLinkPlugin,
       slashCommandPlugin,
       tableKeymapPlugin,
       tableToolbarField,
-      keymap.of([...defaultKeymap, ...historyKeymap, ...searchKeymap]),
+      keymap.of([...defaultKeymap, ...historyKeymap]),
       markdown({ extensions: [GFM], codeLanguages: languages }),
       tableLinePlugin,
       comp.of(this.getModeExtensions(mode)),
@@ -531,8 +695,136 @@ export class Editor extends LitElement {
     this.fileState.quickToggle()
   }
 
+  private async handleExport(kind: 'pdf' | 'html'): Promise<void> {
+    this.showMoreMenu = false
+    const bridge = api()?.export
+    if (!bridge) {
+      alert('Export is unavailable. Restart the app to load the latest version.')
+      return
+    }
+    const content = this.editorView ? this.editorView.state.doc.toString() : this.content
+    try {
+      const result = await bridge[kind](content, this.filePath)
+      if (!result.ok && result.reason !== 'canceled') {
+        alert(`Export failed: ${result.reason ?? 'unknown error'}`)
+      }
+    } catch (err) {
+      console.error(`Export ${kind} failed:`, err)
+      alert(`Export failed: ${err instanceof Error ? err.message : String(err)}`)
+    }
+  }
+
   private handleExplicitModeChange(e: CustomEvent<{ mode: ViewMode }>): void {
     this.fileState.setExplicitMode(e.detail.mode)
+  }
+
+  private handleTextMenu = (e: MouseEvent): void => {
+    e.preventDefault()
+    this.showMoreMenu = false
+    this.textMenu = { x: e.clientX, y: e.clientY }
+  }
+
+  private openFind(mode: 'find' | 'replace'): void {
+    if (!this.editorView) return
+    const sel = this.editorView.state.sliceDoc(
+      this.editorView.state.selection.main.from,
+      this.editorView.state.selection.main.to
+    )
+    this.findQuery = sel.includes('\n') ? '' : sel
+    this.findMode = mode
+    this.findOpen = true
+  }
+
+  private noteMenuItems(): Array<{
+    id: string
+    label: string
+    icon: string
+    dividerBefore?: boolean
+    danger?: boolean
+    checked?: boolean
+  }> {
+    const mode = this.viewMode === 'wysiwyg' ? 'live' : this.viewMode
+    return [
+      { id: 'backlinks', label: 'Backlinks in document', icon: 'backlinks' },
+      { id: 'reading', label: 'Reading view', icon: 'eye', dividerBefore: true, checked: mode === 'reading' },
+      { id: 'source', label: 'Source mode', icon: 'code', checked: mode === 'source' },
+      { id: 'split', label: 'Split right', icon: 'split', dividerBefore: true },
+      { id: 'rename', label: 'Rename', icon: 'pencil', dividerBefore: true },
+      { id: 'move', label: 'Move file to', icon: 'folder' },
+      { id: 'pdf', label: 'Export to PDF', icon: 'file', dividerBefore: true },
+      { id: 'find', label: 'Find', icon: 'search', dividerBefore: true },
+      { id: 'replace', label: 'Replace', icon: 'search' },
+      { id: 'copy-path', label: 'Copy path', icon: 'copy', dividerBefore: true },
+      { id: 'reveal-explorer', label: 'Show in system explorer', icon: 'external' },
+      { id: 'reveal-nav', label: 'Reveal file in navigation', icon: 'reveal' },
+      { id: 'delete', label: 'Delete file', icon: 'trash', dividerBefore: true, danger: true }
+    ]
+  }
+
+  private async handleNoteAction(id: string): Promise<void> {
+    this.showMoreMenu = false
+    switch (id) {
+      case 'backlinks':
+        this.fileState.setSplitSurface('backlinks')
+        break
+      case 'reading':
+        this.fileState.setExplicitMode('reading')
+        break
+      case 'source':
+        this.fileState.setExplicitMode('source')
+        break
+      case 'split':
+        this.fileState.toggleSplitView(true)
+        break
+      case 'rename': {
+        const input = this.shadowRoot?.querySelector('.title-input') as HTMLInputElement | null
+        input?.focus()
+        input?.select()
+        break
+      }
+      case 'move':
+        await this.fileState.moveActiveFile()
+        break
+      case 'pdf':
+        await this.handleExport('pdf')
+        break
+      case 'find':
+        this.openFind('find')
+        break
+      case 'replace':
+        this.openFind('replace')
+        break
+      case 'copy-path':
+        if (this.filePath) {
+          try {
+            await navigator.clipboard.writeText(this.filePath)
+          } catch (err) {
+            console.error('Copy path failed:', err)
+          }
+        }
+        break
+      case 'reveal-explorer':
+        if (this.filePath) {
+          await api()?.shell?.showInFolder?.(this.filePath).catch(() => undefined)
+        }
+        break
+      case 'reveal-nav':
+        this.fileState.setSplitSurface('files')
+        break
+      case 'delete': {
+        if (!this.filePath) break
+        const base = this.filePath.split(/[/\\]/).pop() ?? this.filePath
+        if (!confirm(`Move ${base} to trash?`)) break
+        const ok = await api()?.file?.delete?.(this.filePath)
+        if (!ok) {
+          alert('Could not delete file')
+          break
+        }
+        const idx = this.fileState.getState().tabs.findIndex((t) => t.path === this.filePath)
+        if (idx >= 0) await this.fileState.closeTab(idx)
+        break
+      }
+    }
   }
 
   private handleSurfaceSelection = async (
@@ -613,6 +905,36 @@ export class Editor extends LitElement {
     }
   }
 
+  private startResize = (e: MouseEvent): void => {
+    e.preventDefault()
+    this.isDraggingResizer = true
+    document.addEventListener('mousemove', this.doResize)
+    document.addEventListener('mouseup', this.stopResize)
+    document.body.style.cursor = 'col-resize'
+  }
+
+  private doResize = (e: MouseEvent): void => {
+    if (!this.isDraggingResizer) return
+    const container = this.shadowRoot?.querySelector('.workspace')
+    if (container) {
+      const rect = container.getBoundingClientRect()
+      // Clamp between 20% and 80%
+      let newWidth = ((e.clientX - rect.left) / rect.width) * 100
+      newWidth = Math.max(20, Math.min(80, newWidth))
+      this.leftPaneWidth = newWidth
+    }
+  }
+
+  private stopResize = (): void => {
+    this.isDraggingResizer = false
+    document.removeEventListener('mousemove', this.doResize)
+    document.removeEventListener('mouseup', this.stopResize)
+    document.body.style.cursor = ''
+    // Inform codemirror to resize
+    this.editorView?.requestMeasure()
+    this.secondaryEditorView?.requestMeasure()
+  }
+
   render(): unknown {
     if (!this.filePath && !this.content) {
       return html`
@@ -634,7 +956,7 @@ export class Editor extends LitElement {
     return html`
       <div class="workspace">
         <!-- split view - 1 (Responsive Left Pane) -->
-        <writemd-panel class="pane">
+        <writemd-panel class="pane" style=${this.splitActive ? `flex: 0 0 calc(${this.leftPaneWidth}% - 2.5px);` : ''}>
           <!-- Sub-Header inside editor panel -->
           <div class="sub-header">
             <div class="sub-header-left" title=${this.filePath ?? ''}>${pathDisplay}</div>
@@ -655,12 +977,41 @@ export class Editor extends LitElement {
               >
                 ${this.renderQuickToggleIcon(this.viewMode)}
               </div>
-              <div class="icon-action" title="More Options">
-                <svg viewBox="0 0 24 24" fill="currentColor">
-                  <circle cx="5" cy="12" r="2" />
-                  <circle cx="12" cy="12" r="2" />
-                  <circle cx="19" cy="12" r="2" />
-                </svg>
+              <div class="menu-wrap">
+                <div
+                  class="icon-action faint"
+                  title="More Options"
+                  @click=${() => (this.showMoreMenu = !this.showMoreMenu)}
+                >
+                  <svg viewBox="0 0 24 24" fill="currentColor">
+                    <circle cx="5" cy="12" r="2" />
+                    <circle cx="12" cy="12" r="2" />
+                    <circle cx="19" cy="12" r="2" />
+                  </svg>
+                </div>
+                ${this.showMoreMenu
+                  ? html`
+                      <div
+                        class="menu-backdrop"
+                        @click=${() => (this.showMoreMenu = false)}
+                      ></div>
+                      <div class="m-panel note-menu">
+                        ${this.noteMenuItems().map(
+                          (item) => html`
+                            ${item.dividerBefore ? html`<div class="m-divider"></div>` : ''}
+                            <div
+                              class=${item.danger ? 'm-item danger' : 'm-item'}
+                              @click=${() => void this.handleNoteAction(item.id)}
+                            >
+                              ${menuIcon(item.icon)}
+                              <span>${item.label}</span>
+                              ${item.checked ? menuCheck() : ''}
+                            </div>
+                          `
+                        )}
+                      </div>
+                    `
+                  : ''}
               </div>
             </div>
           </div>
@@ -671,6 +1022,7 @@ export class Editor extends LitElement {
             @paste=${(e: ClipboardEvent) => this.handlePaste(e, false)}
             @dragover=${(e: DragEvent) => e.preventDefault()}
             @drop=${(e: DragEvent) => this.handleDrop(e, false)}
+            @contextmenu=${this.handleTextMenu}
           >
             <div id="primary-cm-wrapper" class="cm-wrapper"></div>
 
@@ -680,6 +1032,15 @@ export class Editor extends LitElement {
               .mode=${this.viewMode}
               @mode-change=${this.handleExplicitModeChange}
             ></writemd-info-pill>
+            ${this.textMenu && this.editorView
+              ? html`<writemd-text-menu
+                  .x=${Math.min(this.textMenu.x, window.innerWidth - 240)}
+                  .y=${Math.min(this.textMenu.y, window.innerHeight - 380)}
+                  .flip=${this.textMenu.x > window.innerWidth - 480}
+                  .view=${this.editorView}
+                  @close=${() => (this.textMenu = null)}
+                ></writemd-text-menu>`
+              : ''}
           </div>
         </writemd-panel>
 
@@ -687,6 +1048,7 @@ export class Editor extends LitElement {
         ${
           this.splitActive
             ? html`
+                <div class="resizer ${this.isDraggingResizer ? 'dragging' : ''}" @mousedown=${this.startResize}></div>
                 <writemd-panel class="pane">
                   ${
                     this.secondaryDoc && this.splitSurface === 'file'
@@ -766,20 +1128,122 @@ export class Editor extends LitElement {
                                   title="Close split pane"
                                   @click=${() => this.fileState.toggleSplitView(false)}
                                 >
-                                  <svg
-                                    viewBox="0 0 12 12"
-                                    fill="none"
-                                    stroke="currentColor"
-                                    stroke-width="1.5"
-                                  >
+                                  <svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5">
                                     <line x1="2" y1="2" x2="10" y2="10" />
                                     <line x1="10" y1="2" x2="2" y2="10" />
                                   </svg>
                                 </div>
                               </div>
                             </div>
-
                             <writemd-vault-explorer></writemd-vault-explorer>
+                          `
+                        : this.splitSurface === 'backlinks'
+                        ? html`
+                            <!-- Backlinks Panel -->
+                            <div class="sub-header">
+                              <div class="sub-header-left">Document</div>
+                              <div class="sub-header-center">Backlinks</div>
+                              <div class="sub-header-right">
+                                <div
+                                  class="icon-action"
+                                  title="Close split pane"
+                                  @click=${() => this.fileState.toggleSplitView(false)}
+                                >
+                                  <svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5">
+                                    <line x1="2" y1="2" x2="10" y2="10" />
+                                    <line x1="10" y1="2" x2="2" y2="10" />
+                                  </svg>
+                                </div>
+                              </div>
+                            </div>
+                            <div class="empty-state">
+                              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                                <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
+                                <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
+                              </svg>
+                              <p>No backlinks found for this document.</p>
+                            </div>
+                          `
+                        : this.splitSurface === 'ai'
+                        ? html`
+                            <!-- AI Panel -->
+                            <div class="sub-header">
+                              <div class="sub-header-left">Assistant</div>
+                              <div class="sub-header-center">AI</div>
+                              <div class="sub-header-right">
+                                <div
+                                  class="icon-action"
+                                  title="Clear chat history"
+                                  @click=${() => (this.aiMessages = [])}
+                                >
+                                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                                    <path d="M3 6h18" />
+                                    <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                                  </svg>
+                                </div>
+                                <div
+                                  class="icon-action"
+                                  title="Close split pane"
+                                  @click=${() => this.fileState.toggleSplitView(false)}
+                                >
+                                  <svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5">
+                                    <line x1="2" y1="2" x2="10" y2="10" />
+                                    <line x1="10" y1="2" x2="2" y2="10" />
+                                  </svg>
+                                </div>
+                              </div>
+                            </div>
+                            ${this.isAiConfigured
+                              ? html`
+                                  <div style="padding: 16px; display: flex; flex-direction: column; height: 100%; box-sizing: border-box; overflow: hidden; gap: 16px;">
+                                    <div style="flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; font-family: var(--font-body); font-size: 14px; color: var(--text);">
+                                      <div style="display: flex; gap: 8px;">
+                                        <div style="background: var(--bg-elevated); padding: 12px 16px; border-radius: 8px; border-bottom-left-radius: 2px;">
+                                          Hi! I'm your AI Assistant. I'm ready to help you write, brainstorm, or rephrase your document.
+                                        </div>
+                                      </div>
+                                      
+                                      ${this.aiMessages.map(m => html`
+                                        <div style="display: flex; gap: 8px; justify-content: ${m.role === 'user' ? 'flex-end' : 'flex-start'}">
+                                          <div style="background: var(${m.role === 'user' ? '--accent' : '--bg-elevated'}); color: var(${m.role === 'user' ? '--accent-text' : '--text'}); padding: 12px 16px; border-radius: 8px; border-bottom-${m.role === 'user' ? 'right' : 'left'}-radius: 2px; max-width: 85%; ${m.role === 'user' ? 'white-space: pre-wrap;' : ''} overflow-wrap: break-word;">
+                                            ${m.role === 'assistant' ? unsafeHTML(md.render(m.content)) : m.content}
+                                          </div>
+                                        </div>
+                                      `)}
+                                      
+                                      ${this.aiIsLoading ? html`
+                                        <div style="display: flex; gap: 8px;">
+                                          <div style="background: var(--bg-elevated); padding: 12px 16px; border-radius: 8px; border-bottom-left-radius: 2px; color: var(--text-secondary); font-style: italic;">
+                                            Thinking...
+                                          </div>
+                                        </div>
+                                      ` : ''}
+                                    </div>
+                                    <div style="flex-shrink: 0;">
+                                      <input 
+                                        type="text" 
+                                        placeholder="Ask AI..." 
+                                        .disabled=${this.aiIsLoading}
+                                        style="width: 100%; padding: 12px; background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 6px; color: var(--text); font-family: var(--font-body); box-sizing: border-box; opacity: ${this.aiIsLoading ? 0.5 : 1};"
+                                        @keydown=${(e: KeyboardEvent) => {
+                                          if (e.key === 'Enter') {
+                                            const val = (e.target as HTMLInputElement).value;
+                                            (e.target as HTMLInputElement).value = '';
+                                            this.handleAiSubmit(val)
+                                          }
+                                        }}
+                                      />
+                                    </div>
+                                  </div>
+                                `
+                              : html`
+                                  <div class="empty-state">
+                                    <svg viewBox="0 0 24 24" fill="currentColor">
+                                      <path d="M12 2L9.5 8.5L3 11L9.5 13.5L12 20L14.5 13.5L21 11L14.5 8.5L12 2Z" />
+                                    </svg>
+                                    <p>AI Assistant is not configured yet.</p>
+                                  </div>
+                                `}
                           `
                         : html`
                             <!-- Open a surface Launcher Panel -->
@@ -814,6 +1278,14 @@ export class Editor extends LitElement {
               `
             : ''
         }
+        ${this.findOpen && this.editorView
+          ? html`<writemd-find-panel
+              .view=${this.editorView}
+              .mode=${this.findMode}
+              .initialQuery=${this.findQuery}
+              @close=${() => (this.findOpen = false)}
+            ></writemd-find-panel>`
+          : ''}
       </div>
     `
   }

@@ -77,7 +77,8 @@ export class WriteMDButton extends LitElement {
     .label {
       white-space: nowrap;
       overflow: hidden;
-      text-overflow: ellipsis;
+      -webkit-mask-image: linear-gradient(to right, black 80%, transparent 100%);
+      mask-image: linear-gradient(to right, black 80%, transparent 100%);
     }
   `
 

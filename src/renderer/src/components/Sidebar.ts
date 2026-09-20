@@ -1,5 +1,6 @@
 import { html, css, LitElement } from 'lit'
 import { customElement, state } from 'lit/decorators.js'
+import { scrollbarStyles } from './scrollbars'
 import type { ElectronAPI, VaultFile } from '../../../shared/electron-api'
 import { FileState } from '../state/file-state'
 
@@ -87,7 +88,8 @@ export class Sidebar extends LitElement {
       flex: 1;
       white-space: nowrap;
       overflow: hidden;
-      text-overflow: ellipsis;
+      -webkit-mask-image: linear-gradient(to right, black 80%, transparent 100%);
+      mask-image: linear-gradient(to right, black 80%, transparent 100%);
     }
     .empty-state {
       padding: 24px 16px;
@@ -95,6 +97,7 @@ export class Sidebar extends LitElement {
       color: var(--text-muted);
       font-size: 12px;
     }
+    ${scrollbarStyles}
   `
 
   @state() private vaultFiles: VaultFile[] = []

@@ -224,32 +224,38 @@ function getFrontmatterDecorations(state: EditorState) {
   const text = state.doc.toString()
   
   if (text.startsWith('---\n')) {
-    const endMatch = text.indexOf('\n---\n', 4)
+    let endMatch = text.indexOf('\n---\n', 4)
+    let endLen = 5
+    if (endMatch === -1) {
+      if (text.endsWith('\n---')) {
+        endMatch = text.length - 4
+        endLen = 4
+      }
+    }
+
     if (endMatch !== -1) {
       const from = 0
-      const to = endMatch + 5
-      
-      const activeLines = new Set<number>()
-      if (!readOnly) {
-        for (const r of state.selection.ranges) {
-          const firstLine = state.doc.lineAt(r.from).number
-          const lastLine = state.doc.lineAt(r.to).number
-          for (let n = firstLine; n <= lastLine; n++) activeLines.add(n)
-        }
-      }
+      const to = endMatch + endLen
       
       let active = false
-      const startLine = state.doc.lineAt(from).number
-      const endLine = state.doc.lineAt(to).number
-      for (let n = startLine; n <= endLine; n++) {
-        if (activeLines.has(n)) { active = true; break; }
+      if (!readOnly) {
+        for (const r of state.selection.ranges) {
+          // Only expand if cursor is strictly inside the frontmatter text.
+          // This prevents auto-expanding when the file is opened (cursor at 0) 
+          // or when cursor is immediately after the block.
+          const inFrontmatter = (pos: number) => pos > 0 && pos < to
+          if (inFrontmatter(r.from) || inFrontmatter(r.to)) {
+            active = true
+            break
+          }
+        }
       }
       
       if (!active || readOnly) {
         const innerText = text.substring(4, endMatch)
         const widget = Decoration.replace({
           block: true,
-          widget: new FrontmatterPropertiesWidget(innerText, endMatch)
+          widget: new FrontmatterPropertiesWidget(innerText, to)
         })
         builder.add(from, to, widget)
       }

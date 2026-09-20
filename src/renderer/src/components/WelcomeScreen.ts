@@ -125,7 +125,8 @@ export class WelcomeScreen extends LitElement {
     .tab-label {
       white-space: nowrap;
       overflow: hidden;
-      text-overflow: ellipsis;
+      -webkit-mask-image: linear-gradient(to right, black 80%, transparent 100%);
+      mask-image: linear-gradient(to right, black 80%, transparent 100%);
       flex: 1;
       min-width: 0;
     }
@@ -318,7 +319,8 @@ export class WelcomeScreen extends LitElement {
       color: #ffffff;
       white-space: nowrap;
       overflow: hidden;
-      text-overflow: ellipsis;
+      -webkit-mask-image: linear-gradient(to right, black 80%, transparent 100%);
+      mask-image: linear-gradient(to right, black 80%, transparent 100%);
       transition: color 100ms;
     }
     .file-path {
@@ -330,7 +332,8 @@ export class WelcomeScreen extends LitElement {
       text-align: right;
       white-space: nowrap;
       overflow: hidden;
-      text-overflow: ellipsis;
+      -webkit-mask-image: linear-gradient(to right, black 80%, transparent 100%);
+      mask-image: linear-gradient(to right, black 80%, transparent 100%);
       flex-shrink: 0;
       max-width: 55%;
     }
@@ -407,7 +410,8 @@ export class WelcomeScreen extends LitElement {
     .btn span {
       white-space: nowrap;
       overflow: hidden;
-      text-overflow: ellipsis;
+      -webkit-mask-image: linear-gradient(to right, black 80%, transparent 100%);
+      mask-image: linear-gradient(to right, black 80%, transparent 100%);
     }
 
     /* ───── Responsive ───── */
@@ -520,7 +524,7 @@ export class WelcomeScreen extends LitElement {
         <div class="top-bar-right">
           <!-- Split view icon (Component 29 (1).svg) -->
           <button class="top-icon-btn" aria-label="Split view" title="Split view">
-            <svg width="17" height="17" viewBox="0 0 17 17" fill="none">
+            <svg width="17" height="17" viewBox="-2.5 -2.5 22 22" fill="none">
               <path
                 d="M15 0C16.1046 0 17 0.895431 17 2V15C17 16.0357 16.2128 16.887 15.2041 16.9893L15 17H2L1.7959 16.9893C0.854346 16.8938 0.1062 16.1457 0.0107422 15.2041L0 15V2C0 0.895431 0.895431 4.0266e-09 2 0H15ZM2 1C1.44772 1 1 1.44772 1 2V15C1 15.5523 1.44772 16 2 16H6V1H2ZM7 16H15C15.5523 16 16 15.5523 16 15V2C16 1.44772 15.5523 1 15 1H7V16Z"
                 fill="#737373"
@@ -534,8 +538,8 @@ export class WelcomeScreen extends LitElement {
               @click=${() => void api()?.window?.minimize?.()}
               aria-label="Minimize"
             >
-              <svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5">
-                <line x1="2" y1="6" x2="10" y2="6" />
+              <svg viewBox="0 0 10 10" fill="none">
+                <path d="M0 5H10" stroke="currentColor" stroke-width="1" />
               </svg>
             </button>
             <button
@@ -543,8 +547,8 @@ export class WelcomeScreen extends LitElement {
               @click=${() => void api()?.window?.maximize?.()}
               aria-label="Maximize"
             >
-              <svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5">
-                <rect x="2" y="2" width="8" height="8" rx="1" />
+              <svg viewBox="0 0 10 10" fill="none">
+                <rect x="0.5" y="0.5" width="9" height="9" stroke="currentColor" stroke-width="1" />
               </svg>
             </button>
             <button
@@ -552,9 +556,8 @@ export class WelcomeScreen extends LitElement {
               @click=${() => void api()?.window?.close?.()}
               aria-label="Close"
             >
-              <svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5">
-                <line x1="3" y1="3" x2="9" y2="9" />
-                <line x1="9" y1="3" x2="3" y2="9" />
+              <svg viewBox="0 0 10 10" fill="none">
+                <path d="M0.5 0.5L9.5 9.5M9.5 0.5L0.5 9.5" stroke="currentColor" stroke-width="1" />
               </svg>
             </button>
           </div>

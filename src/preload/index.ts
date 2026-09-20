@@ -19,7 +19,10 @@ const writemdAPI = {
     minimize: () => ipcRenderer.invoke('window:minimize'),
     maximize: () => ipcRenderer.invoke('window:maximize'),
     close: () => ipcRenderer.invoke('window:close'),
-    isMaximized: () => ipcRenderer.invoke('window:is-maximized')
+    isMaximized: () => ipcRenderer.invoke('window:is-maximized'),
+    zoomIn: () => ipcRenderer.invoke('window:zoom-in'),
+    zoomOut: () => ipcRenderer.invoke('window:zoom-out'),
+    zoomReset: () => ipcRenderer.invoke('window:zoom-reset')
   },
   file: {
     read: (path: string) => ipcRenderer.invoke('file:read', path),
@@ -40,6 +43,7 @@ const writemdAPI = {
     watch: (path: string) => ipcRenderer.invoke('file:watch', path),
     unwatch: (path: string) => ipcRenderer.invoke('file:unwatch', path),
     rename: (oldPath: string, newPath: string) => ipcRenderer.invoke('file:rename', oldPath, newPath),
+    delete: (path: string) => ipcRenderer.invoke('file:delete', path),
     onChanged: (callback: (path: string) => void) =>
       onChannel('file:changed', callback as (...args: unknown[]) => void)
   },
@@ -54,13 +58,39 @@ const writemdAPI = {
     get: () => ipcRenderer.invoke('settings:get'),
     set: (settings: Record<string, unknown>) => ipcRenderer.invoke('settings:set', settings)
   },
+  net: {
+    fetchModels: (provider: string, apiKey: string) => ipcRenderer.invoke('net:fetch-models', provider, apiKey),
+    chat: (provider: string, model: string, apiKey: string, messages: any[], systemPrompt?: string) => ipcRenderer.invoke('net:chat', provider, model, apiKey, messages, systemPrompt)
+  },
   dialog: {
     showOpenDialog: (options: Electron.OpenDialogOptions) =>
       ipcRenderer.invoke('dialog:show-open-dialog', options)
   },
   shell: {
     openPath: (path: string) => ipcRenderer.invoke('shell:open-path', path),
-    openExternal: (url: string) => ipcRenderer.invoke('shell:open-external', url)
+    openExternal: (url: string) => ipcRenderer.invoke('shell:open-external', url),
+    showInFolder: (path: string) => ipcRenderer.invoke('shell:show-in-folder', path)
+  },
+  export: {
+    pdf: (markdown: string, docPath: string | null) =>
+      ipcRenderer.invoke('export:pdf', markdown, docPath),
+    html: (markdown: string, docPath: string | null) =>
+      ipcRenderer.invoke('export:html', markdown, docPath)
+  },
+  updater: {
+    check: () => ipcRenderer.invoke('updater:check'),
+    download: () => ipcRenderer.invoke('updater:download'),
+    install: () => ipcRenderer.invoke('updater:install'),
+    onUpdateAvailable: (callback: (info: any) => void) =>
+      onChannel('updater:update-available', callback as (...args: unknown[]) => void),
+    onUpdateNotAvailable: (callback: (info: any) => void) =>
+      onChannel('updater:update-not-available', callback as (...args: unknown[]) => void),
+    onUpdateDownloaded: (callback: (info: any) => void) =>
+      onChannel('updater:update-downloaded', callback as (...args: unknown[]) => void),
+    onDownloadProgress: (callback: (info: any) => void) =>
+      onChannel('updater:download-progress', callback as (...args: unknown[]) => void),
+    onError: (callback: (err: string) => void) =>
+      onChannel('updater:error', callback as (...args: unknown[]) => void)
   },
   onFileOpenExternal: (callback: (path: string) => void) =>
     onChannel('file:open-external', callback as (...args: unknown[]) => void)

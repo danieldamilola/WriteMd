@@ -2,11 +2,9 @@
 name: appllama-app-design-skill
 description: Build native-feeling, benchmark-quality mobile app screens (Expo / React Native). Use when designing or implementing any mobile UI — screens, flows, onboarding, paywalls, tab bars, sheets, settings, empty states.
 license: MIT
-metadata: {"author":"Appllama (appllama.io)","version":"1.3.0"}
 tags: [markdown, test]
 ---
 
-# Testing this here for the new file
 ## testing rows
 ### cars
 
@@ -29,9 +27,7 @@ function helloWorld() {
 ### Math & KaTeX
 
 Here is an inline equation: $E = mc^2$.
-
 And a block equation:
-
 $$
 \frac{-b \pm \sqrt{b^2 - 4ac}}{2a}
 $$
@@ -41,7 +37,6 @@ $$
 Check out [[AnotherPage]] or maybe [[AGENTS.md]].
 
 ### Mermaid
-
 ```mermaid
 graph TD;
     A-->B;

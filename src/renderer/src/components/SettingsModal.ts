@@ -3,12 +3,22 @@ import { customElement, state } from 'lit/decorators.js'
 import type { ElectronAPI } from '../../../shared/electron-api'
 import { SettingsStore } from '../state/settings'
 import { showConfirm } from './ConfirmDialog'
+import { scrollbarStyles } from './scrollbars'
+import {
+  COMMANDS,
+  commandTitle,
+  effectiveBinding,
+  findConflict,
+  formatBinding,
+  normalizeBinding,
+  parseBinding
+} from '../state/shortcuts'
 
 function api(): ElectronAPI | undefined {
   return typeof window !== 'undefined' ? window.electronAPI : undefined
 }
 
-type SettingsTab = 'appearance' | 'editor' | 'files' | 'advanced'
+type SettingsTab = 'general' | 'appearance' | 'editor' | 'files' | 'shortcuts' | 'advanced' | 'ai'
 
 interface ThemeDefinition {
   id: string
@@ -69,63 +79,79 @@ export class SettingsModal extends LitElement {
     }
 
     .modal-dialog {
-      width: min(840px, 94vw);
+      width: min(900px, 94vw);
       height: min(620px, 88vh);
       display: flex;
-      background: #0a0a0a;
-      border: 1px solid #2a2a2a;
+      background: var(--bg-elevated);
+      border: 1px solid var(--border-subtle);
       border-radius: 12px;
-      box-shadow: 0 20px 40px rgba(0,0,0,0.4);
+      box-shadow: var(--shadow-3);
       overflow: hidden;
-      color: #e5e5e5;
+      color: var(--text);
     }
 
     /* Sidebar Navigation */
     .sidebar {
-      width: 240px;
+      width: 230px;
       flex-shrink: 0;
-      background: #111111;
-      border-right: 1px solid #1f1f1f;
+      background: var(--bg-elevated);
+      border-right: none;
       display: flex;
       flex-direction: column;
     }
 
     .sidebar-search {
-      padding: 16px;
-      border-bottom: 1px solid #1f1f1f;
+      padding: 16px 16px 8px 16px;
     }
 
     .sidebar-search input {
       width: 100%;
       box-sizing: border-box;
-      background: #1a1a1a;
-      border: 1px solid #2a2a2a;
+      background: var(--bg-hover);
+      border: 1px solid var(--border-subtle);
       border-radius: 6px;
       padding: 8px 12px;
-      color: #fff;
+      color: var(--text);
       font-size: 13px;
       outline: none;
     }
     .sidebar-search input:focus {
-      border-color: #444;
+      border-color: var(--border);
     }
 
     .sidebar-nav {
-      padding: 12px 8px;
+      padding: 8px;
       display: flex;
       flex-direction: column;
-      gap: 4px;
+      gap: 2px;
+      flex: 1;
+      overflow-y: auto;
+    }
+
+    .nav-group {
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--text-muted);
+      padding: 12px 12px 4px 12px;
+    }
+
+    .nav-footer {
+      padding: 12px 16px;
+      font-size: 12px;
+      color: var(--text-muted);
+      border-top: 1px solid var(--border-subtle);
+      line-height: 1.5;
     }
 
     .nav-btn {
       display: flex;
       align-items: center;
       gap: 12px;
-      padding: 10px 12px;
-      border-radius: 8px;
-      font-size: 14px;
+      padding: 8px 12px;
+      border-radius: 6px;
+      font-size: 13px;
       font-weight: 500;
-      color: #888;
+      color: var(--text-secondary);
       background: transparent;
       border: none;
       cursor: pointer;
@@ -134,19 +160,20 @@ export class SettingsModal extends LitElement {
     }
 
     .nav-btn svg {
-      width: 18px;
-      height: 18px;
+      width: 16px;
+      height: 16px;
       opacity: 0.7;
+      flex-shrink: 0;
     }
 
     .nav-btn:hover {
-      background: #1a1a1a;
-      color: #ddd;
+      background: var(--bg-hover);
+      color: var(--text);
     }
 
     .nav-btn.active {
-      background: #1e1e1e;
-      color: #fff;
+      background: var(--bg-active);
+      color: var(--text);
       font-weight: 600;
     }
     .nav-btn.active svg {
@@ -167,15 +194,14 @@ export class SettingsModal extends LitElement {
       justify-content: space-between;
       height: 56px;
       padding: 0 24px;
-      border-bottom: 1px solid #1f1f1f;
       flex-shrink: 0;
     }
 
     .main-header h2 {
-      font-size: 16px;
+      font-size: 15px;
       font-weight: 600;
       margin: 0;
-      color: #fff;
+      color: var(--text);
     }
 
     .close-btn {
@@ -186,36 +212,35 @@ export class SettingsModal extends LitElement {
       justify-content: center;
       background: transparent;
       border: none;
-      color: #888;
+      color: var(--text-secondary);
       border-radius: 6px;
       cursor: pointer;
       transition: all 0.15s ease;
     }
     .close-btn:hover {
-      background: #1a1a1a;
-      color: #fff;
+      background: var(--bg-hover);
+      color: var(--text);
     }
 
     .content-panel {
       flex: 1;
-      padding: 24px;
+      padding: 8px 24px 24px 24px;
       overflow-y: auto;
     }
-    
-    .content-panel::-webkit-scrollbar { width: 6px; }
-    .content-panel::-webkit-scrollbar-thumb { background: #333; border-radius: 3px; }
 
-    /* Sections */
+    /* Card sections */
     .section {
-      margin-bottom: 32px;
+      background: var(--bg-card);
+      border: 1px solid var(--border-subtle);
+      border-radius: 12px;
+      padding: 4px 20px;
+      margin-bottom: 24px;
     }
     .section-title {
-      font-size: 11px;
+      font-size: 15px;
       font-weight: 600;
-      text-transform: uppercase;
-      letter-spacing: 0.1em;
-      color: #666;
-      margin-bottom: 16px;
+      color: var(--text);
+      margin: 0 0 12px 4px;
     }
 
     /* Theme Grid */
@@ -241,14 +266,14 @@ export class SettingsModal extends LitElement {
     }
 
     .theme-card.active .theme-box-wrapper {
-      border-color: #fff;
+      border-color: var(--border-focus);
     }
     
     .theme-box {
       width: 72px;
       height: 64px;
       border-radius: 6px;
-      background: #222;
+      background: var(--bg-gutter);
       display: flex;
       overflow: hidden;
     }
@@ -259,10 +284,10 @@ export class SettingsModal extends LitElement {
     .theme-name {
       font-size: 13px;
       font-weight: 500;
-      color: #aaa;
+      color: var(--text-secondary);
     }
     .theme-card.active .theme-name {
-      color: #fff;
+      color: var(--text);
     }
 
     /* Accent Colors */
@@ -283,7 +308,7 @@ export class SettingsModal extends LitElement {
       justify-content: center;
     }
     .color-circle-wrapper.active {
-      border-color: #fff;
+      border-color: var(--border-focus);
     }
     
     .color-circle {
@@ -298,7 +323,7 @@ export class SettingsModal extends LitElement {
     .color-circle svg {
       width: 14px;
       height: 14px;
-      color: #000;
+      color: var(--bg-elevated);
     }
 
     /* Font Grid */
@@ -309,8 +334,8 @@ export class SettingsModal extends LitElement {
     }
 
     .font-card {
-      background: #111;
-      border: 1px solid #222;
+      background: transparent;
+      border: 1px solid var(--border);
       border-radius: 8px;
       padding: 16px;
       cursor: pointer;
@@ -321,11 +346,11 @@ export class SettingsModal extends LitElement {
     }
     
     .font-card:hover {
-      border-color: #444;
+      border-color: var(--text-muted);
     }
 
     .font-card.active {
-      border-color: #fff;
+      border-color: var(--border-focus);
     }
 
     .font-info {
@@ -337,52 +362,85 @@ export class SettingsModal extends LitElement {
     .font-name {
       font-size: 15px;
       font-weight: 600;
-      color: #ddd;
+      color: var(--text-secondary);
     }
-    .font-card.active .font-name { color: #fff; }
+    .font-card.active .font-name { color: var(--text); }
 
     .font-type {
       font-size: 12px;
-      color: #666;
+      color: var(--text-muted);
     }
 
     .font-card svg {
-      color: #fff;
+      color: var(--text);
       width: 20px;
       height: 20px;
     }
     
-    /* Fallback sections for generic rows */
+    /* Card rows */
     .setting-row {
       display: flex;
       justify-content: space-between;
       align-items: center;
-      padding: 16px 0;
-      border-bottom: 1px solid #1f1f1f;
+      gap: 24px;
+      padding: 14px 0;
+      border-bottom: 1px solid var(--border-subtle);
     }
     .setting-row:last-child {
       border-bottom: none;
     }
-    .setting-label { font-size: 14px; color: #fff; }
-    .setting-desc { font-size: 12px; color: #888; margin-top: 4px; }
+    .setting-label { font-size: 14px; font-weight: 500; color: var(--text); }
+    .setting-desc { font-size: 13px; color: var(--text-secondary); margin-top: 4px; line-height: 1.5; }
     
     .control-btn {
       padding: 6px 12px;
-      background: #222;
-      border: 1px solid #444;
-      color: #fff;
+      background: var(--bg-hover);
+      border: 1px solid var(--border);
+      color: var(--text);
       border-radius: 6px;
       cursor: pointer;
       font-size: 13px;
+      flex-shrink: 0;
     }
-    .control-btn:hover { background: #333; }
+    .control-btn:hover { background: var(--bg-active); }
+
+    .select-input {
+      background: transparent;
+      border: none;
+      color: var(--text);
+      font-size: 13px;
+      font-weight: 500;
+      cursor: pointer;
+      outline: none;
+      text-align: right;
+      flex-shrink: 0;
+    }
+    .select-input option {
+      background: var(--bg-elevated);
+      color: var(--text);
+    }
+
+    .text-input {
+      width: 200px;
+      background: var(--bg-hover);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 6px 10px;
+      color: var(--text);
+      font-size: 13px;
+      outline: none;
+      flex-shrink: 0;
+    }
+    .text-input:focus {
+      border-color: var(--border-focus);
+    }
     
     .danger-btn {
       background: transparent;
-      border: 1px solid #ff4444;
-      color: #ff4444;
+      border: 1px solid var(--danger);
+      color: var(--danger);
     }
-    .danger-btn:hover { background: rgba(255, 68, 68, 0.1); }
+    .danger-btn:hover { background: var(--danger-bg); }
     
     /* Toggle Switch */
     .toggle-switch {
@@ -390,35 +448,37 @@ export class SettingsModal extends LitElement {
       width: 36px;
       height: 20px;
       border-radius: 99px;
-      background: #333;
+      background: var(--bg-hover);
       cursor: pointer;
-      border: none;
+      border: 1px solid var(--border);
       padding: 0;
       outline: none;
-      transition: background 0.2s;
+      transition: background 0.2s, border-color 0.2s;
     }
     .toggle-switch[aria-checked='true'] {
-      background: #fff;
+      background: var(--accent);
+      border-color: var(--accent);
     }
     .toggle-switch::after {
       content: '';
       position: absolute;
-      top: 2px;
-      left: 2px;
+      top: 1px;
+      left: 1px;
       width: 16px;
       height: 16px;
       border-radius: 50%;
-      background: #fff;
-      transition: transform 0.2s;
+      background: var(--text-muted);
+      transition: transform 0.2s, background 0.2s;
     }
     .toggle-switch[aria-checked='true']::after {
       transform: translateX(16px);
-      background: #000;
+      background: var(--accent-text);
     }
+    ${scrollbarStyles}
   `
 
-  @state() private tab: SettingsTab = 'appearance'
-  
+  @state() private tab: SettingsTab = 'general'
+
   // Settings State
   @state() private vaultPath = ''
   @state() private theme = 'dark'
@@ -429,6 +489,23 @@ export class SettingsModal extends LitElement {
   @state() private autoSave = true
   @state() private lineNumbers = false
   @state() private enableMermaid = true
+  @state() private spellCheck = false
+  @state() private cleanupImages = 'prompt'
+  @state() private defaultNewFileName = 'Untitled.md'
+  @state() private pdfPageSize = 'A4'
+  @state() private pdfTheme = 'light'
+  @state() private pdfMargin = 24
+  @state() private appVersion = ''
+  @state() private capturingId: string | null = null
+  @state() private conflictMsg = ''
+
+  // AI State
+  @state() private aiProvider = 'OpenAI'
+  @state() private aiModel = 'gpt-4o'
+  @state() private aiApiKey = ''
+  @state() private availableModels: string[] = []
+  @state() private isFetchingModels = false
+  @state() private fetchError = ''
 
   private settingsStore = SettingsStore.getInstance()
 
@@ -437,6 +514,10 @@ export class SettingsModal extends LitElement {
     this.loadCurrentSettings()
     window.addEventListener('keydown', this.handleKeyDown)
     this.addEventListener('click', this.handleBackdropClick)
+    void api()
+      ?.app?.getVersion?.()
+      .then((v) => (this.appVersion = v))
+      .catch(() => undefined)
   }
 
   disconnectedCallback(): void {
@@ -456,6 +537,34 @@ export class SettingsModal extends LitElement {
     this.lineNumbers = s.get('editor.lineNumbers', false)
     this.vaultPath = s.get('files.vaultPath', '')
     this.enableMermaid = s.get('advanced.enableMermaid', true)
+    this.spellCheck = s.get('advanced.spellCheck', false)
+    this.cleanupImages = s.get('files.cleanupUnusedImages', 'prompt')
+    this.defaultNewFileName = s.get('files.defaultNewFileName', 'Untitled.md')
+    this.pdfPageSize = s.get('export.pdfPageSize', 'A4')
+    this.pdfTheme = s.get('export.pdfTheme', 'light')
+    this.pdfMargin = s.get('export.pdfMargin', 24)
+    this.aiProvider = s.get('ai.provider', 'OpenAI')
+    this.aiModel = s.get('ai.model', 'gpt-4o')
+    this.aiApiKey = s.get('ai.apiKey', '')
+    
+    const defaults: Record<string, string[]> = {
+      'OpenAI': ['gpt-4o', 'gpt-4-turbo', 'gpt-3.5-turbo'],
+      'Anthropic': ['claude-3-5-sonnet-20240620', 'claude-3-opus-20240229', 'claude-3-haiku-20240307'],
+      'GoogleGemini': ['gemini-1.5-pro', 'gemini-1.5-flash'],
+      'Mistral': ['mistral-large-latest', 'open-mixtral-8x22b'],
+      'Groq': ['llama3-70b-8192', 'llama3-8b-8192', 'mixtral-8x7b-32768'],
+      'DeepSeek': ['deepseek-chat', 'deepseek-coder'],
+      'xAI': ['grok-2', 'grok-2-mini'],
+      'OpenRouter': ['openai/gpt-4o', 'anthropic/claude-3.5-sonnet', 'google/gemini-1.5-pro'],
+      'Ollama': ['llama3', 'mistral', 'phi3']
+    }
+    
+    if (this.availableModels.length === 0) {
+      this.availableModels = defaults[this.aiProvider] || []
+      if (this.aiModel && !this.availableModels.includes(this.aiModel)) {
+        this.availableModels.unshift(this.aiModel)
+      }
+    }
   }
 
   private updateSetting(key: string, value: any): void {
@@ -464,7 +573,59 @@ export class SettingsModal extends LitElement {
   }
 
   private handleKeyDown = (e: KeyboardEvent): void => {
+    if (this.capturingId) {
+      e.preventDefault()
+      e.stopPropagation()
+      this.finishCapture(e)
+      return
+    }
     if (e.key === 'Escape') this.close()
+  }
+
+  private shortcutOverrides(): Record<string, string> {
+    return { ...this.settingsStore.get<Record<string, string>>('shortcuts.bindings', {}) }
+  }
+
+  private finishCapture(e: KeyboardEvent): void {
+    const id = this.capturingId
+    if (!id) return
+    if (e.key === 'Escape') {
+      this.capturingId = null
+      this.conflictMsg = ''
+      return
+    }
+    if (e.key === 'Backspace' || e.key === 'Delete') {
+      const overrides = this.shortcutOverrides()
+      delete overrides[id]
+      this.settingsStore.set('shortcuts.bindings', overrides)
+      this.capturingId = null
+      this.conflictMsg = ''
+      return
+    }
+    if (['Control', 'Shift', 'Alt', 'Meta'].includes(e.key)) return
+    const raw = `${e.ctrlKey || e.metaKey ? 'Ctrl+' : ''}${e.shiftKey ? 'Shift+' : ''}${e.altKey ? 'Alt+' : ''}${e.key}`
+    const normalized = normalizeBinding(raw)
+    if (!normalized) {
+      this.capturingId = null
+      return
+    }
+    const overrides = this.shortcutOverrides()
+    const parsed = parseBinding(normalized)
+    const conflict = parsed ? findConflict(id, parsed, overrides) : null
+    if (conflict) {
+      this.conflictMsg = `${normalized} is already used by ${commandTitle(conflict)}`
+      return
+    }
+    overrides[id] = normalized
+    this.settingsStore.set('shortcuts.bindings', overrides)
+    this.capturingId = null
+    this.conflictMsg = ''
+  }
+
+  private handleResetShortcuts(): void {
+    this.settingsStore.set('shortcuts.bindings', {})
+    this.capturingId = null
+    this.conflictMsg = ''
   }
 
   private handleBackdropClick = (e: MouseEvent): void => {
@@ -498,6 +659,59 @@ export class SettingsModal extends LitElement {
     }
   }
 
+  private async fetchModels() {
+    this.fetchError = ''
+    if (!this.aiApiKey && this.aiProvider !== 'Ollama') {
+      this.fetchError = 'API Key required'
+      return
+    }
+    this.isFetchingModels = true
+    this.availableModels = []
+    try {
+      const electron = api()
+      if (!electron) throw new Error('No electron API')
+      
+      const models = await electron.net.fetchModels(this.aiProvider, this.aiApiKey)
+      if (models && models.length > 0) {
+        this.availableModels = models
+        if (!this.availableModels.includes(this.aiModel)) {
+          this.aiModel = this.availableModels[0]
+          this.updateSetting('ai.model', this.aiModel)
+        }
+      } else {
+        throw new Error('No models returned')
+      }
+    } catch (e: any) {
+      console.error('Failed to fetch models', e)
+      this.fetchError = e.message || 'Failed to fetch'
+    } finally {
+      this.isFetchingModels = false
+    }
+  }
+
+  private handleProviderChange(e: Event) {
+    const provider = (e.target as HTMLSelectElement).value
+    this.updateSetting('ai.provider', provider)
+    
+    // Set some sensible defaults before fetching
+    const defaults: Record<string, string[]> = {
+      'OpenAI': ['gpt-4o', 'gpt-4-turbo', 'gpt-3.5-turbo'],
+      'Anthropic': ['claude-3-5-sonnet-20240620', 'claude-3-opus-20240229', 'claude-3-haiku-20240307'],
+      'GoogleGemini': ['gemini-1.5-pro', 'gemini-1.5-flash'],
+      'Mistral': ['mistral-large-latest', 'open-mixtral-8x22b'],
+      'Groq': ['llama3-70b-8192', 'llama3-8b-8192', 'mixtral-8x7b-32768'],
+      'DeepSeek': ['deepseek-chat', 'deepseek-coder'],
+      'xAI': ['grok-2', 'grok-2-mini'],
+      'OpenRouter': ['openai/gpt-4o', 'anthropic/claude-3.5-sonnet', 'google/gemini-1.5-pro'],
+      'Ollama': ['llama3', 'mistral', 'phi3']
+    }
+    
+    this.availableModels = defaults[provider] || []
+    if (this.availableModels.length > 0) {
+      this.updateSetting('ai.model', this.availableModels[0])
+    }
+  }
+
   render() {
     return html`
       <div class="modal-dialog" role="dialog" aria-modal="true" @click=${(e: MouseEvent) => e.stopPropagation()}>
@@ -508,13 +722,13 @@ export class SettingsModal extends LitElement {
             <input type="text" placeholder="Search settings..." />
           </div>
           <div class="sidebar-nav">
-            <button class="nav-btn ${this.tab === 'appearance' ? 'active' : ''}" @click=${() => (this.tab = 'appearance')}>
+            <div class="nav-group">Workspace</div>
+            <button class="nav-btn ${this.tab === 'general' ? 'active' : ''}" @click=${() => (this.tab = 'general')}>
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <circle cx="12" cy="12" r="10" />
-                <path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20" />
-                <path d="M2 12h20" />
+                <circle cx="12" cy="12" r="3" />
+                <path d="M12 2v3M12 19v3M2 12h3M19 12h3" />
               </svg>
-              Appearance
+              General
             </button>
             <button class="nav-btn ${this.tab === 'editor' ? 'active' : ''}" @click=${() => (this.tab = 'editor')}>
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -530,6 +744,22 @@ export class SettingsModal extends LitElement {
               </svg>
               Files & Vault
             </button>
+            <div class="nav-group">Application</div>
+            <button class="nav-btn ${this.tab === 'appearance' ? 'active' : ''}" @click=${() => (this.tab = 'appearance')}>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="12" cy="12" r="10" />
+                <path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20" />
+                <path d="M2 12h20" />
+              </svg>
+              Appearance
+            </button>
+            <button class="nav-btn ${this.tab === 'shortcuts' ? 'active' : ''}" @click=${() => (this.tab = 'shortcuts')}>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <rect x="2" y="6" width="20" height="12" rx="2" />
+                <path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M6 14h.01M18 14h.01M9 14h6" />
+              </svg>
+              Shortcuts
+            </button>
             <button class="nav-btn ${this.tab === 'advanced' ? 'active' : ''}" @click=${() => (this.tab = 'advanced')}>
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <circle cx="12" cy="12" r="3" />
@@ -537,7 +767,15 @@ export class SettingsModal extends LitElement {
               </svg>
               Advanced
             </button>
+            <div class="nav-group">Plugins</div>
+            <button class="nav-btn ${this.tab === 'ai' ? 'active' : ''}" @click=${() => (this.tab = 'ai')}>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M12 2L15.09 8.26L22 9.27L17 14.14L18.18 21.02L12 17.77L5.82 21.02L7 14.14L2 9.27L8.91 8.26L12 2Z" />
+              </svg>
+              AI Assistant
+            </button>
           </div>
+          <div class="nav-footer">WriteMd Desktop${this.appVersion ? html`<br />v${this.appVersion}` : ''}</div>
         </div>
 
         <!-- Main Area -->
@@ -553,20 +791,64 @@ export class SettingsModal extends LitElement {
           </div>
           
           <div class="content-panel">
+            ${this.tab === 'general' ? this.renderGeneral() : ''}
             ${this.tab === 'appearance' ? this.renderAppearance() : ''}
             ${this.tab === 'editor' ? this.renderEditor() : ''}
             ${this.tab === 'files' ? this.renderFiles() : ''}
+            ${this.tab === 'shortcuts' ? this.renderShortcuts() : ''}
             ${this.tab === 'advanced' ? this.renderAdvanced() : ''}
+            ${this.tab === 'ai' ? this.renderAI() : ''}
           </div>
         </div>
       </div>
     `
   }
 
-  private renderAppearance() {
+  private renderGeneral(): unknown {
     return html`
+      <div class="section-title">New files</div>
       <div class="section">
-        <div class="section-title">Theme</div>
+        <div class="setting-row">
+          <div>
+            <div class="setting-label">Default file name</div>
+            <div class="setting-desc">Name used for new vault files</div>
+          </div>
+          <input
+            type="text"
+            class="text-input"
+            .value=${this.defaultNewFileName}
+            @change=${(e: Event) =>
+              this.updateSetting('files.defaultNewFileName', (e.target as HTMLInputElement).value)}
+          />
+        </div>
+
+        <div class="setting-row">
+          <div>
+            <div class="setting-label">Spell check</div>
+            <div class="setting-desc">Underline misspelled words while writing</div>
+          </div>
+          <button class="toggle-switch" role="switch" aria-checked="${this.spellCheck}" @click=${() => this.updateSetting('advanced.spellCheck', !this.spellCheck)}></button>
+        </div>
+
+        <div class="setting-row">
+          <div>
+            <div class="setting-label">Unused images</div>
+            <div class="setting-desc">What to do with images no longer referenced</div>
+          </div>
+          <select class="select-input" .value=${this.cleanupImages} @change=${(e: Event) => this.updateSetting('files.cleanupUnusedImages', (e.target as HTMLSelectElement).value)}>
+            <option value="prompt">Ask me</option>
+            <option value="keep">Keep</option>
+            <option value="delete">Delete</option>
+          </select>
+        </div>
+      </div>
+    `
+  }
+
+  private renderAppearance(): unknown {
+    return html`
+      <div class="section-title">Theme</div>
+      <div class="section">
         <div class="theme-grid">
           ${THEME_PREVIEWS.map(t => html`
             <div class="theme-card ${this.theme === t.id ? 'active' : ''}" @click=${() => this.updateSetting('appearance.theme', t.id)}>
@@ -582,8 +864,8 @@ export class SettingsModal extends LitElement {
         </div>
       </div>
 
+      <div class="section-title">Accent Color</div>
       <div class="section">
-        <div class="section-title">Accent Color</div>
         <div class="color-row">
           ${ACCENT_COLORS.map((c, i) => html`
             <div class="color-circle-wrapper ${this.accentColor === c ? 'active' : ''}" @click=${() => this.updateSetting('appearance.accentColor', c)}>
@@ -604,8 +886,8 @@ export class SettingsModal extends LitElement {
 
   private renderEditor() {
     return html`
+      <div class="section-title">Font</div>
       <div class="section">
-        <div class="section-title">Font</div>
         <div class="font-grid">
           ${FONT_FAMILIES.map(f => html`
             <div class="font-card ${this.fontFamily === f.id ? 'active' : ''}" @click=${() => this.updateSetting('editor.fontFamily', f.id)}>
@@ -623,15 +905,15 @@ export class SettingsModal extends LitElement {
         </div>
       </div>
 
+      <div class="section-title">Preferences</div>
       <div class="section">
-        <div class="section-title">Preferences</div>
         
         <div class="setting-row">
           <div>
             <div class="setting-label">Font Size</div>
             <div class="setting-desc">Base font size for the editor</div>
           </div>
-          <input type="number" style="width: 80px; background: #111; color: #fff; border: 1px solid #333; padding: 6px; border-radius: 4px; outline: none;" 
+          <input type="number" class="text-input" style="width: 80px;" 
             .value=${this.fontSize.toString()} 
             @change=${(e: any) => this.updateSetting('editor.fontSize', parseInt(e.target.value))} />
         </div>
@@ -657,13 +939,13 @@ export class SettingsModal extends LitElement {
 
   private renderFiles() {
     return html`
+      <div class="section-title">Storage</div>
       <div class="section">
-        <div class="section-title">Storage</div>
         
         <div class="setting-row">
           <div>
             <div class="setting-label">Vault Location</div>
-            <div class="setting-desc" style="max-width: 400px; word-break: break-all;">${this.vaultPath || 'Default Documents/WriteMD folder'}</div>
+            <div class="setting-desc" style="max-width: 400px; word-break: break-all;">${this.vaultPath || 'Default Documents/WriteMd folder'}</div>
           </div>
           <button class="control-btn" @click=${this.handleVaultSelect}>Change</button>
         </div>
@@ -679,10 +961,55 @@ export class SettingsModal extends LitElement {
     `
   }
 
-  private renderAdvanced() {
+  private renderShortcuts(): unknown {
+    const overrides = this.shortcutOverrides()
+    const categories = [...new Set(COMMANDS.map((c) => c.category))]
     return html`
+      <div class="section-title">Keyboard Shortcuts</div>
       <div class="section">
-        <div class="section-title">Features</div>
+        <div class="setting-desc" style="margin-bottom: 8px;">
+          Click a binding to rebind it. Backspace clears, Esc cancels.
+        </div>
+        ${this.conflictMsg
+          ? html`<div class="setting-desc" style="color: var(--danger); margin-bottom: 8px;">${this.conflictMsg}</div>`
+          : ''}
+      </div>
+      ${categories.map(
+        (cat) => html`
+          <div class="section-title">${cat}</div>
+          <div class="section">
+            ${COMMANDS.filter((c) => c.category === cat).map((c) => {
+              const binding = effectiveBinding(c.id, overrides)
+              const capturing = this.capturingId === c.id
+              return html`
+                <div class="setting-row">
+                  <div>
+                    <div class="setting-label">${c.title}</div>
+                  </div>
+                  <button class="control-btn" @click=${() => (this.capturingId = c.id)}>
+                    ${capturing ? 'Press keys...' : binding ? formatBinding(binding) : 'Not set'}
+                  </button>
+                </div>
+              `
+            })}
+          </div>
+        `
+      )}
+      <div class="section">
+        <div class="setting-row">
+          <div>
+            <div class="setting-label">Reset Shortcuts</div>
+            <div class="setting-desc">Restore all bindings to their defaults</div>
+          </div>
+          <button class="control-btn" @click=${this.handleResetShortcuts}>Reset All</button>
+        </div>
+      </div>
+    `
+  }
+
+  private renderAdvanced() {    return html`
+      <div class="section-title">Features</div>
+      <div class="section">
         
         <div class="setting-row">
           <div>
@@ -693,8 +1020,50 @@ export class SettingsModal extends LitElement {
         </div>
       </div>
       
+      <div class="section-title">Export</div>
       <div class="section">
-        <div class="section-title">Danger Zone</div>
+        <div class="setting-row">
+          <div>
+            <div class="setting-label">PDF page size</div>
+            <div class="setting-desc">Paper size for PDF export</div>
+          </div>
+          <select class="select-input" .value=${this.pdfPageSize} @change=${(e: Event) => this.updateSetting('export.pdfPageSize', (e.target as HTMLSelectElement).value)}>
+            <option value="A4">A4</option>
+            <option value="A5">A5</option>
+            <option value="Letter">Letter</option>
+            <option value="Legal">Legal</option>
+            <option value="Tabloid">Tabloid</option>
+          </select>
+        </div>
+
+        <div class="setting-row">
+          <div>
+            <div class="setting-label">PDF theme</div>
+            <div class="setting-desc">Color scheme for exported documents</div>
+          </div>
+          <select class="select-input" .value=${this.pdfTheme} @change=${(e: Event) => this.updateSetting('export.pdfTheme', (e.target as HTMLSelectElement).value)}>
+            <option value="light">Light</option>
+            <option value="dark">Dark</option>
+          </select>
+        </div>
+
+        <div class="setting-row">
+          <div>
+            <div class="setting-label">PDF margin</div>
+            <div class="setting-desc">Page margin in millimeters</div>
+          </div>
+          <input
+            type="number"
+            class="text-input"
+            style="width: 80px;"
+            .value=${this.pdfMargin.toString()}
+            @change=${(e: Event) => this.updateSetting('export.pdfMargin', Math.max(0, parseInt((e.target as HTMLInputElement).value, 10) || 0))}
+          />
+        </div>
+      </div>
+
+      <div class="section-title">Danger Zone</div>
+      <div class="section">
         
         <div class="setting-row">
           <div>
@@ -703,6 +1072,71 @@ export class SettingsModal extends LitElement {
           </div>
           <button class="control-btn danger-btn" @click=${this.handleReset}>Reset All</button>
         </div>
+      </div>
+    `
+  }
+
+  private renderAI() {
+    return html`
+      <div class="section-title">AI Assistant Config</div>
+      <div class="section">
+        
+        <div class="setting-row">
+          <div>
+            <div class="setting-label">Provider</div>
+            <div class="setting-desc">Select your AI backend provider</div>
+          </div>
+          <select class="select-input" .value=${this.aiProvider} @change=${this.handleProviderChange}>
+            <option value="OpenAI">OpenAI</option>
+            <option value="Anthropic">Anthropic</option>
+            <option value="GoogleGemini">Google Gemini</option>
+            <option value="Mistral">Mistral</option>
+            <option value="Groq">Groq</option>
+            <option value="OpenRouter">OpenRouter</option>
+            <option value="DeepSeek">DeepSeek</option>
+            <option value="xAI">xAI (Grok)</option>
+            <option value="Ollama">Ollama (Local)</option>
+          </select>
+        </div>
+
+        <div class="setting-row">
+          <div>
+            <div class="setting-label">Model</div>
+            <div class="setting-desc">Specify the model to use (e.g. gpt-4o, claude-3.5-sonnet, gemini-1.5-pro, llama3)</div>
+          </div>
+          <div style="display: flex; gap: 8px; flex-direction: column; align-items: flex-end;">
+            <div style="display: flex; gap: 8px;">
+              <select
+                class="select-input"
+                .value=${this.aiModel}
+                @change=${(e: Event) => this.updateSetting('ai.model', (e.target as HTMLSelectElement).value)}
+              >
+                ${this.availableModels.length > 0 
+                  ? this.availableModels.map(m => html`<option value=${m} ?selected=${this.aiModel === m}>${m}</option>`) 
+                  : html`<option value=${this.aiModel}>${this.aiModel}</option>`}
+              </select>
+              <button class="control-btn" @click=${this.fetchModels} ?disabled=${this.isFetchingModels}>
+                ${this.isFetchingModels ? 'Loading...' : 'Fetch'}
+              </button>
+            </div>
+            ${this.fetchError ? html`<div class="setting-desc" style="color: var(--danger);">${this.fetchError}</div>` : ''}
+          </div>
+        </div>
+
+        <div class="setting-row">
+          <div>
+            <div class="setting-label">API Key</div>
+            <div class="setting-desc">Your secret API key (saved locally)</div>
+          </div>
+          <input
+            type="password"
+            class="text-input"
+            placeholder="sk-..."
+            .value=${this.aiApiKey}
+            @change=${(e: Event) => this.updateSetting('ai.apiKey', (e.target as HTMLInputElement).value)}
+          />
+        </div>
+
       </div>
     `
   }

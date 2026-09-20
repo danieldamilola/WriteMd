@@ -6,9 +6,16 @@ import './Editor'
 import './SettingsModal'
 import './WelcomeScreen'
 import './ConflictDialog'
+import './CommandPalette'
 import type { ElectronAPI } from '../../../shared/electron-api'
 import { SettingsStore } from '../state/settings'
 import { FileState, type ConflictInfo } from '../state/file-state'
+import {
+  COMMANDS,
+  bindingFromEvent,
+  bindingsEqual,
+  effectiveBindings
+} from '../state/shortcuts'
 
 function api(): ElectronAPI | undefined {
   return typeof window !== 'undefined' ? window.electronAPI : undefined
@@ -46,13 +53,30 @@ export class WriteMDApp extends LitElement {
       flex-direction: column;
       min-width: 0;
     }
+    .tab-add {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 26px;
+      height: 20px;
+      border-radius: 4px;
+      color: var(--text-muted);
+      cursor: pointer;
+      flex-shrink: 0;
+      -webkit-app-region: no-drag;
+    }
+    .tab-add:hover {
+      color: var(--text);
+      background: rgba(255, 255, 255, 0.06);
+    }
   `
 
   @state() private showWelcome = true
   @state() private showSettings = false
+  @state() private showPalette = false
   @state() private splitActive = false
-  @state() private currentPath: string | null = null
-  @state() private isDirty = false
+  @state() private tabs: Array<{ path: string | null; dirty: boolean }> = []
+  @state() private activeTab = 0
   @state() private secondaryPath: string | null = null
   @state() private secondaryDirty = false
   @state() private conflict: ConflictInfo | null = null
@@ -67,16 +91,18 @@ export class WriteMDApp extends LitElement {
       'data-theme',
       this.settingsStore.get('appearance.theme', 'dark')
     )
-    this.showWelcome = true
     this.unsubscribeFileState = this.fileState.subscribe((s) => {
       this.splitActive = s.splitActive
-      this.currentPath = s.path
-      this.isDirty = s.dirty
+      this.tabs = s.tabs
+      this.activeTab = s.activeTab
+      this.showWelcome = s.tabs.length === 0
       this.secondaryPath = s.secondaryDoc?.path ?? null
       this.secondaryDirty = s.secondaryDoc?.dirty ?? false
       this.conflict = s.conflict
       this.requestUpdate()
     })
+    this.showWelcome = true
+    await this.fileState.restoreTabs().catch(() => false)
 
     api()?.onFileOpenExternal?.((path: string) => {
       void this.fileState.openFile(path)
@@ -117,39 +143,112 @@ export class WriteMDApp extends LitElement {
   }
 
   private handleGlobalShortcuts = (e: KeyboardEvent): void => {
-    const mod = e.ctrlKey || e.metaKey
-    if (!mod) return
-    if (e.key === ',') {
+    // Palette and settings modal get first refusal for Escape
+    if (e.key === 'Escape') {
+      if (this.showPalette) {
+        this.showPalette = false
+        return
+      }
+      return
+    }
+    // Never hijack keys while rebinding shortcuts in settings
+    if (this.showSettings) return
+    const pressed = bindingFromEvent(e)
+    const overrides = this.settingsStore.get<Record<string, string>>('shortcuts.bindings', {})
+    for (const cmd of COMMANDS) {
+      const bindings = effectiveBindings(cmd.id, overrides)
+      const matched = bindings.find((b) => bindingsEqual(pressed, b))
+      if (!matched) continue
+      if (!matched.mod && !matched.alt && !matched.shift) {
+        // Bare keys must not hijack typing
+        const target = e.target as HTMLElement | null
+        if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) {
+          continue
+        }
+      }
       e.preventDefault()
-      this.showSettings = true
-    } else if (e.key === 'n') {
-      e.preventDefault()
-      void this.fileState.newFile()
-      this.showWelcome = false
-    } else if (e.key === 'o') {
-      e.preventDefault()
-      void this.openFileDialog()
-    } else if (e.key === 's' && e.shiftKey) {
-      e.preventDefault()
-      void this.fileState.saveAs()
-    } else if (e.key === 's' && e.altKey) {
-      e.preventDefault()
-      this.fileState.toggleSplitView()
-    } else if (e.key === 's') {
-      e.preventDefault()
-      void this.fileState.save()
-    } else if (e.key === 'e' && e.shiftKey) {
-      e.preventDefault()
-      this.fileState.setSplitSurface('files')
-    } else if (e.key === 'b' && e.shiftKey) {
-      e.preventDefault()
-      this.fileState.setSplitSurface('backlinks')
-    } else if (e.key === 'a' && e.altKey) {
-      e.preventDefault()
-      this.fileState.setSplitSurface('ai')
-    } else if (e.key === 'e') {
-      e.preventDefault()
-      this.fileState.quickToggle()
+      void this.runCommand(cmd.id)
+      return
+    }
+  }
+
+  private async runCommand(id: string): Promise<void> {
+    this.showPalette = false
+    switch (id) {
+      case 'new-file':
+        await this.fileState.newFile()
+        this.showWelcome = false
+        break
+      case 'open-file':
+        await this.openFileDialog()
+        break
+      case 'save':
+        await this.fileState.save()
+        break
+      case 'save-as':
+        await this.fileState.saveAs()
+        break
+      case 'export-pdf':
+        await this.handleExport('pdf')
+        break
+      case 'export-html':
+        await this.handleExport('html')
+        break
+      case 'quick-toggle':
+        this.fileState.quickToggle()
+        break
+      case 'toggle-split':
+        this.fileState.toggleSplitView()
+        break
+      case 'split-files':
+        this.fileState.setSplitSurface('files')
+        break
+      case 'split-backlinks':
+        this.fileState.setSplitSurface('backlinks')
+        break
+      case 'split-ai':
+        this.fileState.setSplitSurface('ai')
+        break
+      case 'open-settings':
+        this.showSettings = true
+        break
+      case 'command-palette':
+        this.showPalette = true
+        break
+      case 'zoom-in':
+      case 'zoom-out':
+      case 'zoom-reset':
+        await this.handleZoom(id)
+        break
+    }
+  }
+
+  private async handleZoom(id: 'zoom-in' | 'zoom-out' | 'zoom-reset'): Promise<void> {
+    const bridge = api()?.window
+    if (!bridge?.zoomIn) {
+      alert('Zoom is unavailable. Restart the app to load the latest version.')
+      return
+    }
+    try {
+      if (id === 'zoom-in') await bridge.zoomIn()
+      else if (id === 'zoom-out') await bridge.zoomOut()
+      else await bridge.zoomReset()
+    } catch (err) {
+      console.error(`Zoom failed:`, err)
+      alert(`Zoom failed: ${err instanceof Error ? err.message : String(err)}`)
+    }
+  }
+
+  private async handleExport(kind: 'pdf' | 'html'): Promise<void> {
+    const s = this.fileState.getState()
+    try {
+      const result = await api()?.export?.[kind]?.(s.content, s.path)
+      if (result && !result.ok && result.reason !== 'canceled') {
+        alert(`Export failed: ${result.reason ?? 'unknown error'}`)
+      }
+    } catch (err) {
+      console.error(`Export ${kind} failed:`, err)
+      alert(`Export failed: ${err instanceof Error ? err.message : String(err)}`)
     }
   }
 
@@ -193,13 +292,17 @@ export class WriteMDApp extends LitElement {
             }}
           ></writemd-welcome-screen>
           ${this.showSettings ? html`<writemd-settings-modal @close=${() => (this.showSettings = false)}></writemd-settings-modal>` : ''}
+          ${this.showPalette
+            ? html`<writemd-command-palette
+                @close=${() => (this.showPalette = false)}
+                @run-command=${(e: CustomEvent<{ id: string }>) => void this.runCommand(e.detail.id)}
+              ></writemd-command-palette>`
+            : ''}
           ${this.conflict ? html`<writemd-conflict-dialog .conflict=${this.conflict}></writemd-conflict-dialog>` : ''}
         </div>
       `
     }
 
-    const currentPath = this.currentPath ?? this.fileState.getState().path ?? 'Untitled.md'
-    const fileName = currentPath.split(/[/\\]/).pop() ?? 'Untitled.md'
     const secondaryName = this.secondaryPath
       ? (this.secondaryPath.split(/[/\\]/).pop() ?? 'Secondary.md')
       : null
@@ -208,22 +311,39 @@ export class WriteMDApp extends LitElement {
       <div class="app-container">
         <writemd-top-bar
           .splitActive=${this.splitActive}
-          @open-menu=${() => void this.openFileDialog()}
+          @open-menu=${() => (this.showPalette = true)}
           @open-settings=${() => (this.showSettings = true)}
           @toggle-split=${() => this.fileState.toggleSplitView()}
         >
-          <div slot="tabs" style="display: flex; gap: 4px; align-items: center;">
-            <writemd-tab
-              label=${fileName}
-              ?active=${true}
-              .dirty=${this.isDirty}
-              @close=${() => {
-                if (this.isDirty && !confirm('You have unsaved changes. Close anyway?')) {
-                  return
-                }
-                this.showWelcome = true
-              }}
-            ></writemd-tab>
+          <div slot="tabs" style="display: flex; gap: 10px; align-items: center;">
+            ${this.tabs.map(
+              (t, i) => html`
+                <writemd-tab
+                  label=${t.path?.split(/[/\\]/).pop() ?? 'Untitled.md'}
+                  ?active=${i === this.activeTab}
+                  .dirty=${t.dirty}
+                  @select=${() => this.fileState.switchTab(i)}
+                  @close=${() => void this.fileState.closeTab(i)}
+                ></writemd-tab>
+              `
+            )}
+            <div
+              class="tab-add"
+              title="Open file in new tab"
+              @click=${() => void this.openFileDialog()}
+            >
+              <svg
+                width="14"
+                height="14"
+                viewBox="0 0 14 14"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.5"
+              >
+                <line x1="7" y1="2" x2="7" y2="12" />
+                <line x1="2" y1="7" x2="12" y2="7" />
+              </svg>
+            </div>
             ${
               secondaryName
                 ? html`
@@ -260,6 +380,12 @@ export class WriteMDApp extends LitElement {
               ></writemd-settings-modal>`
             : ''
         }
+        ${this.showPalette
+          ? html`<writemd-command-palette
+              @close=${() => (this.showPalette = false)}
+              @run-command=${(e: CustomEvent<{ id: string }>) => void this.runCommand(e.detail.id)}
+            ></writemd-command-palette>`
+          : ''}
         ${
           this.conflict
             ? html`<writemd-conflict-dialog

@@ -24,6 +24,12 @@ export interface VaultTreeNode {
   children?: VaultTreeNode[]
 }
 
+export interface ExportResult {
+  ok: boolean
+  path?: string
+  reason?: string
+}
+
 export interface ElectronAPI {
   app: {
     getVersion: () => Promise<string>
@@ -35,6 +41,9 @@ export interface ElectronAPI {
     maximize: () => Promise<void>
     close: () => Promise<void>
     isMaximized: () => Promise<boolean>
+    zoomIn: () => Promise<void>
+    zoomOut: () => Promise<void>
+    zoomReset: () => Promise<void>
   }
   file: {
     read: (path: string) => Promise<FileReadResult>
@@ -54,6 +63,7 @@ export interface ElectronAPI {
     watch: (path: string) => Promise<void>
     unwatch: (path: string) => Promise<void>
     rename: (oldPath: string, newPath: string) => Promise<boolean>
+    delete: (path: string) => Promise<boolean>
     onChanged: (callback: (path: string) => void) => () => void
   }
   vault: {
@@ -67,12 +77,31 @@ export interface ElectronAPI {
     get: () => Promise<Record<string, unknown>>
     set: (settings: Record<string, unknown>) => Promise<void>
   }
+  net: {
+    fetchModels: (provider: string, apiKey: string) => Promise<string[]>
+    chat: (provider: string, model: string, apiKey: string, messages: any[], systemPrompt?: string) => Promise<string>
+  }
   dialog: {
     showOpenDialog: (options: Electron.OpenDialogOptions) => Promise<Electron.OpenDialogReturnValue>
   }
   shell: {
     openPath: (path: string) => Promise<void>
     openExternal: (url: string) => Promise<void>
+    showInFolder: (path: string) => Promise<void>
+  }
+  export: {
+    pdf: (markdown: string, docPath: string | null) => Promise<ExportResult>
+    html: (markdown: string, docPath: string | null) => Promise<ExportResult>
+  }
+  updater: {
+    check: () => Promise<any>
+    download: () => Promise<any>
+    install: () => void
+    onUpdateAvailable: (callback: (info: any) => void) => () => void
+    onUpdateNotAvailable: (callback: (info: any) => void) => () => void
+    onUpdateDownloaded: (callback: (info: any) => void) => () => void
+    onDownloadProgress: (callback: (info: any) => void) => () => void
+    onError: (callback: (err: string) => void) => () => void
   }
   onFileOpenExternal: (callback: (path: string) => void) => () => void
 }

@@ -1,5 +1,6 @@
 import { html, css, LitElement } from 'lit'
 import { customElement, state } from 'lit/decorators.js'
+import { scrollbarStyles } from './scrollbars'
 import type { ElectronAPI, VaultTreeNode } from '../../../shared/electron-api'
 import { FileState } from '../state/file-state'
 
@@ -79,7 +80,8 @@ export class VaultExplorer extends LitElement {
     .node-name {
       white-space: nowrap;
       overflow: hidden;
-      text-overflow: ellipsis;
+      -webkit-mask-image: linear-gradient(to right, black 80%, transparent 100%);
+      mask-image: linear-gradient(to right, black 80%, transparent 100%);
       flex: 1;
     }
 
@@ -101,6 +103,7 @@ export class VaultExplorer extends LitElement {
       width: 14px;
       height: 14px;
     }
+    ${scrollbarStyles}
   `
 
   @state() private rootNode: VaultTreeNode | null = null

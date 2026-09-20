@@ -1,7 +1,7 @@
 import { html, css, LitElement } from 'lit'
 import { customElement, property } from 'lit/decorators.js'
 
-export type IconButtonSize = 'sm' | 'md'
+export type IconButtonSize = 'sm' | 'md' | 'caption'
 
 @customElement('writemd-icon-button')
 export class WriteMDIconButton extends LitElement {
@@ -38,13 +38,31 @@ export class WriteMDIconButton extends LitElement {
       padding: 0;
     }
 
+    :host([size='caption']) button {
+      width: 46px;
+      height: 100%;
+      min-height: 32px;
+      border-radius: 0;
+      padding: 0;
+    }
+
     button:hover {
       background: rgba(255, 255, 255, 0.05);
       color: #d4d4d4;
     }
 
     :host([variant='close']) button:hover {
-      background: #d32f2f;
+      background: #c42b1c;
+      color: #ffffff;
+    }
+
+    :host([size='caption']) button:hover {
+      background: rgba(255, 255, 255, 0.06);
+      color: #d4d4d4;
+    }
+
+    :host([size='caption'][variant='close']) button:hover {
+      background: #c42b1c;
       color: #ffffff;
     }
 
@@ -57,6 +75,15 @@ export class WriteMDIconButton extends LitElement {
     :host([size='md']) ::slotted(svg) {
       width: 12px;
       height: 12px;
+    }
+
+    :host([size='caption']) {
+      align-self: stretch;
+    }
+
+    :host([size='caption']) ::slotted(svg) {
+      width: 10px;
+      height: 10px;
     }
   `
 
