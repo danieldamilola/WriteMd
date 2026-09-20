@@ -37,7 +37,7 @@ function getMathDecorations(view: EditorView) {
     }
     
     if (!active || readOnly) {
-      builder.add(from, to, Decoration.widget({
+      builder.add(from, to, Decoration.replace({
         widget: new MathWidget(content, true),
         block: true
       }))
@@ -56,7 +56,7 @@ function getMathDecorations(view: EditorView) {
     
     const line = view.state.doc.lineAt(from).number
     if (!activeLines.has(line) || readOnly) {
-      builder.add(from, to, Decoration.widget({
+      builder.add(from, to, Decoration.replace({
         widget: new MathWidget(content, false)
       }))
     }

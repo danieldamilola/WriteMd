@@ -31,6 +31,7 @@ function getFrontmatterDecorations(view: EditorView) {
       
       if (!active || readOnly) {
         const widget = Decoration.replace({
+          block: true,
           widget: new class extends WidgetType {
             eq(_other: any) { return false }
             ignoreEvent() { return false }
