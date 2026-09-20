@@ -14,9 +14,12 @@ import { languages } from '@codemirror/language-data'
 import { unifiedMergeView } from '@codemirror/merge'
 import { GFM } from '@lezer/markdown'
 import { defaultKeymap, history, historyKeymap } from '@codemirror/commands'
+import { search, searchKeymap } from '@codemirror/search'
 import { writeMDTheme } from './EditorTheme'
 import { livePreviewPlugin, readOnlyExtension, documentPathFacet, tableLinePlugin } from './LivePreview'
 import { mathPlugin } from './extensions/math-plugin'
+import { frontmatterPlugin } from './extensions/frontmatter-plugin'
+import { wikiLinkPlugin } from './extensions/wiki-link-plugin'
 import { slashCommandPlugin } from './extensions/slash-command'
 import { tableKeymapPlugin } from './extensions/table-keys'
 import { tableToolbarField } from './extensions/table-toolbar'
@@ -380,11 +383,14 @@ export class Editor extends LitElement {
       writeMDTheme,
       EditorView.lineWrapping,
       history(),
+      search({top: true}),
       mathPlugin,
+      frontmatterPlugin,
+      wikiLinkPlugin,
       slashCommandPlugin,
       tableKeymapPlugin,
       tableToolbarField,
-      keymap.of([...defaultKeymap, ...historyKeymap]),
+      keymap.of([...defaultKeymap, ...historyKeymap, ...searchKeymap]),
       markdown({ extensions: [GFM], codeLanguages: languages }),
       tableLinePlugin,
       comp.of(this.getModeExtensions(mode)),

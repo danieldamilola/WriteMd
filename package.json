@@ -38,7 +38,8 @@
     "katex": "^0.16.11",
     "lit": "^3.3.3",
     "markdown-it": "^15.0.2",
-    "mermaid": "^11.4.0"
+    "mermaid": "^11.4.0",
+    "@codemirror/search": "^6.5.9"
   },
   "devDependencies": {
     "@electron-toolkit/eslint-config-prettier": "^3.0.0",

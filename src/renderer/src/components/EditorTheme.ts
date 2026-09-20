@@ -208,9 +208,12 @@ export const writeMDTheme: Extension = EditorView.theme({
     backgroundColor: 'var(--border-subtle)'
   },
   '.cm-live-link': {
-    color: 'var(--syntax-link) !important',
-    textDecoration: 'underline',
+    color: 'var(--accent)',
+    textDecoration: 'none',
     cursor: 'pointer'
+  },
+  '.cm-frontmatter-dim': {
+    color: 'var(--text-muted)'
   },
   /* Math and Code Widgets */
   '.cm-live-math': {
