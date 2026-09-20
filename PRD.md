@@ -526,22 +526,22 @@ writemd/
 
 ### Phase 2: Editor Core (Week 3-5)
 
-- [ ] CodeMirror 6 integration
-- [ ] Markdown parser (Lezer) + syntax highlighting
-- [ ] Live Preview decorations (WYSIWYG)
+- [x] CodeMirror 6 integration
+- [x] Markdown parser (Lezer) + syntax highlighting
+- [x] Live Preview decorations (WYSIWYG)
 - [ ] Toolbar → formatting commands
 - [ ] Keyboard shortcuts
-- [ ] Mode toggle (WYSIWYG/Source/Split)
+- [x] Mode toggle (WYSIWYG/Source/Split)
 
 ### Phase 3: File & Image Handling (Week 6)
 
-- [ ] Open/Save dialogs + drag-drop (vault + external)
-- [ ] File association registration
-- [ ] Auto-save + dirty tracking
-- [ ] Recent files (vault + external)
-- [ ] Image paste/drop → sibling `_assets/`
+- [x] Open/Save dialogs + drag-drop (vault + external)
+- [x] File association registration
+- [x] Auto-save + dirty tracking
+- [x] Recent files (vault + external)
+- [x] Image paste/drop → sibling `_assets/`
 - [ ] Image resize handles
-- [ ] Vault file explorer sidebar
+- [x] Vault file explorer sidebar
 
 ### Phase 4: Advanced Editing (Week 7-8)
 

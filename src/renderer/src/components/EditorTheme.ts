@@ -209,8 +209,43 @@ export const writeMDTheme: Extension = EditorView.theme({
   },
   '.cm-live-link': {
     color: 'var(--syntax-link) !important',
-    textDecoration: 'underline !important',
-    textUnderlineOffset: '2px'
+    textDecoration: 'underline',
+    cursor: 'pointer'
+  },
+  /* Math and Code Widgets */
+  '.cm-live-math': {
+    display: 'inline-block',
+    cursor: 'pointer',
+    padding: '0 4px',
+    borderRadius: '4px',
+    background: 'rgba(120, 120, 120, 0.1)'
+  },
+  '.cm-live-math-block': {
+    display: 'flex',
+    justifyContent: 'center',
+    padding: '16px',
+    margin: '8px 0',
+    background: 'var(--bg-elevated)',
+    borderRadius: '8px',
+    position: 'relative'
+  },
+  '.cm-math-copy-btn': {
+    position: 'absolute',
+    top: '8px',
+    right: '8px',
+    background: 'transparent',
+    border: 'none',
+    color: 'var(--text-muted)',
+    cursor: 'pointer',
+    padding: '4px',
+    borderRadius: '4px',
+    display: 'none'
+  },
+  '.cm-live-math-block:hover .cm-math-copy-btn': {
+    display: 'flex'
+  },
+  '.cm-math-copy-btn:hover': {
+    color: 'var(--text)'
   },
   '.cm-live-link::after': {
     content: "''",

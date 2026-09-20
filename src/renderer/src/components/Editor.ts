@@ -1,5 +1,6 @@
-import { html, css, LitElement } from 'lit'
+import { html, css, LitElement, unsafeCSS } from 'lit'
 import { customElement, state } from 'lit/decorators.js'
+import katexCss from 'katex/dist/katex.min.css?inline'
 import {
   EditorView,
   keymap,
@@ -9,11 +10,13 @@ import {
 } from '@codemirror/view'
 import { EditorState, Extension, Compartment } from '@codemirror/state'
 import { markdown } from '@codemirror/lang-markdown'
+import { languages } from '@codemirror/language-data'
 import { unifiedMergeView } from '@codemirror/merge'
 import { GFM } from '@lezer/markdown'
 import { defaultKeymap, history, historyKeymap } from '@codemirror/commands'
 import { writeMDTheme } from './EditorTheme'
 import { livePreviewPlugin, readOnlyExtension, documentPathFacet, tableLinePlugin } from './LivePreview'
+import { mathPlugin } from './extensions/math-plugin'
 import { slashCommandPlugin } from './extensions/slash-command'
 import { tableKeymapPlugin } from './extensions/table-keys'
 import { tableToolbarField } from './extensions/table-toolbar'
@@ -30,7 +33,9 @@ function api(): ElectronAPI | undefined {
 
 @customElement('writemd-editor')
 export class Editor extends LitElement {
-  static styles = css`
+  static styles = [
+    unsafeCSS(katexCss),
+    css`
     :host {
       display: flex;
       flex: 1;
@@ -209,6 +214,7 @@ export class Editor extends LitElement {
       opacity: 0.4;
     }
   `
+  ]
 
   private fileState = FileState.getInstance()
   private unsubscribe: (() => void) | null = null
@@ -374,11 +380,12 @@ export class Editor extends LitElement {
       writeMDTheme,
       EditorView.lineWrapping,
       history(),
+      mathPlugin,
       slashCommandPlugin,
       tableKeymapPlugin,
       tableToolbarField,
       keymap.of([...defaultKeymap, ...historyKeymap]),
-      markdown({ extensions: [GFM] }),
+      markdown({ extensions: [GFM], codeLanguages: languages }),
       tableLinePlugin,
       comp.of(this.getModeExtensions(mode)),
       pathComp.of(documentPathFacet.of(currentPath)),

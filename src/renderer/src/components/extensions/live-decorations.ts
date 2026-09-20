@@ -6,6 +6,7 @@ import { Decoration, EditorView, ViewPlugin, type DecorationSet, type ViewUpdate
 import { BULLET_WIDGET } from '../widgets/BulletWidget'
 import { TaskCheckboxWidget } from '../widgets/TaskCheckboxWidget'
 import { ImageWidget } from '../widgets/ImageWidget'
+import { CodeBlockWidget } from '../widgets/CodeBlockWidget'
 import { readOnlyFacet } from './read-only'
 import { previewFrozenField } from './freeze-mouse'
 import { treeGrowthEffect } from './tree-progress'
@@ -134,6 +135,33 @@ export function buildInlineDecorations(view: EditorView): DecorationSet {
             break
           }
         }
+        
+        let language = ''
+        const codeInfo = node.node.getChild('CodeInfo')
+        if (codeInfo) {
+          language = doc.sliceString(codeInfo.from, codeInfo.to)
+        }
+        
+        const codeContent = doc.sliceString(node.from, node.to)
+          .replace(/^```[^\n]*\n/, '')
+          .replace(/\n```\s*$/, '')
+          
+        if (!anyActive && !readOnly) {
+          ranges.push(
+            Decoration.widget({
+              widget: new CodeBlockWidget(language, codeContent),
+              block: true
+            }).range(node.from)
+          )
+        } else if (readOnly) {
+          ranges.push(
+            Decoration.widget({
+              widget: new CodeBlockWidget(language, codeContent),
+              block: true
+            }).range(node.from)
+          )
+        }
+
         if (anyActive) {
           for (let n = firstLine; n <= lastLine; n++) activeLines.add(n)
         }
