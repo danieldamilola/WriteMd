@@ -61,6 +61,12 @@ export class SettingsStore {
     applySettingsToDOM(this)
   }
 
+  reset(): void {
+    this.settings = {}
+    void api()?.settings?.set?.(this.settings)
+    applySettingsToDOM(this)
+  }
+
   get<T>(key: string, defaultValue: T): T {
     let value: unknown = this.settings
     for (const k of key.split('.')) {

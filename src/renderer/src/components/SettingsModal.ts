@@ -8,7 +8,7 @@ function api(): ElectronAPI | undefined {
   return typeof window !== 'undefined' ? window.electronAPI : undefined
 }
 
-type SettingsTab = 'appearance' | 'editor' | 'ai' | 'about'
+type SettingsTab = 'appearance' | 'editor' | 'files' | 'advanced'
 
 interface ThemeDefinition {
   id: string
@@ -352,7 +352,7 @@ export class SettingsModal extends LitElement {
       height: 20px;
     }
     
-    /* Fallback sections for Editor/About */
+    /* Fallback sections for generic rows */
     .setting-row {
       display: flex;
       justify-content: space-between;
@@ -360,9 +360,62 @@ export class SettingsModal extends LitElement {
       padding: 16px 0;
       border-bottom: 1px solid #1f1f1f;
     }
+    .setting-row:last-child {
+      border-bottom: none;
+    }
     .setting-label { font-size: 14px; color: #fff; }
     .setting-desc { font-size: 12px; color: #888; margin-top: 4px; }
-  `;
+    
+    .control-btn {
+      padding: 6px 12px;
+      background: #222;
+      border: 1px solid #444;
+      color: #fff;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 13px;
+    }
+    .control-btn:hover { background: #333; }
+    
+    .danger-btn {
+      background: transparent;
+      border: 1px solid #ff4444;
+      color: #ff4444;
+    }
+    .danger-btn:hover { background: rgba(255, 68, 68, 0.1); }
+    
+    /* Toggle Switch */
+    .toggle-switch {
+      position: relative;
+      width: 36px;
+      height: 20px;
+      border-radius: 99px;
+      background: #333;
+      cursor: pointer;
+      border: none;
+      padding: 0;
+      outline: none;
+      transition: background 0.2s;
+    }
+    .toggle-switch[aria-checked='true'] {
+      background: #fff;
+    }
+    .toggle-switch::after {
+      content: '';
+      position: absolute;
+      top: 2px;
+      left: 2px;
+      width: 16px;
+      height: 16px;
+      border-radius: 50%;
+      background: #fff;
+      transition: transform 0.2s;
+    }
+    .toggle-switch[aria-checked='true']::after {
+      transform: translateX(16px);
+      background: #000;
+    }
+  `
 
   @state() private tab: SettingsTab = 'appearance'
   
@@ -373,7 +426,9 @@ export class SettingsModal extends LitElement {
   @state() private fontFamily = 'Inter'
   @state() private fontSize = 15
   @state() private wordWrap = true
+  @state() private autoSave = true
   @state() private lineNumbers = false
+  @state() private enableMermaid = true
 
   private settingsStore = SettingsStore.getInstance()
 
@@ -397,8 +452,10 @@ export class SettingsModal extends LitElement {
     this.fontFamily = s.get('editor.fontFamily', 'Inter')
     this.fontSize = s.get('editor.fontSize', 15)
     this.wordWrap = s.get('editor.wordWrap', true)
+    this.autoSave = s.get('files.autoSave', true)
     this.lineNumbers = s.get('editor.lineNumbers', false)
     this.vaultPath = s.get('files.vaultPath', '')
+    this.enableMermaid = s.get('advanced.enableMermaid', true)
   }
 
   private updateSetting(key: string, value: any): void {
@@ -436,8 +493,8 @@ export class SettingsModal extends LitElement {
       'Reset Settings'
     )
     if (confirmed) {
-      // Just clear localstorage/indexeddb equivalent for MVP
-      alert('Settings reset!')
+      this.settingsStore.reset()
+      this.loadCurrentSettings()
     }
   }
 
@@ -448,7 +505,7 @@ export class SettingsModal extends LitElement {
         <!-- Sidebar Navigation -->
         <div class="sidebar">
           <div class="sidebar-search">
-            <input type="text" placeholder="Search..." />
+            <input type="text" placeholder="Search settings..." />
           </div>
           <div class="sidebar-nav">
             <button class="nav-btn ${this.tab === 'appearance' ? 'active' : ''}" @click=${() => (this.tab = 'appearance')}>
@@ -466,19 +523,19 @@ export class SettingsModal extends LitElement {
               </svg>
               Editor
             </button>
-            <button class="nav-btn ${this.tab === 'ai' ? 'active' : ''}" @click=${() => (this.tab = 'ai')}>
+            <button class="nav-btn ${this.tab === 'files' ? 'active' : ''}" @click=${() => (this.tab = 'files')}>
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83" />
+                <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
+                <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
               </svg>
-              AI
+              Files & Vault
             </button>
-            <button class="nav-btn ${this.tab === 'about' ? 'active' : ''}" @click=${() => (this.tab = 'about')}>
+            <button class="nav-btn ${this.tab === 'advanced' ? 'active' : ''}" @click=${() => (this.tab = 'advanced')}>
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <circle cx="12" cy="12" r="10" />
-                <line x1="12" y1="16" x2="12" y2="12" />
-                <line x1="12" y1="8" x2="12.01" y2="8" />
+                <circle cx="12" cy="12" r="3" />
+                <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" />
               </svg>
-              About
+              Advanced
             </button>
           </div>
         </div>
@@ -486,7 +543,7 @@ export class SettingsModal extends LitElement {
         <!-- Main Area -->
         <div class="main-area">
           <div class="main-header">
-            <h2>${this.tab.charAt(0).toUpperCase() + this.tab.slice(1)}</h2>
+            <h2>${this.tab === 'files' ? 'Files & Vault' : this.tab.charAt(0).toUpperCase() + this.tab.slice(1)}</h2>
             <button class="close-btn" @click=${this.close}>
               <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2">
                 <line x1="18" y1="6" x2="6" y2="18" />
@@ -498,8 +555,8 @@ export class SettingsModal extends LitElement {
           <div class="content-panel">
             ${this.tab === 'appearance' ? this.renderAppearance() : ''}
             ${this.tab === 'editor' ? this.renderEditor() : ''}
-            ${this.tab === 'ai' ? this.renderAI() : ''}
-            ${this.tab === 'about' ? this.renderAbout() : ''}
+            ${this.tab === 'files' ? this.renderFiles() : ''}
+            ${this.tab === 'advanced' ? this.renderAdvanced() : ''}
           </div>
         </div>
       </div>
@@ -542,7 +599,11 @@ export class SettingsModal extends LitElement {
           `)}
         </div>
       </div>
+    `
+  }
 
+  private renderEditor() {
+    return html`
       <div class="section">
         <div class="section-title">Font</div>
         <div class="font-grid">
@@ -561,20 +622,16 @@ export class SettingsModal extends LitElement {
           `)}
         </div>
       </div>
-    `
-  }
 
-  private renderEditor() {
-    return html`
       <div class="section">
-        <div class="section-title">Editor Preferences</div>
+        <div class="section-title">Preferences</div>
         
         <div class="setting-row">
           <div>
             <div class="setting-label">Font Size</div>
             <div class="setting-desc">Base font size for the editor</div>
           </div>
-          <input type="number" style="width: 80px; background: #111; color: #fff; border: 1px solid #333; padding: 6px; border-radius: 4px;" 
+          <input type="number" style="width: 80px; background: #111; color: #fff; border: 1px solid #333; padding: 6px; border-radius: 4px; outline: none;" 
             .value=${this.fontSize.toString()} 
             @change=${(e: any) => this.updateSetting('editor.fontSize', parseInt(e.target.value))} />
         </div>
@@ -584,7 +641,7 @@ export class SettingsModal extends LitElement {
             <div class="setting-label">Word Wrap</div>
             <div class="setting-desc">Wrap lines that exceed the editor width</div>
           </div>
-          <input type="checkbox" .checked=${this.wordWrap} @change=${(e: any) => this.updateSetting('editor.wordWrap', e.target.checked)} />
+          <button class="toggle-switch" role="switch" aria-checked="${this.wordWrap}" @click=${() => this.updateSetting('editor.wordWrap', !this.wordWrap)}></button>
         </div>
 
         <div class="setting-row">
@@ -592,51 +649,59 @@ export class SettingsModal extends LitElement {
             <div class="setting-label">Line Numbers</div>
             <div class="setting-desc">Show line numbers in source mode</div>
           </div>
-          <input type="checkbox" .checked=${this.lineNumbers} @change=${(e: any) => this.updateSetting('editor.lineNumbers', e.target.checked)} />
+          <button class="toggle-switch" role="switch" aria-checked="${this.lineNumbers}" @click=${() => this.updateSetting('editor.lineNumbers', !this.lineNumbers)}></button>
+        </div>
+      </div>
+    `
+  }
+
+  private renderFiles() {
+    return html`
+      <div class="section">
+        <div class="section-title">Storage</div>
+        
+        <div class="setting-row">
+          <div>
+            <div class="setting-label">Vault Location</div>
+            <div class="setting-desc" style="max-width: 400px; word-break: break-all;">${this.vaultPath || 'Default Documents/WriteMD folder'}</div>
+          </div>
+          <button class="control-btn" @click=${this.handleVaultSelect}>Change</button>
+        </div>
+
+        <div class="setting-row">
+          <div>
+            <div class="setting-label">Auto-save</div>
+            <div class="setting-desc">Automatically write modifications to disk</div>
+          </div>
+          <button class="toggle-switch" role="switch" aria-checked="${this.autoSave}" @click=${() => this.updateSetting('files.autoSave', !this.autoSave)}></button>
+        </div>
+      </div>
+    `
+  }
+
+  private renderAdvanced() {
+    return html`
+      <div class="section">
+        <div class="section-title">Features</div>
+        
+        <div class="setting-row">
+          <div>
+            <div class="setting-label">Enable Mermaid</div>
+            <div class="setting-desc">Render Mermaid diagrams in live preview</div>
+          </div>
+          <button class="toggle-switch" role="switch" aria-checked="${this.enableMermaid}" @click=${() => this.updateSetting('advanced.enableMermaid', !this.enableMermaid)}></button>
         </div>
       </div>
       
       <div class="section">
-        <div class="section-title">Files</div>
+        <div class="section-title">Danger Zone</div>
+        
         <div class="setting-row">
           <div>
-            <div class="setting-label">Vault Location</div>
-            <div class="setting-desc">${this.vaultPath || 'Default Documents/WriteMD folder'}</div>
+            <div class="setting-label">Reset Preferences</div>
+            <div class="setting-desc">Restore all options to their factory defaults</div>
           </div>
-          <button style="padding: 6px 12px; background: #222; border: 1px solid #444; color: #fff; border-radius: 4px; cursor: pointer;" @click=${this.handleVaultSelect}>Change</button>
-        </div>
-      </div>
-    `
-  }
-
-  private renderAI() {
-    return html`
-      <div class="section" style="text-align: center; padding: 40px 0; color: #666;">
-        <svg viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="currentColor" stroke-width="1.5" style="margin-bottom: 16px;">
-          <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83" />
-        </svg>
-        <h3 style="color: #fff; margin-bottom: 8px;">AI Features</h3>
-        <p>AI integrations are currently disabled in this workspace.</p>
-      </div>
-    `
-  }
-
-  private renderAbout() {
-    return html`
-      <div class="section">
-        <div class="section-title">WriteMD</div>
-        <div class="setting-row">
-          <div>
-            <div class="setting-label">Version</div>
-            <div class="setting-desc">1.0.0-beta</div>
-          </div>
-        </div>
-        <div class="setting-row">
-          <div>
-            <div class="setting-label">Reset</div>
-            <div class="setting-desc">Restore all preferences to default values</div>
-          </div>
-          <button style="padding: 6px 12px; background: transparent; border: 1px solid #ff4444; color: #ff4444; border-radius: 4px; cursor: pointer;" @click=${this.handleReset}>Reset All</button>
+          <button class="control-btn danger-btn" @click=${this.handleReset}>Reset All</button>
         </div>
       </div>
     `
