@@ -150,22 +150,19 @@ export function buildInlineDecorations(view: EditorView): DecorationSet {
         if (language === 'mermaid' && (!anyActive || readOnly)) {
           ranges.push(
             Decoration.widget({
-              widget: new MermaidWidget(codeContent),
-              block: true
+              widget: new MermaidWidget(codeContent)
             }).range(node.from)
           )
         } else if (!anyActive && !readOnly) {
           ranges.push(
             Decoration.widget({
-              widget: new CodeBlockWidget(language, codeContent),
-              block: true
+              widget: new CodeBlockWidget(language, codeContent)
             }).range(node.from)
           )
         } else if (readOnly) {
           ranges.push(
             Decoration.widget({
-              widget: new CodeBlockWidget(language, codeContent),
-              block: true
+              widget: new CodeBlockWidget(language, codeContent)
             }).range(node.from)
           )
         }
