@@ -1,11 +1,12 @@
-import { ViewPlugin, Decoration, EditorView, WidgetType, type ViewUpdate } from '@codemirror/view'
+import { Decoration, DecorationSet, EditorView, WidgetType } from '@codemirror/view'
+import { StateField, type EditorState } from '@codemirror/state'
 import { RangeSetBuilder } from '@codemirror/state'
 import { readOnlyFacet } from './read-only'
 
-function getFrontmatterDecorations(view: EditorView) {
+function getFrontmatterDecorations(state: EditorState) {
   const builder = new RangeSetBuilder<Decoration>()
-  const readOnly = view.state.facet(readOnlyFacet)
-  const text = view.state.doc.toString()
+  const readOnly = state.facet(readOnlyFacet)
+  const text = state.doc.toString()
   
   if (text.startsWith('---\n')) {
     const endMatch = text.indexOf('\n---\n', 4)
@@ -14,17 +15,17 @@ function getFrontmatterDecorations(view: EditorView) {
       const to = endMatch + 5
       
       const activeLines = new Set<number>()
-      if (view.hasFocus && !readOnly) {
-        for (const r of view.state.selection.ranges) {
-          const firstLine = view.state.doc.lineAt(r.from).number
-          const lastLine = view.state.doc.lineAt(r.to).number
+      if (!readOnly) {
+        for (const r of state.selection.ranges) {
+          const firstLine = state.doc.lineAt(r.from).number
+          const lastLine = state.doc.lineAt(r.to).number
           for (let n = firstLine; n <= lastLine; n++) activeLines.add(n)
         }
       }
       
       let active = false
-      const startLine = view.state.doc.lineAt(from).number
-      const endLine = view.state.doc.lineAt(to).number
+      const startLine = state.doc.lineAt(from).number
+      const endLine = state.doc.lineAt(to).number
       for (let n = startLine; n <= endLine; n++) {
         if (activeLines.has(n)) { active = true; break; }
       }
@@ -49,17 +50,13 @@ function getFrontmatterDecorations(view: EditorView) {
               div.style.fontSize = '0.9em'
               
               const innerText = text.substring(4, endMatch)
-              div.innerText = 'Metadata\\n' + innerText
+              div.innerText = 'Metadata\n' + innerText
               
               return div
             }
           }()
         })
         builder.add(from, to, widget)
-      } else {
-        // Just dim the text
-        const mark = Decoration.mark({ class: 'cm-frontmatter-dim' })
-        builder.add(from, to, mark)
       }
     }
   }
@@ -67,19 +64,15 @@ function getFrontmatterDecorations(view: EditorView) {
   return builder.finish()
 }
 
-export const frontmatterPlugin = ViewPlugin.fromClass(
-  class {
-    decorations
-    constructor(view: EditorView) {
-      this.decorations = getFrontmatterDecorations(view)
-    }
-    update(update: ViewUpdate) {
-      if (update.docChanged || update.selectionSet || update.focusChanged || update.viewportChanged) {
-        this.decorations = getFrontmatterDecorations(update.view)
-      }
-    }
+export const frontmatterPlugin = StateField.define<DecorationSet>({
+  create(state) {
+    return getFrontmatterDecorations(state)
   },
-  {
-    decorations: v => v.decorations
-  }
-)
+  update(value, tr) {
+    if (tr.docChanged || tr.selection) {
+      return getFrontmatterDecorations(tr.state)
+    }
+    return value
+  },
+  provide: f => EditorView.decorations.from(f)
+})

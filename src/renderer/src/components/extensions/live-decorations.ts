@@ -149,10 +149,10 @@ export function buildInlineDecorations(view: EditorView): DecorationSet {
           
         if (language === 'mermaid' && (!anyActive || readOnly)) {
           ranges.push(
-            Decoration.replace({
+            Decoration.widget({
               widget: new MermaidWidget(codeContent),
               block: true
-            }).range(node.from, node.to)
+            }).range(node.from)
           )
         } else if (!anyActive && !readOnly) {
           ranges.push(
