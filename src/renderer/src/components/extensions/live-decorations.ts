@@ -7,6 +7,7 @@ import { BULLET_WIDGET } from '../widgets/BulletWidget'
 import { TaskCheckboxWidget } from '../widgets/TaskCheckboxWidget'
 import { ImageWidget } from '../widgets/ImageWidget'
 import { CodeBlockWidget } from '../widgets/CodeBlockWidget'
+import { MermaidWidget } from '../widgets/MermaidWidget'
 import { readOnlyFacet } from './read-only'
 import { previewFrozenField } from './freeze-mouse'
 import { treeGrowthEffect } from './tree-progress'
@@ -146,7 +147,14 @@ export function buildInlineDecorations(view: EditorView): DecorationSet {
           .replace(/^```[^\n]*\n/, '')
           .replace(/\n```\s*$/, '')
           
-        if (!anyActive && !readOnly) {
+        if (language === 'mermaid' && (!anyActive || readOnly)) {
+          ranges.push(
+            Decoration.replace({
+              widget: new MermaidWidget(codeContent),
+              block: true
+            }).range(node.from, node.to)
+          )
+        } else if (!anyActive && !readOnly) {
           ranges.push(
             Decoration.widget({
               widget: new CodeBlockWidget(language, codeContent),
