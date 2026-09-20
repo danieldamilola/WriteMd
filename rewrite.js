@@ -1,4 +1,6 @@
-import { html, css, LitElement } from 'lit'
+const fs = require('fs');
+
+const code = `import { html, css, LitElement } from 'lit'
 import { customElement, state } from 'lit/decorators.js'
 import type { ElectronAPI } from '../../../shared/electron-api'
 import { SettingsStore } from '../state/settings'
@@ -49,7 +51,7 @@ const FONT_FAMILIES = [
 
 @customElement('writemd-settings-modal')
 export class SettingsModal extends LitElement {
-  static styles = css`
+  static styles = css\`
     :host {
       position: fixed;
       inset: 0;
@@ -362,7 +364,7 @@ export class SettingsModal extends LitElement {
     }
     .setting-label { font-size: 14px; color: #fff; }
     .setting-desc { font-size: 12px; color: #888; margin-top: 4px; }
-  `;
+  \`;
 
   @state() private tab: SettingsTab = 'appearance'
   
@@ -373,6 +375,7 @@ export class SettingsModal extends LitElement {
   @state() private fontFamily = 'Inter'
   @state() private fontSize = 15
   @state() private wordWrap = true
+  @state() private autoSave = true
   @state() private lineNumbers = false
 
   private settingsStore = SettingsStore.getInstance()
@@ -397,6 +400,7 @@ export class SettingsModal extends LitElement {
     this.fontFamily = s.get('editor.fontFamily', 'Inter')
     this.fontSize = s.get('editor.fontSize', 15)
     this.wordWrap = s.get('editor.wordWrap', true)
+    this.autoSave = s.get('files.autoSave', true)
     this.lineNumbers = s.get('editor.lineNumbers', false)
     this.vaultPath = s.get('files.vaultPath', '')
   }
@@ -421,12 +425,11 @@ export class SettingsModal extends LitElement {
   private async handleVaultSelect() {
     const electron = api()
     if (!electron) return
-    const result = await electron.dialog?.showOpenDialog?.({
-      properties: ['openDirectory', 'createDirectory'],
+    const result = await electron.invoke('dialog:openDirectory', {
       defaultPath: this.vaultPath
     })
-    if (result && !result.canceled && result.filePaths.length > 0) {
-      this.updateSetting('files.vaultPath', result.filePaths[0])
+    if (result && result.length > 0) {
+      this.updateSetting('files.vaultPath', result[0])
     }
   }
 
@@ -442,8 +445,8 @@ export class SettingsModal extends LitElement {
   }
 
   render() {
-    return html`
-      <div class="modal-dialog" role="dialog" aria-modal="true" @click=${(e: MouseEvent) => e.stopPropagation()}>
+    return html\`
+      <div class="modal-dialog" role="dialog" aria-modal="true" @click=\${(e: MouseEvent) => e.stopPropagation()}>
         
         <!-- Sidebar Navigation -->
         <div class="sidebar">
@@ -451,7 +454,7 @@ export class SettingsModal extends LitElement {
             <input type="text" placeholder="Search..." />
           </div>
           <div class="sidebar-nav">
-            <button class="nav-btn ${this.tab === 'appearance' ? 'active' : ''}" @click=${() => (this.tab = 'appearance')}>
+            <button class="nav-btn \${this.tab === 'appearance' ? 'active' : ''}" @click=\${() => (this.tab = 'appearance')}>
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <circle cx="12" cy="12" r="10" />
                 <path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20" />
@@ -459,20 +462,20 @@ export class SettingsModal extends LitElement {
               </svg>
               Appearance
             </button>
-            <button class="nav-btn ${this.tab === 'editor' ? 'active' : ''}" @click=${() => (this.tab = 'editor')}>
+            <button class="nav-btn \${this.tab === 'editor' ? 'active' : ''}" @click=\${() => (this.tab = 'editor')}>
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <path d="M12 20h9" />
                 <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" />
               </svg>
               Editor
             </button>
-            <button class="nav-btn ${this.tab === 'ai' ? 'active' : ''}" @click=${() => (this.tab = 'ai')}>
+            <button class="nav-btn \${this.tab === 'ai' ? 'active' : ''}" @click=\${() => (this.tab = 'ai')}>
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83" />
               </svg>
               AI
             </button>
-            <button class="nav-btn ${this.tab === 'about' ? 'active' : ''}" @click=${() => (this.tab = 'about')}>
+            <button class="nav-btn \${this.tab === 'about' ? 'active' : ''}" @click=\${() => (this.tab = 'about')}>
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <circle cx="12" cy="12" r="10" />
                 <line x1="12" y1="16" x2="12" y2="12" />
@@ -486,8 +489,8 @@ export class SettingsModal extends LitElement {
         <!-- Main Area -->
         <div class="main-area">
           <div class="main-header">
-            <h2>${this.tab.charAt(0).toUpperCase() + this.tab.slice(1)}</h2>
-            <button class="close-btn" @click=${this.close}>
+            <h2>\${this.tab.charAt(0).toUpperCase() + this.tab.slice(1)}</h2>
+            <button class="close-btn" @click=\${this.close}>
               <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2">
                 <line x1="18" y1="6" x2="6" y2="18" />
                 <line x1="6" y1="6" x2="18" y2="18" />
@@ -496,76 +499,76 @@ export class SettingsModal extends LitElement {
           </div>
           
           <div class="content-panel">
-            ${this.tab === 'appearance' ? this.renderAppearance() : ''}
-            ${this.tab === 'editor' ? this.renderEditor() : ''}
-            ${this.tab === 'ai' ? this.renderAI() : ''}
-            ${this.tab === 'about' ? this.renderAbout() : ''}
+            \${this.tab === 'appearance' ? this.renderAppearance() : ''}
+            \${this.tab === 'editor' ? this.renderEditor() : ''}
+            \${this.tab === 'ai' ? this.renderAI() : ''}
+            \${this.tab === 'about' ? this.renderAbout() : ''}
           </div>
         </div>
       </div>
-    `
+    \`
   }
 
   private renderAppearance() {
-    return html`
+    return html\`
       <div class="section">
         <div class="section-title">Theme</div>
         <div class="theme-grid">
-          ${THEME_PREVIEWS.map(t => html`
-            <div class="theme-card ${this.theme === t.id ? 'active' : ''}" @click=${() => this.updateSetting('appearance.theme', t.id)}>
+          \${THEME_PREVIEWS.map(t => html\`
+            <div class="theme-card \${this.theme === t.id ? 'active' : ''}" @click=\${() => this.updateSetting('appearance.theme', t.id)}>
               <div class="theme-box-wrapper">
                 <div class="theme-box">
-                  <div class="theme-box-left" style="background: ${t.c1}"></div>
-                  <div class="theme-box-right" style="background: ${t.c2}"></div>
+                  <div class="theme-box-left" style="background: \${t.c1}"></div>
+                  <div class="theme-box-right" style="background: \${t.c2}"></div>
                 </div>
               </div>
-              <span class="theme-name">${t.name}</span>
+              <span class="theme-name">\${t.name}</span>
             </div>
-          `)}
+          \`)}
         </div>
       </div>
 
       <div class="section">
         <div class="section-title">Accent Color</div>
         <div class="color-row">
-          ${ACCENT_COLORS.map((c, i) => html`
-            <div class="color-circle-wrapper ${this.accentColor === c ? 'active' : ''}" @click=${() => this.updateSetting('appearance.accentColor', c)}>
-              <div class="color-circle" style="background: ${c}">
-                ${i === 0 ? html`
+          \${ACCENT_COLORS.map((c, i) => html\`
+            <div class="color-circle-wrapper \${this.accentColor === c ? 'active' : ''}" @click=\${() => this.updateSetting('appearance.accentColor', c)}>
+              <div class="color-circle" style="background: \${c}">
+                \${i === 0 ? html\`
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3">
                     <line x1="18" y1="6" x2="6" y2="18" />
                     <line x1="6" y1="6" x2="18" y2="18" />
                   </svg>
-                ` : ''}
+                \` : ''}
               </div>
             </div>
-          `)}
+          \`)}
         </div>
       </div>
 
       <div class="section">
         <div class="section-title">Font</div>
         <div class="font-grid">
-          ${FONT_FAMILIES.map(f => html`
-            <div class="font-card ${this.fontFamily === f.id ? 'active' : ''}" @click=${() => this.updateSetting('editor.fontFamily', f.id)}>
+          \${FONT_FAMILIES.map(f => html\`
+            <div class="font-card \${this.fontFamily === f.id ? 'active' : ''}" @click=\${() => this.updateSetting('editor.fontFamily', f.id)}>
               <div class="font-info">
-                <span class="font-name" style="font-family: ${f.id}">${f.name}</span>
-                <span class="font-type">${f.type}</span>
+                <span class="font-name" style="font-family: \${f.id}">\${f.name}</span>
+                <span class="font-type">\${f.type}</span>
               </div>
-              ${this.fontFamily === f.id ? html`
+              \${this.fontFamily === f.id ? html\`
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
                   <polyline points="20 6 9 17 4 12" />
                 </svg>
-              ` : ''}
+              \` : ''}
             </div>
-          `)}
+          \`)}
         </div>
       </div>
-    `
+    \`
   }
 
   private renderEditor() {
-    return html`
+    return html\`
       <div class="section">
         <div class="section-title">Editor Preferences</div>
         
@@ -575,8 +578,8 @@ export class SettingsModal extends LitElement {
             <div class="setting-desc">Base font size for the editor</div>
           </div>
           <input type="number" style="width: 80px; background: #111; color: #fff; border: 1px solid #333; padding: 6px; border-radius: 4px;" 
-            .value=${this.fontSize.toString()} 
-            @change=${(e: any) => this.updateSetting('editor.fontSize', parseInt(e.target.value))} />
+            .value=\${this.fontSize.toString()} 
+            @change=\${(e: any) => this.updateSetting('editor.fontSize', parseInt(e.target.value))} />
         </div>
 
         <div class="setting-row">
@@ -584,7 +587,7 @@ export class SettingsModal extends LitElement {
             <div class="setting-label">Word Wrap</div>
             <div class="setting-desc">Wrap lines that exceed the editor width</div>
           </div>
-          <input type="checkbox" .checked=${this.wordWrap} @change=${(e: any) => this.updateSetting('editor.wordWrap', e.target.checked)} />
+          <input type="checkbox" .checked=\${this.wordWrap} @change=\${(e: any) => this.updateSetting('editor.wordWrap', e.target.checked)} />
         </div>
 
         <div class="setting-row">
@@ -592,7 +595,7 @@ export class SettingsModal extends LitElement {
             <div class="setting-label">Line Numbers</div>
             <div class="setting-desc">Show line numbers in source mode</div>
           </div>
-          <input type="checkbox" .checked=${this.lineNumbers} @change=${(e: any) => this.updateSetting('editor.lineNumbers', e.target.checked)} />
+          <input type="checkbox" .checked=\${this.lineNumbers} @change=\${(e: any) => this.updateSetting('editor.lineNumbers', e.target.checked)} />
         </div>
       </div>
       
@@ -601,16 +604,16 @@ export class SettingsModal extends LitElement {
         <div class="setting-row">
           <div>
             <div class="setting-label">Vault Location</div>
-            <div class="setting-desc">${this.vaultPath || 'Default Documents/WriteMD folder'}</div>
+            <div class="setting-desc">\${this.vaultPath || 'Default Documents/WriteMD folder'}</div>
           </div>
-          <button style="padding: 6px 12px; background: #222; border: 1px solid #444; color: #fff; border-radius: 4px; cursor: pointer;" @click=${this.handleVaultSelect}>Change</button>
+          <button style="padding: 6px 12px; background: #222; border: 1px solid #444; color: #fff; border-radius: 4px; cursor: pointer;" @click=\${this.handleVaultSelect}>Change</button>
         </div>
       </div>
-    `
+    \`
   }
 
   private renderAI() {
-    return html`
+    return html\`
       <div class="section" style="text-align: center; padding: 40px 0; color: #666;">
         <svg viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="currentColor" stroke-width="1.5" style="margin-bottom: 16px;">
           <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83" />
@@ -618,11 +621,11 @@ export class SettingsModal extends LitElement {
         <h3 style="color: #fff; margin-bottom: 8px;">AI Features</h3>
         <p>AI integrations are currently disabled in this workspace.</p>
       </div>
-    `
+    \`
   }
 
   private renderAbout() {
-    return html`
+    return html\`
       <div class="section">
         <div class="section-title">WriteMD</div>
         <div class="setting-row">
@@ -636,9 +639,12 @@ export class SettingsModal extends LitElement {
             <div class="setting-label">Reset</div>
             <div class="setting-desc">Restore all preferences to default values</div>
           </div>
-          <button style="padding: 6px 12px; background: transparent; border: 1px solid #ff4444; color: #ff4444; border-radius: 4px; cursor: pointer;" @click=${this.handleReset}>Reset All</button>
+          <button style="padding: 6px 12px; background: transparent; border: 1px solid #ff4444; color: #ff4444; border-radius: 4px; cursor: pointer;" @click=\${this.handleReset}>Reset All</button>
         </div>
       </div>
-    `
+    \`
   }
 }
+`;
+
+fs.writeFileSync('src/renderer/src/components/SettingsModal.ts', code);

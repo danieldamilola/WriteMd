@@ -12,11 +12,28 @@ export function applySettingsToDOM(store: SettingsStore): void {
   const fontSize = store.get('editor.fontSize', 15)
   const lineHeight = store.get('editor.lineHeight', 1.7)
   const fontFamily = store.get('editor.fontFamily', 'JetBrains Mono')
+  const accentColor = store.get('appearance.accentColor', '') as string
+  
   const root = document.documentElement
   root.style.setProperty('--editor-font-size', `${fontSize}px`)
   root.style.setProperty('--editor-line-height', String(lineHeight))
   if (fontFamily) {
     root.style.setProperty('--font-mono', `'${fontFamily}', monospace`)
+  }
+  if (accentColor && accentColor !== '#ffffff') {
+    root.style.setProperty('--accent', accentColor)
+    root.style.setProperty('--accent-hover', accentColor)
+    root.style.setProperty('--border-focus', accentColor)
+  } else {
+    // If monochrome is selected or default
+    root.style.removeProperty('--accent')
+    root.style.removeProperty('--accent-hover')
+    root.style.removeProperty('--border-focus')
+    
+    // Fallback to monochrome for UI elements but keep syntax highlights
+    root.style.setProperty('--accent', 'var(--text)')
+    root.style.setProperty('--accent-hover', 'var(--text-secondary)')
+    root.style.setProperty('--border-focus', 'var(--text)')
   }
 }
 
