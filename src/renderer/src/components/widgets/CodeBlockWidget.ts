@@ -12,7 +12,7 @@ export class CodeBlockWidget extends WidgetType {
     return other.language === this.language && other.codeContent === this.codeContent
   }
 
-  toDOM(view: EditorView): HTMLElement {
+  toDOM(_view: EditorView): HTMLElement {
     const container = document.createElement('div')
     container.className = 'cm-live-code-header'
     container.style.display = 'flex'

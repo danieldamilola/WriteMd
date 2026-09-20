@@ -13,7 +13,7 @@ export class MathWidget extends WidgetType {
     return other.content === this.content && other.isBlock === this.isBlock
   }
 
-  toDOM(view: EditorView): HTMLElement {
+  toDOM(_view: EditorView): HTMLElement {
     const span = document.createElement('span')
     span.className = this.isBlock ? 'cm-live-math cm-live-math-block' : 'cm-live-math'
     
