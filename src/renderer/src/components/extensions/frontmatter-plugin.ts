@@ -39,15 +39,15 @@ function getFrontmatterDecorations(state: EditorState) {
             toDOM() {
               const div = document.createElement('div')
               div.className = 'cm-frontmatter-widget'
-              div.style.background = 'var(--bg-secondary)'
-              div.style.padding = '8px 12px'
+              div.style.background = 'var(--code-bg)'
+              div.style.padding = '10px 14px'
               div.style.borderRadius = '6px'
-              div.style.border = '1px solid var(--border)'
+              div.style.border = '1px solid var(--border-subtle)'
               div.style.marginBottom = '12px'
               div.style.cursor = 'pointer'
               div.style.color = 'var(--text-muted)'
-              div.style.fontFamily = 'monospace'
-              div.style.fontSize = '0.9em'
+              div.style.fontFamily = 'var(--font-mono, monospace)'
+              div.style.fontSize = '12px'
               
               const innerText = text.substring(4, endMatch)
               div.innerText = 'Metadata\n' + innerText

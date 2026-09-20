@@ -18,12 +18,12 @@ export class CodeBlockWidget extends WidgetType {
     container.style.display = 'flex'
     container.style.justifyContent = 'space-between'
     container.style.alignItems = 'center'
-    container.style.padding = '4px 12px'
-    container.style.background = 'var(--bg-elevated)'
+    container.style.padding = '4px 14px'
+    container.style.margin = '0 -14px'
+    container.style.background = 'var(--code-bg)'
     container.style.borderTopLeftRadius = '6px'
     container.style.borderTopRightRadius = '6px'
-    container.style.border = '1px solid var(--border-subtle)'
-    container.style.borderBottom = 'none'
+    container.style.borderBottom = '1px solid var(--border-subtle)'
     container.style.userSelect = 'none'
     
     // Language picker (simplified to just display for now, could be a select later)

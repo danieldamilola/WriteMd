@@ -188,7 +188,14 @@ export function buildInlineDecorations(view: EditorView): DecorationSet {
         const lastLine = doc.lineAt(node.to)
         for (let n = firstLine.number; n <= lastLine.number; n++) {
           const line = doc.line(n)
-          ranges.push(Decoration.line({ class: lineClass }).range(line.from))
+          if (node.name === 'FencedCode') {
+            const classes = [lineClass]
+            if (n === firstLine.number) classes.push('cm-live-code-first')
+            if (n === lastLine.number) classes.push('cm-live-code-last')
+            ranges.push(Decoration.line({ class: classes.join(' ') }).range(line.from))
+          } else {
+            ranges.push(Decoration.line({ class: lineClass }).range(line.from))
+          }
         }
       }
 

@@ -122,7 +122,23 @@ export const writeMDTheme: Extension = EditorView.theme({
     fontSize: '13px !important',
     paddingLeft: '14px !important',
     paddingRight: '14px !important',
-    boxShadow: 'inset 2px 0 0 var(--border-subtle) !important'
+    borderLeft: '1px solid var(--border-subtle) !important',
+    borderRight: '1px solid var(--border-subtle) !important',
+    boxShadow: 'none !important'
+  },
+  '.cm-line.cm-live-code-first': {
+    borderTop: '1px solid var(--border-subtle) !important',
+    borderTopLeftRadius: '6px !important',
+    borderTopRightRadius: '6px !important',
+    marginTop: '6px !important',
+    overflow: 'hidden !important'
+  },
+  '.cm-line.cm-live-code-last': {
+    borderBottom: '1px solid var(--border-subtle) !important',
+    borderBottomLeftRadius: '6px !important',
+    borderBottomRightRadius: '6px !important',
+    marginBottom: '6px !important',
+    paddingBottom: '6px !important'
   },
   /* Inline Marks */
   '.cm-live-bold': {
@@ -135,7 +151,8 @@ export const writeMDTheme: Extension = EditorView.theme({
   },
   '.cm-live-code': {
     backgroundColor: 'var(--code-bg) !important',
-    padding: '2px 6px !important',
+    border: '1px solid var(--border-subtle) !important',
+    padding: '1px 5px !important',
     borderRadius: '4px !important',
     fontSize: '13px !important',
     color: 'var(--syntax-code) !important'
@@ -219,17 +236,19 @@ export const writeMDTheme: Extension = EditorView.theme({
   '.cm-live-math': {
     display: 'inline-block',
     cursor: 'pointer',
-    padding: '0 4px',
+    padding: '1px 6px',
     borderRadius: '4px',
-    background: 'rgba(120, 120, 120, 0.1)'
+    background: 'var(--code-bg)',
+    border: '1px solid var(--border-subtle)'
   },
   '.cm-live-math-block': {
     display: 'flex',
     justifyContent: 'center',
     padding: '16px',
     margin: '8px 0',
-    background: 'var(--bg-elevated)',
-    borderRadius: '8px',
+    background: 'var(--code-bg)',
+    border: '1px solid var(--border-subtle)',
+    borderRadius: '6px',
     position: 'relative'
   },
   '.cm-math-copy-btn': {
