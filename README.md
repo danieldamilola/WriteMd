@@ -12,6 +12,14 @@
 
 WriteMD is a fast, private, local-first Markdown editor. Double-click any `.md` file and edit it where it lives — no vault to configure, no import step, no account. New notes land in your vault (`~/Documents/WriteMD/`); existing files always save back in place.
 
+## Screenshots
+
+> Drop captures into `docs/screenshots/` with these exact filenames to fill this section: `editor.png` (main editing view), `split-view.png` (split pane with backlinks or AI). For video demos, upload the `.mp4` to a GitHub release (or drag-drop it into an issue to get a URL) and embed it here — READMEs only play video from GitHub-hosted URLs, not repo files.
+
+| Editor | Split view |
+| ------ | ---------- |
+| ![WriteMD editor](docs/screenshots/editor.png) | ![WriteMD split view](docs/screenshots/split-view.png) |
+
 ## Highlights
 
 - **Zero friction** — open any `.md` from Explorer, drag-drop, or `Ctrl+O`; auto-save keeps you safe
