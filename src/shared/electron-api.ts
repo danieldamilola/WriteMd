@@ -1,4 +1,4 @@
-import type { WriteMDSettings, WriteMDSettingsPatch } from './settings-schema'
+import type { WriteMdSettings, WriteMdSettingsPatch } from './settings-schema'
 
 export interface FileReadResult {
   content: string
@@ -95,8 +95,8 @@ export interface ElectronAPI {
     getTree: () => Promise<VaultTreeNode>
   }
   settings: {
-    get: () => Promise<WriteMDSettings>
-    set: (settings: WriteMDSettingsPatch) => Promise<void>
+    get: () => Promise<WriteMdSettings>
+    set: (settings: WriteMdSettingsPatch) => Promise<void>
   }
   net: {
     fetchModels: (provider: string, apiKey: string) => Promise<string[]>

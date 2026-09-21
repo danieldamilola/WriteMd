@@ -3,7 +3,7 @@
  * The main process persists this to config.json in the userData directory.
  */
 
-export interface WriteMDSettings {
+export interface WriteMdSettings {
   editor: {
     fontSize: number
     fontFamily: string
@@ -66,11 +66,11 @@ export interface WriteMDSettings {
 }
 
 /** A nested-partial settings object, e.g. `{ files: { vaultPath: '...' } }`. */
-export type WriteMDSettingsPatch = {
-  [K in keyof WriteMDSettings]?: Partial<WriteMDSettings[K]>
+export type WriteMdSettingsPatch = {
+  [K in keyof WriteMdSettings]?: Partial<WriteMdSettings[K]>
 }
 
-export const DEFAULT_SETTINGS: WriteMDSettings = {
+export const DEFAULT_SETTINGS: WriteMdSettings = {
   editor: {
     fontSize: 15,
     fontFamily: 'JetBrains Mono',

@@ -19,8 +19,20 @@ describe('phase 1 foundation', () => {
   it('creates the vault folder on ensureVaultExists', async () => {
     const { ensureVaultExists } = await import('../src/main/vault')
     const p = ensureVaultExists()
-    expect(p.replace(/\\/g, '/')).toBe(`${TEST_ROOT}/Documents/WriteMD`)
+    expect(p.replace(/\\/g, '/')).toBe(`${TEST_ROOT}/Documents/WriteMd Vault`)
     expect(existsSync(p)).toBe(true)
+  })
+
+  it('migrates a legacy WriteMD vault folder forward', async () => {
+    const { mkdirSync, writeFileSync, existsSync: exists } = await import('fs')
+    const legacy = `${TEST_ROOT}/Documents/WriteMD`
+    mkdirSync(legacy, { recursive: true })
+    writeFileSync(`${legacy}/note.md`, '# hi')
+    const { getDefaultVaultPath } = await import('../src/main/vault')
+    const p = getDefaultVaultPath().replace(/\\/g, '/')
+    expect(p).toBe(`${TEST_ROOT}/Documents/WriteMd Vault`)
+    expect(exists(`${TEST_ROOT}/Documents/WriteMd Vault/note.md`)).toBe(true)
+    expect(exists(legacy)).toBe(false)
   })
 
   it('round-trips settings to config.json', async () => {

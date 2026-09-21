@@ -20,7 +20,7 @@ tags: [markdown, test]
 
 ```typescript
 function helloWorld() {
-  console.log("Hello, WriteMD!");
+  console.log("Hello, WriteMd!");
 }
 ```
 

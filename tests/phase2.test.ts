@@ -62,7 +62,7 @@ describe('phase 2 editor core & split view', () => {
 
   it('reconfigures view mode via Compartment without document disruption', () => {
     const modeComp = new Compartment()
-    const docText = '# Hello WriteMD\n\n**Live preview** in action.'
+    const docText = '# Hello WriteMd\n\n**Live preview** in action.'
 
     const state = EditorState.create({
       doc: docText,

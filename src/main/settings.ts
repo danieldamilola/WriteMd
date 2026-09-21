@@ -4,13 +4,13 @@ import { readFileSync, existsSync, mkdirSync, renameSync } from 'fs'
 import { writeFile } from 'fs/promises'
 import {
   DEFAULT_SETTINGS,
-  type WriteMDSettingsPatch,
-  type WriteMDSettings
+  type WriteMdSettingsPatch,
+  type WriteMdSettings
 } from '../shared/settings-schema'
 
 export const SETTINGS_FILE = join(app.getPath('userData'), 'config.json')
 
-export type { WriteMDSettings, WriteMDSettingsPatch } from '../shared/settings-schema'
+export type { WriteMdSettings, WriteMdSettingsPatch } from '../shared/settings-schema'
 export { DEFAULT_SETTINGS } from '../shared/settings-schema'
 
 const ENCRYPTION_PREFIX = 'enc:v1:'
@@ -50,7 +50,7 @@ export function decryptApiKey(value: string): string {
   }
 }
 
-let settingsCache: WriteMDSettings | null = null
+let settingsCache: WriteMdSettings | null = null
 
 export function deepMerge(
   target: Record<string, unknown>,
@@ -75,15 +75,15 @@ export function deepMerge(
   return result
 }
 
-export function getSettings(): WriteMDSettings {
+export function getSettings(): WriteMdSettings {
   if (settingsCache) return settingsCache
-  let next: WriteMDSettings = structuredClone(DEFAULT_SETTINGS)
+  let next: WriteMdSettings = structuredClone(DEFAULT_SETTINGS)
   try {
     if (existsSync(SETTINGS_FILE)) {
       next = deepMerge(
         structuredClone(DEFAULT_SETTINGS) as unknown as Record<string, unknown>,
         JSON.parse(readFileSync(SETTINGS_FILE, 'utf-8'))
-      ) as unknown as WriteMDSettings
+      ) as unknown as WriteMdSettings
     }
   } catch (e) {
     // Corrupt config.json would otherwise silently wipe all settings on next
@@ -102,12 +102,12 @@ export function getSettings(): WriteMDSettings {
   return next
 }
 
-export async function setSettings(partial: WriteMDSettingsPatch): Promise<void> {
+export async function setSettings(partial: WriteMdSettingsPatch): Promise<void> {
   const current = getSettings()
   const merged = deepMerge(
     current as unknown as Record<string, unknown>,
     partial as unknown as Record<string, unknown>
-  ) as unknown as WriteMDSettings
+  ) as unknown as WriteMdSettings
   settingsCache = merged
   try {
     const dir = dirname(SETTINGS_FILE)

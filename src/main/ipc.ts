@@ -10,7 +10,7 @@ import {
   listMarkdownFiles,
   getVaultTree
 } from './vault'
-import { getSettings, setSettings, type WriteMDSettingsPatch } from './settings'
+import { getSettings, setSettings, type WriteMdSettingsPatch } from './settings'
 import { exportHtml, exportPdf } from './export'
 import { getAiProvider } from '../shared/ai-providers'
 import type { ChatMessage } from '../shared/electron-api'
@@ -222,7 +222,7 @@ export function setupIpc(getWindow: () => BrowserWindow | null): void {
   ipcMain.handle('vault:get-tree', () => getVaultTree())
 
   ipcMain.handle('settings:get', () => getSettings())
-  ipcMain.handle('settings:set', async (_, settings: WriteMDSettingsPatch) => {
+  ipcMain.handle('settings:set', async (_, settings: WriteMdSettingsPatch) => {
     await setSettings(settings)
   })
 

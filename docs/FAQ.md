@@ -1,7 +1,7 @@
 # Frequently Asked Questions
 
 ## Where are my files stored?
-WriteMd uses a hybrid vault model. By default, new files created in the app are saved to `~/Documents/WriteMD/` (or your configured vault path). However, you can open any markdown file anywhere on your computer, and it will be edited and saved in place. WriteMd never locks you into a proprietary format.
+WriteMd uses a hybrid vault model. By default, new files created in the app are saved to `~/Documents/WriteMd Vault/` (or your configured vault path). However, you can open any markdown file anywhere on your computer, and it will be edited and saved in place. WriteMd never locks you into a proprietary format.
 
 ## Does WriteMd require an internet connection?
 No! The core editor is 100% offline. WriteMd does not have accounts or telemetry. Network connections are only used if you configure an AI Assistant and select a cloud provider like OpenAI or Anthropic. 

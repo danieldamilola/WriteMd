@@ -5,7 +5,7 @@ export type ButtonVariant = 'default' | 'vault' | 'icon'
 export type ButtonWidth = 'auto' | '160' | '46' | 'full'
 
 @customElement('writemd-button')
-export class WriteMDButton extends LitElement {
+export class WriteMdButton extends LitElement {
   static styles = css`
     :host {
       display: inline-block;
@@ -100,6 +100,6 @@ export class WriteMDButton extends LitElement {
 
 declare global {
   interface HTMLElementTagNameMap {
-    'writemd-button': WriteMDButton
+    'writemd-button': WriteMdButton
   }
 }

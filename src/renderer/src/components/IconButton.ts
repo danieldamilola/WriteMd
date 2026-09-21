@@ -4,7 +4,7 @@ import { customElement, property } from 'lit/decorators.js'
 export type IconButtonSize = 'sm' | 'md' | 'caption'
 
 @customElement('writemd-icon-button')
-export class WriteMDIconButton extends LitElement {
+export class WriteMdIconButton extends LitElement {
   static styles = css`
     :host {
       display: inline-flex;
@@ -103,6 +103,6 @@ export class WriteMDIconButton extends LitElement {
 
 declare global {
   interface HTMLElementTagNameMap {
-    'writemd-icon-button': WriteMDIconButton
+    'writemd-icon-button': WriteMdIconButton
   }
 }

@@ -4,9 +4,9 @@ import { customElement, property } from 'lit/decorators.js'
 let confirmResolve: ((value: boolean) => void) | null = null
 
 export function showConfirm(message: string, title = 'Confirm'): Promise<boolean> {
-  let dialog = document.querySelector('writemd-confirm') as WriteMDConfirm
+  let dialog = document.querySelector('writemd-confirm') as WriteMdConfirm
   if (!dialog) {
-    dialog = document.createElement('writemd-confirm') as WriteMDConfirm
+    dialog = document.createElement('writemd-confirm') as WriteMdConfirm
     document.body.appendChild(dialog)
   }
   dialog.titleText = title
@@ -19,7 +19,7 @@ export function showConfirm(message: string, title = 'Confirm'): Promise<boolean
 }
 
 @customElement('writemd-confirm')
-export class WriteMDConfirm extends LitElement {
+export class WriteMdConfirm extends LitElement {
   static styles = css`
     .overlay {
       position: fixed;

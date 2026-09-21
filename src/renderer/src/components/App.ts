@@ -17,7 +17,7 @@ function api(): ElectronAPI | undefined {
 }
 
 @customElement('writemd-app')
-export class WriteMDApp extends LitElement {
+export class WriteMdApp extends LitElement {
   static styles = css`
     :host {
       display: flex;
@@ -408,6 +408,6 @@ export class WriteMDApp extends LitElement {
 
 declare global {
   interface HTMLElementTagNameMap {
-    'writemd-app': WriteMDApp
+    'writemd-app': WriteMdApp
   }
 }

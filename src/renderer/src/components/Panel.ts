@@ -3,7 +3,7 @@ import { customElement, property } from 'lit/decorators.js'
 import { scrollbarStyles } from './scrollbars'
 
 @customElement('writemd-panel')
-export class WriteMDPanel extends LitElement {
+export class WriteMdPanel extends LitElement {
   static styles = css`
     :host {
       display: flex;
@@ -74,6 +74,6 @@ export class WriteMDPanel extends LitElement {
 
 declare global {
   interface HTMLElementTagNameMap {
-    'writemd-panel': WriteMDPanel
+    'writemd-panel': WriteMdPanel
   }
 }

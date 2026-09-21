@@ -1,8 +1,8 @@
-# AGENTS.md — WriteMD Development Guide
+# AGENTS.md — WriteMd Development Guide
 
 ## Project Overview
 
-**WriteMD** — Frictionless Markdown Editor. Hybrid vault model: new files go to vault (`~/Documents/WriteMD/`), existing files open/edit/save in place. No accounts, no sync, no lock-in.
+**WriteMd** — Frictionless Markdown Editor. Hybrid vault model: new files go to vault (`~/Documents/WriteMd Vault/`), existing files open/edit/save in place. No accounts, no sync, no lock-in.
 
 **PRD:** `PRD.md` — single source of truth for scope, architecture, and decisions.
 
@@ -53,7 +53,7 @@ Some screens are not designed yet (menu bar, settings modal, welcome screen, exp
 - Styling: CSS custom properties only. Themes switch via `[data-theme="..."]`.
 - State: file state and settings are singletons with subscribe/notify. No duplicated sources of truth.
 - File writes: temp file + atomic rename. Never write directly over the original.
-- Vault path defaults to `~/Documents/WriteMD/`. External files always save back to their original location.
+- Vault path defaults to `~/Documents/WriteMd Vault/`. External files always save back to their original location.
 
 ---
 

@@ -1,5 +1,5 @@
 appId: com.writemd.editor
-productName: WriteMD
+productName: WriteMd
 fileAssociations:
   - ext: md
     name: Markdown File

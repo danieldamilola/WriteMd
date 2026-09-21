@@ -1,15 +1,33 @@
 import { app } from 'electron'
 import { join, extname } from 'path'
-import { existsSync, mkdirSync, readdirSync, type Dirent } from 'fs'
+import { existsSync, mkdirSync, readdirSync, renameSync, type Dirent } from 'fs'
 import { getSettings, setSettings } from './settings'
 
-const DEFAULT_VAULT_NAME = 'WriteMD'
+const DEFAULT_VAULT_NAME = 'WriteMd Vault'
+const LEGACY_VAULT_NAME = 'WriteMD'
 const MARKDOWN_EXTS = ['.md', '.markdown', '.mdown', '.mkd']
 
 let vaultPathCache: string | null = null
 
 export function getDefaultVaultPath(): string {
-  return join(app.getPath('documents'), DEFAULT_VAULT_NAME)
+  const fresh = join(app.getPath('documents'), DEFAULT_VAULT_NAME)
+  const legacy = join(app.getPath('documents'), LEGACY_VAULT_NAME)
+  try {
+    const settings = getSettings()
+    // Migrate users who never set a custom path: move their notes forward
+    // instead of stranding them in the old folder.
+    if (!settings.files?.vaultPath && !existsSync(fresh) && existsSync(legacy)) {
+      try {
+        renameSync(legacy, fresh)
+      } catch {
+        // Locked or busy: keep resolving the legacy folder below.
+      }
+    }
+  } catch {
+    // Settings unreadable: resolve whatever exists.
+  }
+  if (!existsSync(fresh) && existsSync(legacy)) return legacy
+  return fresh
 }
 
 export function getVaultPath(): string {

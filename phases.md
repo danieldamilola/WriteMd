@@ -1,4 +1,4 @@
-# WriteMD Implementation Roadmap
+# WriteMd Implementation Roadmap
 
 Tracker for what shipped in v1.0.0 and what lands in v1.1.0. Each v1.1.0 item carries acceptance criteria; nothing counts as done until `pnpm typecheck` + `pnpm test` pass.
 
@@ -19,7 +19,7 @@ Tracker for what shipped in v1.0.0 and what lands in v1.1.0. Each v1.1.0 item ca
 - [x] Right-click text menu (formatting, headings, inserts, internal/external link insertion)
 
 ### Files & links
-- [x] Hybrid vault (`~/Documents/WriteMD/`) + open-anywhere files saving back in place
+- [x] Hybrid vault (`~/Documents/WriteMd Vault/`) + open-anywhere files saving back in place
 - [x] Auto-save (debounced, atomic) + dirty tracking + external-change conflict dialog
 - [x] Image paste/drop → sibling `_assets/` folder
 - [x] Vault explorer, recent files, tabs with session restore

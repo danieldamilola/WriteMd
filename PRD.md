@@ -1,8 +1,8 @@
-# PRD: WriteMD — Frictionless Markdown Editor 
+# PRD: WriteMd — Frictionless Markdown Editor 
 
 ## 1. Product Vision By daniel and also 
 
-**WriteMD** is a local-first markdown editor that opens **any `.md` file directly** — no vault, no import, no copy-paste. Double-click a file, edit in a beautiful WYSIWYG interface, save. Done.
+**WriteMd** is a local-first markdown editor that opens **any `.md` file directly** — no vault, no import, no copy-paste. Double-click a file, edit in a beautiful WYSIWYG interface, save. Done.
 
 **Core philosophy:** "Open → Edit → Save". Zero friction. Zero setup.
 
@@ -28,7 +28,7 @@
 
 ### MVP (Must Have)
 
-- [x] **US-001** Double-click any `.md` file → opens in WriteMD immediately
+- [x] **US-001** Double-click any `.md` file → opens in WriteMd immediately
 - [x] **US-002** Drag-drop `.md` file onto app window → opens
 - [x] **US-003** WYSIWYG editing: bold, italic, headings, lists, quotes, code, links, images
 - [x] **US-004** Live Preview toggle (WYSIWYG ↔ Source) with `Ctrl+E`
@@ -209,7 +209,7 @@ The following functional capabilities are fully specified in the PRD logic and s
 
 | Scenario                                                   | Behavior                                                                                                |
 | ---------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
-| **New File** (`Ctrl+N`)                                    | Created in **default vault** (`~/Documents/WriteMD/` or user-chosen on first run). No "Save As" prompt. |
+| **New File** (`Ctrl+N`)                                    | Created in **default vault** (`~/Documents/WriteMd Vault/` or user-chosen on first run). No "Save As" prompt. |
 | **Open Existing File** (double-click, drag-drop, `Ctrl+O`) | Opens from **original location**. Saves back to **same location**.                                      |
 | **Save As**                                                | User chooses location (can be vault or anywhere).                                                       |
 | **Recent Files**                                           | Tracks both vault and external files.                                                                   |
@@ -218,7 +218,7 @@ The following functional capabilities are fully specified in the PRD logic and s
 
 ### 6.2 Vault Implementation
 
-- **Default:** `~/Documents/WriteMD/` (created on first launch)
+- **Default:** `~/Documents/WriteMd Vault/` (created on first launch)
 - **Changeable:** Settings → "Default Vault Location"
 - **Structure:** Flat or user-created folders (no enforced structure)
 - **No database/index** — just a filesystem folder. File Explorer sidebar shows vault contents.
@@ -521,7 +521,7 @@ writemd/
 - [ ] Basic layout (AppShell, Toolbar, StatusBar)
 - [ ] Theme system (CSS variables, 5 themes)
 - [ ] Settings persistence (IndexedDB)
-- [ ] Vault setup: default `~/Documents/WriteMD/`, picker UI, file watcher
+- [ ] Vault setup: default `~/Documents/WriteMd Vault/`, picker UI, file watcher
 - [ ] File associations (register .md on install)
 
 ### Phase 2: Editor Core (Week 3-5)
@@ -605,7 +605,7 @@ writemd/
 2. **Sync?** — Out of scope. Users can use Syncthing, iCloud, Dropbox on the vault folder.
 3. **Mobile?** — Capacitor wrapper later. Desktop first.
 4. **License?** — MIT or AGPL? Recommend MIT for adoption.
-5. **Name "WriteMD"** — Confirm trademark availability.
+5. **Name "WriteMd"** — Confirm trademark availability.
 
 ---
 

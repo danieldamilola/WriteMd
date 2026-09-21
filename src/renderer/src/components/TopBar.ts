@@ -8,7 +8,7 @@ function api(): ElectronAPI | undefined {
 }
 
 @customElement('writemd-top-bar')
-export class WriteMDTopBar extends LitElement {
+export class WriteMdTopBar extends LitElement {
   static styles = css`
     :host {
       display: flex;
@@ -228,6 +228,6 @@ export class WriteMDTopBar extends LitElement {
 
 declare global {
   interface HTMLElementTagNameMap {
-    'writemd-top-bar': WriteMDTopBar
+    'writemd-top-bar': WriteMdTopBar
   }
 }

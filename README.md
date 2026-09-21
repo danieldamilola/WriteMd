@@ -1,16 +1,16 @@
 <div align="center">
-  <img src="resources/icon.png" width="128" alt="WriteMD Logo">
-  <h1>WriteMD</h1>
+  <img src="resources/icon.png" width="128" alt="WriteMd Logo">
+  <h1>WriteMd</h1>
   <p><strong>Frictionless, keyboard-first Markdown editor. Open → Edit → Save.</strong></p>
 
   <p>
-    <a href="https://github.com/danieldamilola/WriteMd/releases/latest"><img src="https://img.shields.io/github/v/release/danieldamilola/WriteMd?style=flat-square" alt="Release"></a>
+    <a href="https://github.com/danieldamilola/WriteMd Vaultreleases/latest"><img src="https://img.shields.io/github/v/release/danieldamilola/WriteMd?style=flat-square" alt="Release"></a>
     <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg?style=flat-square" alt="License"></a>
-    <a href="https://github.com/danieldamilola/WriteMd/actions"><img src="https://img.shields.io/github/actions/workflow/status/danieldamilola/WriteMd/ci.yml?style=flat-square" alt="Build Status"></a>
+    <a href="https://github.com/danieldamilola/WriteMd Vaultactions"><img src="https://img.shields.io/github/actions/workflow/status/danieldamilola/WriteMd Vaultci.yml?style=flat-square" alt="Build Status"></a>
   </p>
 </div>
 
-WriteMD is a fast, private, local-first Markdown editor. Double-click any `.md` file and edit it where it lives — no vault to configure, no import step, no account. New notes land in your vault (`~/Documents/WriteMD/`); existing files always save back in place.
+WriteMd is a fast, private, local-first Markdown editor. Double-click any `.md` file and edit it where it lives — no vault to configure, no import step, no account. New notes land in your vault (`~/Documents/WriteMd Vault/`); existing files always save back in place.
 
 ## Highlights
 
@@ -24,15 +24,15 @@ WriteMD is a fast, private, local-first Markdown editor. Double-click any `.md` 
 
 ## Installation
 
-Download the installer from the [Releases page](https://github.com/danieldamilola/WriteMd/releases):
+Download the installer from the [Releases page](https://github.com/danieldamilola/WriteMd Vaultreleases):
 
 | Platform | File |
 | -------- | ---- |
-| Windows  | `WriteMD-<version>-setup.exe` |
-| macOS    | `WriteMD-<version>.dmg` (build from source for now) |
-| Linux    | `WriteMD-<version>.AppImage` (build from source for now) |
+| Windows  | `writemd-<version>-setup.exe` |
+| macOS    | `writemd-<version>.dmg` (build from source for now) |
+| Linux    | `writemd-<version>.AppImage` (build from source for now) |
 
-WriteMD registers itself for `.md`, `.markdown`, `.mdown`, and `.mkd` so files open in it on double-click.
+WriteMd registers itself for `.md`, `.markdown`, `.mdown`, and `.mkd` so files open in it on double-click.
 
 ## Usage
 

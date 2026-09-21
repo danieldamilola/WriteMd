@@ -4,7 +4,7 @@ import { customElement, property } from 'lit/decorators.js'
 export type ViewMode = 'wysiwyg' | 'source' | 'split'
 
 @customElement('writemd-mode-toggle')
-export class WriteMDModeToggle extends LitElement {
+export class WriteMdModeToggle extends LitElement {
   static styles = css`
     :host {
       display: inline-flex;
@@ -107,6 +107,6 @@ export class WriteMDModeToggle extends LitElement {
 
 declare global {
   interface HTMLElementTagNameMap {
-    'writemd-mode-toggle': WriteMDModeToggle
+    'writemd-mode-toggle': WriteMdModeToggle
   }
 }

@@ -247,7 +247,7 @@ export class WelcomeScreen extends LitElement {
 
     /* ───── Watermark + App Title (PNG) ─────
        Pre-rendered image pinned to the bottom of the split view.
-       Contains the "W" arches and "WriteMD" text. */
+       Contains the "W" arches and "WriteMd" text. */
     .watermark {
       position: absolute;
       bottom: 0;

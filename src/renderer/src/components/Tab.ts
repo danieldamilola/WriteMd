@@ -2,7 +2,7 @@ import { html, css, LitElement } from 'lit'
 import { customElement, property } from 'lit/decorators.js'
 
 @customElement('writemd-tab')
-export class WriteMDTab extends LitElement {
+export class WriteMdTab extends LitElement {
   static styles = css`
     :host {
       display: inline-flex;
@@ -154,6 +154,6 @@ export class WriteMDTab extends LitElement {
 
 declare global {
   interface HTMLElementTagNameMap {
-    'writemd-tab': WriteMDTab
+    'writemd-tab': WriteMdTab
   }
 }

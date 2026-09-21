@@ -1,5 +1,5 @@
 import type { ElectronAPI } from '../../../shared/electron-api'
-import { DEFAULT_SETTINGS, type WriteMDSettings } from '../../../shared/settings-schema'
+import { DEFAULT_SETTINGS, type WriteMdSettings } from '../../../shared/settings-schema'
 
 function api(): ElectronAPI | undefined {
   return typeof window !== 'undefined' ? window.electronAPI : undefined
@@ -40,7 +40,7 @@ export function applySettingsToDOM(store: SettingsStore): void {
 
 export class SettingsStore {
   private static instance: SettingsStore
-  private settings: WriteMDSettings = structuredClone(DEFAULT_SETTINGS)
+  private settings: WriteMdSettings = structuredClone(DEFAULT_SETTINGS)
   private listeners = new Map<string, Set<(value: unknown) => void>>()
   private initialized = false
 
@@ -54,7 +54,7 @@ export class SettingsStore {
   async init(): Promise<void> {
     if (this.initialized) return
     try {
-      const loaded = (await api()?.settings?.get?.()) as WriteMDSettings | undefined
+      const loaded = (await api()?.settings?.get?.()) as WriteMdSettings | undefined
       this.settings = { ...structuredClone(DEFAULT_SETTINGS), ...(loaded ?? {}) }
     } catch {
       this.settings = structuredClone(DEFAULT_SETTINGS)
