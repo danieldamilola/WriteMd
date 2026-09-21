@@ -2,7 +2,8 @@ import { app, shell, BrowserWindow } from 'electron'
 import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
-import { setupIpc } from './ipc'
+import { setupIpc, closeAllWatchers } from './ipc'
+import { registerExternalPath } from './path-guard'
 import { ensureVaultExists } from './vault'
 import { registerFileAssociations } from './file-associations'
 import { setupUpdater } from './updater'
@@ -82,12 +83,20 @@ app.on('window-all-closed', () => {
   }
 })
 
+app.on('will-quit', () => {
+  closeAllWatchers()
+})
+
 app.on('second-instance', (_event, argv) => {
   if (mainWindow) {
     if (mainWindow.isMinimized()) mainWindow.restore()
     mainWindow.focus()
-    const filePath = argv.find((arg) => arg.endsWith('.md') || arg.endsWith('.markdown'))
+    // Skip flags; match supported markdown extensions case-insensitively.
+    const filePath = argv.find(
+      (arg) => !arg.startsWith('-') && /\.(md|markdown|mdown|mkd)$/i.test(arg)
+    )
     if (filePath) {
+      registerExternalPath(filePath)
       mainWindow.webContents.send('file:open-external', filePath)
     }
   }

@@ -4,3 +4,7 @@ out
 .DS_Store
 .eslintcache
 *.log*
+test-output.txt
+test-results.txt
+test-results/
+temp-test-vault/

@@ -38,9 +38,9 @@
 - [ ] **US-008** Resize images inline (drag handles)
 - [x] **US-009** Tables: insert, add/remove rows/cols, align
 - [ ] **US-010** Fenced code blocks with language detection + syntax highlight
-- [ ] **US-011** Math: inline `$...$` and block `$$...$$` (KaTeX)
-- [ ] **US-012** Export to PDF (styled) and HTML
-- [ ] **US-013** Recent files list (persisted, 10 items)
+- [x] **US-011** Math: inline `$...$` and block `$$...$$` (KaTeX)
+- [x] **US-012** Export to PDF (styled) and HTML
+- [x] **US-013** Recent files list (persisted, 10 items)
 - [ ] **US-014** Keyboard shortcuts for all formatting (Markdown standard)
 
 ### Post-MVP (Nice to Have)
@@ -54,10 +54,10 @@
 - [ ] **US-026** Find/Replace in file (`Ctrl+F` / `Ctrl+H`)
 - [ ] **US-027** Word count / reading time in status bar
 - [ ] **US-028** Frontmatter editor (YAML)
-- [ ] **US-029** Mermaid diagram rendering
+- [x] **US-029** Mermaid diagram rendering
 - [ ] **US-030** Wiki-links `[[...]]` autocomplete (sibling files)
 - [ ] **US-031** Portable mode (config in app folder)
-- [ ] **US-032** File association handler (set as default `.md` opener)
+- [x] **US-032** File association handler (set as default `.md` opener)
 
 ---
 
@@ -83,7 +83,7 @@
 | **Language**         | TypeScript 5+ (strict mode)                        | Type safety, Obsidian-compatible plugin types  |
 | **Editor**           | CodeMirror 6 + @codemirror/lang-markdown           | Live Preview, decorations, incremental parsing |
 | **Markdown Parse**   | markdown-it (preview) + Lezer (editor)             | Proven, extensible, spec-compliant             |
-| **Syntax Highlight** | Prism.js (preview) + @codemirror/language (editor) | Consistent highlighting both modes             |
+| **Syntax Highlight** | @codemirror/language (Lezer, editor) + custom highlighter (preview) | One highlight pipeline per surface           |
 | **Math**             | KaTeX (fast, no MathJax bloat)                     | Client-side rendering                          |
 | **Diagrams**         | Mermaid.js (lazy-loaded)                           | Optional, on-demand                            |
 | **Styling**          | CSS Custom Properties + PostCSS                    | Themeable, no runtime CSS-in-JS                |

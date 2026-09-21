@@ -1,5 +1,5 @@
 import { ipcMain, dialog, shell, net, app, type BrowserWindow } from 'electron'
-import { readFile, writeFile, stat, rename } from 'fs/promises'
+import { readFile, writeFile, stat, rename, unlink } from 'fs/promises'
 import { watch, existsSync, mkdirSync, type FSWatcher } from 'fs'
 import { dirname, join, resolve } from 'path'
 import { randomUUID } from 'crypto'
@@ -10,12 +10,50 @@ import {
   listMarkdownFiles,
   getVaultTree
 } from './vault'
-import { getSettings, setSettings, type WriteMDSettings } from './settings'
+import { getSettings, setSettings, type WriteMDSettingsPatch } from './settings'
 import { exportHtml, exportPdf } from './export'
+import { getAiProvider } from '../shared/ai-providers'
+import type { ChatMessage } from '../shared/electron-api'
+import {
+  setVaultRootProvider,
+  registerExternalPath,
+  registerExternalPaths,
+  canAccessPath,
+  canProbePath,
+  canRenamePath,
+  canOpenWithShell,
+  assertCanAccess,
+  isSubpath
+} from './path-guard'
 
 const watchedPaths = new Map<string, FSWatcher>()
 
+/** Restore access to documents referenced by our own persisted config. */
+export function registerPersistedPaths(): void {
+  const settings = getSettings()
+  registerExternalPaths([
+    ...settings.files.openTabs,
+    settings.files.activeTabPath,
+    ...settings.files.recentFiles
+  ])
+}
+
+/** Close all fs watchers; called on app quit so nothing leaks. */
+export function closeAllWatchers(): void {
+  for (const watcher of watchedPaths.values()) {
+    try {
+      watcher.close()
+    } catch {
+      // already closed
+    }
+  }
+  watchedPaths.clear()
+}
+
 export function setupIpc(getWindow: () => BrowserWindow | null): void {
+  setVaultRootProvider(getVaultPath)
+  registerPersistedPaths()
+
   ipcMain.handle('app:get-version', () => app.getVersion())
   ipcMain.handle('app:get-path', (_, name: 'home' | 'documents' | 'downloads' | 'temp') =>
     app.getPath(name)
@@ -47,16 +85,25 @@ export function setupIpc(getWindow: () => BrowserWindow | null): void {
   })
 
   ipcMain.handle('file:read', async (_, filePath: string) => {
+    assertCanAccess(filePath)
     const content = await readFile(filePath, 'utf-8')
     const stats = await stat(filePath)
     return { content, mtime: stats.mtimeMs }
   })
 
   ipcMain.handle('file:write', async (_, filePath: string, content: string) => {
+    assertCanAccess(filePath)
     mkdirSync(dirname(filePath), { recursive: true })
-    const tempPath = `${filePath}.tmp`
-    await writeFile(tempPath, content, 'utf-8')
-    await rename(tempPath, filePath)
+    // Unique temp name: concurrent writes to the same file must not clobber
+    // each other's temp file (and stale temps are cleaned up on failure).
+    const tempPath = `${filePath}.${randomUUID()}.tmp`
+    try {
+      await writeFile(tempPath, content, 'utf-8')
+      await rename(tempPath, filePath)
+    } catch (e) {
+      await unlink(tempPath).catch(() => {})
+      throw e
+    }
     const stats = await stat(filePath)
     return { mtime: stats.mtimeMs }
   })
@@ -64,30 +111,48 @@ export function setupIpc(getWindow: () => BrowserWindow | null): void {
   ipcMain.handle('file:open-dialog', async (_, options: Electron.OpenDialogOptions) => {
     const w = getWindow()
     if (!w) return { canceled: true, filePaths: [] }
-    return dialog.showOpenDialog(w, options)
+    const result = await dialog.showOpenDialog(w, options)
+    registerExternalPaths(result.filePaths)
+    return result
   })
 
   ipcMain.handle('file:save-dialog', async (_, options: Electron.SaveDialogOptions) => {
     const w = getWindow()
     if (!w) return { canceled: true, filePath: '' }
-    return dialog.showSaveDialog(w, options)
+    const result = await dialog.showSaveDialog(w, options)
+    registerExternalPath(result.filePath)
+    return result
   })
 
-  ipcMain.handle('file:exists', async (_, filePath: string) => existsSync(filePath))
+  ipcMain.handle('file:exists', async (_, filePath: string) => {
+    if (!canProbePath(filePath)) return false
+    return existsSync(filePath)
+  })
 
   ipcMain.handle('file:rename', async (_, oldPath: string, newPath: string) => {
+    if (!canRenamePath(oldPath, newPath)) {
+      console.error(`file:rename denied: ${oldPath} -> ${newPath}`)
+      return false
+    }
     try {
       await rename(oldPath, newPath)
+      registerExternalPath(newPath)
       return true
-    } catch {
+    } catch (e) {
+      // Surface the real reason in the main log instead of swallowing it.
+      console.error(`file:rename failed (${oldPath} -> ${newPath}):`, e)
       return false
     }
   })
 
-  ipcMain.handle('file:list-dir', async (_, dirPath: string) => listMarkdownFiles(dirPath))
+  ipcMain.handle('file:list-dir', async (_, dirPath: string) => {
+    if (!canAccessPath(dirPath)) return []
+    return listMarkdownFiles(dirPath)
+  })
 
   ipcMain.handle('file:watch', (_, filePath: string) => {
     if (watchedPaths.has(filePath)) return
+    if (!canAccessPath(filePath)) return
     try {
       const watcher = watch(filePath, { persistent: false })
       watcher.on('change', () => getWindow()?.webContents.send('file:changed', filePath))
@@ -107,6 +172,7 @@ export function setupIpc(getWindow: () => BrowserWindow | null): void {
   })
 
   ipcMain.handle('file:save-image', async (_, docPath: string, base64Data: string, ext: string) => {
+    assertCanAccess(docPath)
     const docDir = dirname(docPath)
     const assetsDir = join(docDir, '_assets')
     mkdirSync(assetsDir, { recursive: true })
@@ -122,8 +188,11 @@ export function setupIpc(getWindow: () => BrowserWindow | null): void {
 
   ipcMain.handle('file:resolve-asset', async (_, docPath: string, relativePath: string) => {
     try {
+      assertCanAccess(docPath)
       const docDir = dirname(docPath)
       const fullPath = resolve(docDir, relativePath)
+      // The resolved asset must stay inside the document's directory tree.
+      if (!isSubpath(fullPath, docDir)) return null
       if (!existsSync(fullPath)) return null
       const buffer = await readFile(fullPath)
       const ext = fullPath.split('.').pop()?.toLowerCase() || 'png'
@@ -153,29 +222,51 @@ export function setupIpc(getWindow: () => BrowserWindow | null): void {
   ipcMain.handle('vault:get-tree', () => getVaultTree())
 
   ipcMain.handle('settings:get', () => getSettings())
-  ipcMain.handle('settings:set', async (_, settings: Partial<WriteMDSettings>) => {
+  ipcMain.handle('settings:set', async (_, settings: WriteMDSettingsPatch) => {
     await setSettings(settings)
   })
 
   ipcMain.handle('dialog:show-open-dialog', async (_, options: Electron.OpenDialogOptions) => {
     const w = getWindow()
     if (!w) return { canceled: true, filePaths: [] }
-    return dialog.showOpenDialog(w, options)
+    const result = await dialog.showOpenDialog(w, options)
+    registerExternalPaths(result.filePaths)
+    return result
   })
 
   ipcMain.handle('shell:open-path', async (_, targetPath: string) => {
+    assertCanAccess(targetPath)
+    if (!canOpenWithShell(targetPath)) {
+      throw new Error(`shell:open-path denied for file type: ${targetPath}`)
+    }
     await shell.openPath(targetPath)
   })
 
   ipcMain.handle('shell:open-external', async (_, url: string) => {
+    let parsed: URL
+    try {
+      parsed = new URL(url)
+    } catch {
+      throw new Error(`Invalid URL: ${url}`)
+    }
+    // Only well-known safe schemes may leave the app; file:/// or custom
+    // protocol handlers would let a crafted link launch arbitrary content.
+    if (!['http:', 'https:', 'mailto:'].includes(parsed.protocol)) {
+      throw new Error(`Protocol not allowed: ${parsed.protocol}`)
+    }
     await shell.openExternal(url)
   })
 
   ipcMain.handle('shell:show-in-folder', (_, filePath: string) => {
+    if (!canProbePath(filePath)) return
     shell.showItemInFolder(filePath)
   })
 
   ipcMain.handle('file:delete', async (_, filePath: string) => {
+    if (!canAccessPath(filePath)) {
+      console.error(`file:delete denied: ${filePath}`)
+      return false
+    }
     try {
       await shell.trashItem(filePath)
       return true
@@ -192,131 +283,53 @@ export function setupIpc(getWindow: () => BrowserWindow | null): void {
     exportHtml(getWindow, markdown, docPath)
   )
 
+  async function assertOk(res: Response): Promise<void> {
+    if (res.ok) return
+    if (res.status === 429) throw new Error('rate limit hit')
+    throw new Error(`HTTP ${res.status}: ${await res.text()}`)
+  }
+
   ipcMain.handle('net:fetch-models', async (_, provider: string, apiKey: string) => {
+    const adapter = getAiProvider(provider)
+    if (!adapter) throw new Error(`Unknown AI provider: ${provider}`)
+    if (adapter.staticModels) return [...adapter.staticModels]
+    const req = adapter.buildModelsRequest(apiKey)
+    if (!req) return []
     try {
-      if (provider === 'OpenAI' || provider === 'Groq' || provider === 'Mistral' || provider === 'DeepSeek' || provider === 'xAI' || provider === 'OpenRouter') {
-        const urls: Record<string, string> = {
-          'OpenAI': 'https://api.openai.com/v1/models',
-          'Groq': 'https://api.groq.com/openai/v1/models',
-          'Mistral': 'https://api.mistral.ai/v1/models',
-          'DeepSeek': 'https://api.deepseek.com/models',
-          'xAI': 'https://api.x.ai/v1/models',
-          'OpenRouter': 'https://openrouter.ai/api/v1/models'
-        }
-        // Use Electron's net.fetch
-        const res = await net.fetch(urls[provider], {
-          headers: { 'Authorization': `Bearer ${apiKey}` }
-        })
-        if (!res.ok) throw new Error(`HTTP ${res.status}`)
-        const data = await res.json()
-        if (data.data) {
-          return data.data.map((m: any) => m.id).sort()
-        }
-      } else if (provider === 'GoogleGemini') {
-        const res = await net.fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`)
-        if (!res.ok) throw new Error(`HTTP ${res.status}`)
-        const data = await res.json()
-        if (data.models) {
-          return data.models.map((m: any) => m.name.replace('models/', '')).sort()
-        }
-      } else if (provider === 'Ollama') {
-        const res = await net.fetch('http://localhost:11434/api/tags')
-        if (!res.ok) throw new Error(`HTTP ${res.status}`)
-        const data = await res.json()
-        if (data.models) {
-          return data.models.map((m: any) => m.name).sort()
-        }
-      } else if (provider === 'Anthropic') {
-        return ['claude-3-5-sonnet-20240620', 'claude-3-opus-20240229', 'claude-3-haiku-20240307']
-      }
+      const res = await net.fetch(req.url, { headers: req.headers })
+      await assertOk(res)
+      return adapter.extractModelIds(await res.json())
     } catch (e) {
       console.error('Failed to fetch models in main process:', e)
       throw e
     }
-    return []
   })
 
-  ipcMain.handle('net:chat', async (_, provider: string, model: string, apiKey: string, messages: any[], systemPrompt?: string) => {
-    try {
-      if (provider === 'OpenAI' || provider === 'Groq' || provider === 'Mistral' || provider === 'DeepSeek' || provider === 'xAI' || provider === 'OpenRouter' || provider === 'Ollama') {
-        const urls: Record<string, string> = {
-          'OpenAI': 'https://api.openai.com/v1/chat/completions',
-          'Groq': 'https://api.groq.com/openai/v1/chat/completions',
-          'Mistral': 'https://api.mistral.ai/v1/chat/completions',
-          'DeepSeek': 'https://api.deepseek.com/chat/completions',
-          'xAI': 'https://api.x.ai/v1/chat/completions',
-          'OpenRouter': 'https://openrouter.ai/api/v1/chat/completions',
-          'Ollama': 'http://localhost:11434/v1/chat/completions'
-        }
-        
-        const finalMessages = systemPrompt 
-          ? [{ role: 'system', content: systemPrompt }, ...messages] 
-          : messages;
-
-        const res = await net.fetch(urls[provider], {
+  ipcMain.handle(
+    'net:chat',
+    async (
+      _,
+      provider: string,
+      model: string,
+      apiKey: string,
+      messages: ChatMessage[],
+      systemPrompt?: string
+    ) => {
+      const adapter = getAiProvider(provider)
+      if (!adapter) throw new Error(`Unknown AI provider: ${provider}`)
+      try {
+        const req = adapter.buildChatRequest({ model, apiKey, messages, systemPrompt })
+        const res = await net.fetch(req.url, {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            ...(provider !== 'Ollama' && { 'Authorization': `Bearer ${apiKey}` })
-          },
-          body: JSON.stringify({ model, messages: finalMessages })
+          headers: { 'Content-Type': 'application/json', ...req.headers },
+          body: JSON.stringify(req.body)
         })
-        if (!res.ok) {
-          if (res.status === 429) throw new Error('rate limit hit')
-          throw new Error(`HTTP ${res.status}: ${await res.text()}`)
-        }
-        const data = await res.json()
-        return data.choices[0].message.content
-      } else if (provider === 'GoogleGemini') {
-        // Map messages to Gemini format
-        const contents = messages.map(m => ({
-          role: m.role === 'assistant' ? 'model' : 'user',
-          parts: [{ text: m.content }]
-        }))
-        
-        // Gemini API can be finicky with systemInstruction, so let's guarantee it 
-        // by prepending it to the first user message's text if it exists.
-        if (systemPrompt && contents.length > 0) {
-          contents[0].parts[0].text = `[SYSTEM INSTRUCTION]\n${systemPrompt}\n\n[USER MESSAGE]\n${contents[0].parts[0].text}`;
-        }
-        
-        const res = await net.fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ contents })
-        })
-        if (!res.ok) {
-          if (res.status === 429) throw new Error('rate limit hit')
-          throw new Error(`HTTP ${res.status}: ${await res.text()}`)
-        }
-        const data = await res.json()
-        return data.candidates[0].content.parts[0].text
-      } else if (provider === 'Anthropic') {
-        const res = await net.fetch('https://api.anthropic.com/v1/messages', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'x-api-key': apiKey,
-            'anthropic-version': '2023-06-01'
-          },
-          body: JSON.stringify({
-            model,
-            max_tokens: 1024,
-            ...(systemPrompt && { system: systemPrompt }),
-            messages
-          })
-        })
-        if (!res.ok) {
-          if (res.status === 429) throw new Error('rate limit hit')
-          throw new Error(`HTTP ${res.status}: ${await res.text()}`)
-        }
-        const data = await res.json()
-        return data.content[0].text
+        await assertOk(res)
+        return adapter.extractChatText(await res.json())
+      } catch (e) {
+        console.error('Chat error:', e)
+        throw new Error(e instanceof Error ? e.message : 'Chat failed')
       }
-    } catch (e: any) {
-      console.error('Chat error:', e)
-      throw new Error(e.message || 'Chat failed')
     }
-  })
+  )
 }
-

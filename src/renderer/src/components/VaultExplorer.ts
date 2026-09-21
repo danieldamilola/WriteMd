@@ -41,7 +41,9 @@ export class VaultExplorer extends LitElement {
       gap: 6px;
       font-size: 13px;
       line-height: 28px;
-      transition: background 100ms ease, color 100ms ease;
+      transition:
+        background 100ms ease,
+        color 100ms ease;
     }
 
     .node-row:hover {
@@ -151,40 +153,46 @@ export class VaultExplorer extends LitElement {
       // Root level doesn't need indentation
       return html`
         <div class="dir-group">
-          ${depth > 0
-            ? html`
-                <div class="node-row" @click=${(e: MouseEvent) => this.toggleDir(node.path, e)}>
-                  <span class="icon">
-                    <svg
-                      class="chevron ${isExpanded ? 'expanded' : ''}"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      stroke-width="2"
-                    >
-                      <polyline points="9 18 15 12 9 6" />
-                    </svg>
-                  </span>
-                  <span class="icon">
-                    <svg viewBox="0 0 24 24" fill="currentColor">
-                      <path
-                        d="M10 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"
-                      />
-                    </svg>
-                  </span>
-                  <span class="node-name">${node.name}</span>
-                </div>
-              `
-            : ''}
-          ${isExpanded || depth === 0
-            ? html`
-                <div class="${depth > 0 ? 'children' : 'tree-root'}">
-                  ${node.children && node.children.length > 0
-                    ? node.children.map((child) => this.renderNode(child, depth + 1))
-                    : html`<div class="empty-msg">No markdown notes</div>`}
-                </div>
-              `
-            : ''}
+          ${
+            depth > 0
+              ? html`
+                  <div class="node-row" @click=${(e: MouseEvent) => this.toggleDir(node.path, e)}>
+                    <span class="icon">
+                      <svg
+                        class="chevron ${isExpanded ? 'expanded' : ''}"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="2"
+                      >
+                        <polyline points="9 18 15 12 9 6" />
+                      </svg>
+                    </span>
+                    <span class="icon">
+                      <svg viewBox="0 0 24 24" fill="currentColor">
+                        <path
+                          d="M10 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"
+                        />
+                      </svg>
+                    </span>
+                    <span class="node-name">${node.name}</span>
+                  </div>
+                `
+              : ''
+          }
+          ${
+            isExpanded || depth === 0
+              ? html`
+                  <div class="${depth > 0 ? 'children' : 'tree-root'}">
+                    ${
+                      node.children && node.children.length > 0
+                        ? node.children.map((child) => this.renderNode(child, depth + 1))
+                        : html`<div class="empty-msg">No markdown notes</div>`
+                    }
+                  </div>
+                `
+              : ''
+          }
         </div>
       `
     }

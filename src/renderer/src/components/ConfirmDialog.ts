@@ -24,7 +24,7 @@ export class WriteMDConfirm extends LitElement {
     .overlay {
       position: fixed;
       inset: 0;
-      background: rgba(0,0,0,0.5);
+      background: rgba(0, 0, 0, 0.5);
       display: flex;
       align-items: center;
       justify-content: center;
@@ -43,7 +43,7 @@ export class WriteMDConfirm extends LitElement {
       border-radius: var(--radius-lg, 12px);
       padding: 24px;
       width: 320px;
-      box-shadow: var(--shadow-3, 0 8px 24px rgba(0,0,0,0.4));
+      box-shadow: var(--shadow-3, 0 8px 24px rgba(0, 0, 0, 0.4));
       transform: translateY(10px);
       transition: transform 0.15s ease;
     }

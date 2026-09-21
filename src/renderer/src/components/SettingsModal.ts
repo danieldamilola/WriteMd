@@ -45,7 +45,7 @@ const ACCENT_COLORS = [
   '#00b87c', // Green
   '#f2994a', // Orange/Yellow
   '#f26419', // Orange
-  '#00c4cc'  // Cyan
+  '#00c4cc' // Cyan
 ]
 
 const FONT_FAMILIES = [
@@ -74,8 +74,12 @@ export class SettingsModal extends LitElement {
     }
 
     @keyframes fadeIn {
-      from { opacity: 0; }
-      to { opacity: 1; }
+      from {
+        opacity: 0;
+      }
+      to {
+        opacity: 1;
+      }
     }
 
     .modal-dialog {
@@ -257,7 +261,7 @@ export class SettingsModal extends LitElement {
       gap: 12px;
       cursor: pointer;
     }
-    
+
     .theme-box-wrapper {
       padding: 4px;
       border-radius: 10px;
@@ -268,7 +272,7 @@ export class SettingsModal extends LitElement {
     .theme-card.active .theme-box-wrapper {
       border-color: var(--border-focus);
     }
-    
+
     .theme-box {
       width: 72px;
       height: 64px;
@@ -277,9 +281,13 @@ export class SettingsModal extends LitElement {
       display: flex;
       overflow: hidden;
     }
-    
-    .theme-box-left { flex: 1; }
-    .theme-box-right { flex: 1; }
+
+    .theme-box-left {
+      flex: 1;
+    }
+    .theme-box-right {
+      flex: 1;
+    }
 
     .theme-name {
       font-size: 13px;
@@ -310,7 +318,7 @@ export class SettingsModal extends LitElement {
     .color-circle-wrapper.active {
       border-color: var(--border-focus);
     }
-    
+
     .color-circle {
       width: 24px;
       height: 24px;
@@ -344,7 +352,7 @@ export class SettingsModal extends LitElement {
       justify-content: space-between;
       transition: all 0.2s ease;
     }
-    
+
     .font-card:hover {
       border-color: var(--text-muted);
     }
@@ -364,7 +372,9 @@ export class SettingsModal extends LitElement {
       font-weight: 600;
       color: var(--text-secondary);
     }
-    .font-card.active .font-name { color: var(--text); }
+    .font-card.active .font-name {
+      color: var(--text);
+    }
 
     .font-type {
       font-size: 12px;
@@ -376,7 +386,7 @@ export class SettingsModal extends LitElement {
       width: 20px;
       height: 20px;
     }
-    
+
     /* Card rows */
     .setting-row {
       display: flex;
@@ -389,9 +399,18 @@ export class SettingsModal extends LitElement {
     .setting-row:last-child {
       border-bottom: none;
     }
-    .setting-label { font-size: 14px; font-weight: 500; color: var(--text); }
-    .setting-desc { font-size: 13px; color: var(--text-secondary); margin-top: 4px; line-height: 1.5; }
-    
+    .setting-label {
+      font-size: 14px;
+      font-weight: 500;
+      color: var(--text);
+    }
+    .setting-desc {
+      font-size: 13px;
+      color: var(--text-secondary);
+      margin-top: 4px;
+      line-height: 1.5;
+    }
+
     .control-btn {
       padding: 6px 12px;
       background: var(--bg-hover);
@@ -402,7 +421,9 @@ export class SettingsModal extends LitElement {
       font-size: 13px;
       flex-shrink: 0;
     }
-    .control-btn:hover { background: var(--bg-active); }
+    .control-btn:hover {
+      background: var(--bg-active);
+    }
 
     .select-input {
       background: transparent;
@@ -434,14 +455,16 @@ export class SettingsModal extends LitElement {
     .text-input:focus {
       border-color: var(--border-focus);
     }
-    
+
     .danger-btn {
       background: transparent;
       border: 1px solid var(--danger);
       color: var(--danger);
     }
-    .danger-btn:hover { background: var(--danger-bg); }
-    
+    .danger-btn:hover {
+      background: var(--danger-bg);
+    }
+
     /* Toggle Switch */
     .toggle-switch {
       position: relative;
@@ -453,7 +476,9 @@ export class SettingsModal extends LitElement {
       border: 1px solid var(--border);
       padding: 0;
       outline: none;
-      transition: background 0.2s, border-color 0.2s;
+      transition:
+        background 0.2s,
+        border-color 0.2s;
     }
     .toggle-switch[aria-checked='true'] {
       background: var(--accent);
@@ -468,7 +493,9 @@ export class SettingsModal extends LitElement {
       height: 16px;
       border-radius: 50%;
       background: var(--text-muted);
-      transition: transform 0.2s, background 0.2s;
+      transition:
+        transform 0.2s,
+        background 0.2s;
     }
     .toggle-switch[aria-checked='true']::after {
       transform: translateX(16px);
@@ -546,19 +573,23 @@ export class SettingsModal extends LitElement {
     this.aiProvider = s.get('ai.provider', 'OpenAI')
     this.aiModel = s.get('ai.model', 'gpt-4o')
     this.aiApiKey = s.get('ai.apiKey', '')
-    
+
     const defaults: Record<string, string[]> = {
-      'OpenAI': ['gpt-4o', 'gpt-4-turbo', 'gpt-3.5-turbo'],
-      'Anthropic': ['claude-3-5-sonnet-20240620', 'claude-3-opus-20240229', 'claude-3-haiku-20240307'],
-      'GoogleGemini': ['gemini-1.5-pro', 'gemini-1.5-flash'],
-      'Mistral': ['mistral-large-latest', 'open-mixtral-8x22b'],
-      'Groq': ['llama3-70b-8192', 'llama3-8b-8192', 'mixtral-8x7b-32768'],
-      'DeepSeek': ['deepseek-chat', 'deepseek-coder'],
-      'xAI': ['grok-2', 'grok-2-mini'],
-      'OpenRouter': ['openai/gpt-4o', 'anthropic/claude-3.5-sonnet', 'google/gemini-1.5-pro'],
-      'Ollama': ['llama3', 'mistral', 'phi3']
+      OpenAI: ['gpt-4o', 'gpt-4-turbo', 'gpt-3.5-turbo'],
+      Anthropic: [
+        'claude-3-5-sonnet-20240620',
+        'claude-3-opus-20240229',
+        'claude-3-haiku-20240307'
+      ],
+      GoogleGemini: ['gemini-1.5-pro', 'gemini-1.5-flash'],
+      Mistral: ['mistral-large-latest', 'open-mixtral-8x22b'],
+      Groq: ['llama3-70b-8192', 'llama3-8b-8192', 'mixtral-8x7b-32768'],
+      DeepSeek: ['deepseek-chat', 'deepseek-coder'],
+      xAI: ['grok-2', 'grok-2-mini'],
+      OpenRouter: ['openai/gpt-4o', 'anthropic/claude-3.5-sonnet', 'google/gemini-1.5-pro'],
+      Ollama: ['llama3', 'mistral', 'phi3']
     }
-    
+
     if (this.availableModels.length === 0) {
       this.availableModels = defaults[this.aiProvider] || []
       if (this.aiModel && !this.availableModels.includes(this.aiModel)) {
@@ -567,7 +598,7 @@ export class SettingsModal extends LitElement {
     }
   }
 
-  private updateSetting(key: string, value: any): void {
+  private updateSetting(key: string, value: unknown): void {
     this.settingsStore.set(key, value)
     this.loadCurrentSettings()
   }
@@ -636,7 +667,7 @@ export class SettingsModal extends LitElement {
     this.dispatchEvent(new CustomEvent('close', { bubbles: true, composed: true }))
   }
 
-  private async handleVaultSelect() {
+  private async handleVaultSelect(): Promise<void> {
     const electron = api()
     if (!electron) return
     const result = await electron.dialog?.showOpenDialog?.({
@@ -648,7 +679,7 @@ export class SettingsModal extends LitElement {
     }
   }
 
-  private async handleReset() {
+  private async handleReset(): Promise<void> {
     const confirmed = await showConfirm(
       'Are you sure you want to reset all settings to default?',
       'Reset Settings'
@@ -659,7 +690,7 @@ export class SettingsModal extends LitElement {
     }
   }
 
-  private async fetchModels() {
+  private async fetchModels(): Promise<void> {
     this.fetchError = ''
     if (!this.aiApiKey && this.aiProvider !== 'Ollama') {
       this.fetchError = 'API Key required'
@@ -670,7 +701,7 @@ export class SettingsModal extends LitElement {
     try {
       const electron = api()
       if (!electron) throw new Error('No electron API')
-      
+
       const models = await electron.net.fetchModels(this.aiProvider, this.aiApiKey)
       if (models && models.length > 0) {
         this.availableModels = models
@@ -681,41 +712,49 @@ export class SettingsModal extends LitElement {
       } else {
         throw new Error('No models returned')
       }
-    } catch (e: any) {
+    } catch (e) {
       console.error('Failed to fetch models', e)
-      this.fetchError = e.message || 'Failed to fetch'
+      this.fetchError = e instanceof Error ? e.message : 'Failed to fetch'
     } finally {
       this.isFetchingModels = false
     }
   }
 
-  private handleProviderChange(e: Event) {
+  private handleProviderChange(e: Event): void {
     const provider = (e.target as HTMLSelectElement).value
     this.updateSetting('ai.provider', provider)
-    
+
     // Set some sensible defaults before fetching
     const defaults: Record<string, string[]> = {
-      'OpenAI': ['gpt-4o', 'gpt-4-turbo', 'gpt-3.5-turbo'],
-      'Anthropic': ['claude-3-5-sonnet-20240620', 'claude-3-opus-20240229', 'claude-3-haiku-20240307'],
-      'GoogleGemini': ['gemini-1.5-pro', 'gemini-1.5-flash'],
-      'Mistral': ['mistral-large-latest', 'open-mixtral-8x22b'],
-      'Groq': ['llama3-70b-8192', 'llama3-8b-8192', 'mixtral-8x7b-32768'],
-      'DeepSeek': ['deepseek-chat', 'deepseek-coder'],
-      'xAI': ['grok-2', 'grok-2-mini'],
-      'OpenRouter': ['openai/gpt-4o', 'anthropic/claude-3.5-sonnet', 'google/gemini-1.5-pro'],
-      'Ollama': ['llama3', 'mistral', 'phi3']
+      OpenAI: ['gpt-4o', 'gpt-4-turbo', 'gpt-3.5-turbo'],
+      Anthropic: [
+        'claude-3-5-sonnet-20240620',
+        'claude-3-opus-20240229',
+        'claude-3-haiku-20240307'
+      ],
+      GoogleGemini: ['gemini-1.5-pro', 'gemini-1.5-flash'],
+      Mistral: ['mistral-large-latest', 'open-mixtral-8x22b'],
+      Groq: ['llama3-70b-8192', 'llama3-8b-8192', 'mixtral-8x7b-32768'],
+      DeepSeek: ['deepseek-chat', 'deepseek-coder'],
+      xAI: ['grok-2', 'grok-2-mini'],
+      OpenRouter: ['openai/gpt-4o', 'anthropic/claude-3.5-sonnet', 'google/gemini-1.5-pro'],
+      Ollama: ['llama3', 'mistral', 'phi3']
     }
-    
+
     this.availableModels = defaults[provider] || []
     if (this.availableModels.length > 0) {
       this.updateSetting('ai.model', this.availableModels[0])
     }
   }
 
-  render() {
+  render(): unknown {
     return html`
-      <div class="modal-dialog" role="dialog" aria-modal="true" @click=${(e: MouseEvent) => e.stopPropagation()}>
-        
+      <div
+        class="modal-dialog"
+        role="dialog"
+        aria-modal="true"
+        @click=${(e: MouseEvent) => e.stopPropagation()}
+      >
         <!-- Sidebar Navigation -->
         <div class="sidebar">
           <div class="sidebar-search">
@@ -723,21 +762,30 @@ export class SettingsModal extends LitElement {
           </div>
           <div class="sidebar-nav">
             <div class="nav-group">Workspace</div>
-            <button class="nav-btn ${this.tab === 'general' ? 'active' : ''}" @click=${() => (this.tab = 'general')}>
+            <button
+              class="nav-btn ${this.tab === 'general' ? 'active' : ''}"
+              @click=${() => (this.tab = 'general')}
+            >
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <circle cx="12" cy="12" r="3" />
                 <path d="M12 2v3M12 19v3M2 12h3M19 12h3" />
               </svg>
               General
             </button>
-            <button class="nav-btn ${this.tab === 'editor' ? 'active' : ''}" @click=${() => (this.tab = 'editor')}>
+            <button
+              class="nav-btn ${this.tab === 'editor' ? 'active' : ''}"
+              @click=${() => (this.tab = 'editor')}
+            >
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <path d="M12 20h9" />
                 <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" />
               </svg>
               Editor
             </button>
-            <button class="nav-btn ${this.tab === 'files' ? 'active' : ''}" @click=${() => (this.tab = 'files')}>
+            <button
+              class="nav-btn ${this.tab === 'files' ? 'active' : ''}"
+              @click=${() => (this.tab = 'files')}
+            >
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
                 <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
@@ -745,7 +793,10 @@ export class SettingsModal extends LitElement {
               Files & Vault
             </button>
             <div class="nav-group">Application</div>
-            <button class="nav-btn ${this.tab === 'appearance' ? 'active' : ''}" @click=${() => (this.tab = 'appearance')}>
+            <button
+              class="nav-btn ${this.tab === 'appearance' ? 'active' : ''}"
+              @click=${() => (this.tab = 'appearance')}
+            >
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <circle cx="12" cy="12" r="10" />
                 <path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20" />
@@ -753,43 +804,67 @@ export class SettingsModal extends LitElement {
               </svg>
               Appearance
             </button>
-            <button class="nav-btn ${this.tab === 'shortcuts' ? 'active' : ''}" @click=${() => (this.tab = 'shortcuts')}>
+            <button
+              class="nav-btn ${this.tab === 'shortcuts' ? 'active' : ''}"
+              @click=${() => (this.tab = 'shortcuts')}
+            >
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <rect x="2" y="6" width="20" height="12" rx="2" />
                 <path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M6 14h.01M18 14h.01M9 14h6" />
               </svg>
               Shortcuts
             </button>
-            <button class="nav-btn ${this.tab === 'advanced' ? 'active' : ''}" @click=${() => (this.tab = 'advanced')}>
+            <button
+              class="nav-btn ${this.tab === 'advanced' ? 'active' : ''}"
+              @click=${() => (this.tab = 'advanced')}
+            >
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <circle cx="12" cy="12" r="3" />
-                <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" />
+                <path
+                  d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"
+                />
               </svg>
               Advanced
             </button>
             <div class="nav-group">Plugins</div>
-            <button class="nav-btn ${this.tab === 'ai' ? 'active' : ''}" @click=${() => (this.tab = 'ai')}>
+            <button
+              class="nav-btn ${this.tab === 'ai' ? 'active' : ''}"
+              @click=${() => (this.tab = 'ai')}
+            >
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <path d="M12 2L15.09 8.26L22 9.27L17 14.14L18.18 21.02L12 17.77L5.82 21.02L7 14.14L2 9.27L8.91 8.26L12 2Z" />
+                <path
+                  d="M12 2L15.09 8.26L22 9.27L17 14.14L18.18 21.02L12 17.77L5.82 21.02L7 14.14L2 9.27L8.91 8.26L12 2Z"
+                />
               </svg>
               AI Assistant
             </button>
           </div>
-          <div class="nav-footer">WriteMd Desktop${this.appVersion ? html`<br />v${this.appVersion}` : ''}</div>
+          <div class="nav-footer">
+            WriteMd Desktop${this.appVersion ? html`<br />v${this.appVersion}` : ''}
+          </div>
         </div>
 
         <!-- Main Area -->
         <div class="main-area">
           <div class="main-header">
-            <h2>${this.tab === 'files' ? 'Files & Vault' : this.tab.charAt(0).toUpperCase() + this.tab.slice(1)}</h2>
+            <h2>
+              ${this.tab === 'files' ? 'Files & Vault' : this.tab.charAt(0).toUpperCase() + this.tab.slice(1)}
+            </h2>
             <button class="close-btn" @click=${this.close}>
-              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2">
+              <svg
+                viewBox="0 0 24 24"
+                width="18"
+                height="18"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+              >
                 <line x1="18" y1="6" x2="6" y2="18" />
                 <line x1="6" y1="6" x2="18" y2="18" />
               </svg>
             </button>
           </div>
-          
+
           <div class="content-panel">
             ${this.tab === 'general' ? this.renderGeneral() : ''}
             ${this.tab === 'appearance' ? this.renderAppearance() : ''}
@@ -827,7 +902,12 @@ export class SettingsModal extends LitElement {
             <div class="setting-label">Spell check</div>
             <div class="setting-desc">Underline misspelled words while writing</div>
           </div>
-          <button class="toggle-switch" role="switch" aria-checked="${this.spellCheck}" @click=${() => this.updateSetting('advanced.spellCheck', !this.spellCheck)}></button>
+          <button
+            class="toggle-switch"
+            role="switch"
+            aria-checked="${this.spellCheck}"
+            @click=${() => this.updateSetting('advanced.spellCheck', !this.spellCheck)}
+          ></button>
         </div>
 
         <div class="setting-row">
@@ -835,7 +915,11 @@ export class SettingsModal extends LitElement {
             <div class="setting-label">Unused images</div>
             <div class="setting-desc">What to do with images no longer referenced</div>
           </div>
-          <select class="select-input" .value=${this.cleanupImages} @change=${(e: Event) => this.updateSetting('files.cleanupUnusedImages', (e.target as HTMLSelectElement).value)}>
+          <select
+            class="select-input"
+            .value=${this.cleanupImages}
+            @change=${(e: Event) => this.updateSetting('files.cleanupUnusedImages', (e.target as HTMLSelectElement).value)}
+          >
             <option value="prompt">Ask me</option>
             <option value="keep">Keep</option>
             <option value="delete">Delete</option>
@@ -850,72 +934,109 @@ export class SettingsModal extends LitElement {
       <div class="section-title">Theme</div>
       <div class="section">
         <div class="theme-grid">
-          ${THEME_PREVIEWS.map(t => html`
-            <div class="theme-card ${this.theme === t.id ? 'active' : ''}" @click=${() => this.updateSetting('appearance.theme', t.id)}>
-              <div class="theme-box-wrapper">
-                <div class="theme-box">
-                  <div class="theme-box-left" style="background: ${t.c1}"></div>
-                  <div class="theme-box-right" style="background: ${t.c2}"></div>
+          ${THEME_PREVIEWS.map(
+            (t) => html`
+              <div
+                class="theme-card ${this.theme === t.id ? 'active' : ''}"
+                @click=${() => this.updateSetting('appearance.theme', t.id)}
+              >
+                <div class="theme-box-wrapper">
+                  <div class="theme-box">
+                    <div class="theme-box-left" style="background: ${t.c1}"></div>
+                    <div class="theme-box-right" style="background: ${t.c2}"></div>
+                  </div>
                 </div>
+                <span class="theme-name">${t.name}</span>
               </div>
-              <span class="theme-name">${t.name}</span>
-            </div>
-          `)}
+            `
+          )}
         </div>
       </div>
 
       <div class="section-title">Accent Color</div>
       <div class="section">
         <div class="color-row">
-          ${ACCENT_COLORS.map((c, i) => html`
-            <div class="color-circle-wrapper ${this.accentColor === c ? 'active' : ''}" @click=${() => this.updateSetting('appearance.accentColor', c)}>
-              <div class="color-circle" style="background: ${c}">
-                ${i === 0 ? html`
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3">
-                    <line x1="18" y1="6" x2="6" y2="18" />
-                    <line x1="6" y1="6" x2="18" y2="18" />
-                  </svg>
-                ` : ''}
+          ${ACCENT_COLORS.map(
+            (c, i) => html`
+              <div
+                class="color-circle-wrapper ${this.accentColor === c ? 'active' : ''}"
+                @click=${() => this.updateSetting('appearance.accentColor', c)}
+              >
+                <div class="color-circle" style="background: ${c}">
+                  ${
+                    i === 0
+                      ? html`
+                          <svg
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            stroke-width="3"
+                          >
+                            <line x1="18" y1="6" x2="6" y2="18" />
+                            <line x1="6" y1="6" x2="18" y2="18" />
+                          </svg>
+                        `
+                      : ''
+                  }
+                </div>
               </div>
-            </div>
-          `)}
+            `
+          )}
         </div>
       </div>
     `
   }
 
-  private renderEditor() {
+  private renderEditor(): unknown {
     return html`
       <div class="section-title">Font</div>
       <div class="section">
         <div class="font-grid">
-          ${FONT_FAMILIES.map(f => html`
-            <div class="font-card ${this.fontFamily === f.id ? 'active' : ''}" @click=${() => this.updateSetting('editor.fontFamily', f.id)}>
-              <div class="font-info">
-                <span class="font-name" style="font-family: ${f.id}">${f.name}</span>
-                <span class="font-type">${f.type}</span>
+          ${FONT_FAMILIES.map(
+            (f) => html`
+              <div
+                class="font-card ${this.fontFamily === f.id ? 'active' : ''}"
+                @click=${() => this.updateSetting('editor.fontFamily', f.id)}
+              >
+                <div class="font-info">
+                  <span class="font-name" style="font-family: ${f.id}">${f.name}</span>
+                  <span class="font-type">${f.type}</span>
+                </div>
+                ${
+                  this.fontFamily === f.id
+                    ? html`
+                        <svg
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          stroke-width="2.5"
+                        >
+                          <polyline points="20 6 9 17 4 12" />
+                        </svg>
+                      `
+                    : ''
+                }
               </div>
-              ${this.fontFamily === f.id ? html`
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
-                  <polyline points="20 6 9 17 4 12" />
-                </svg>
-              ` : ''}
-            </div>
-          `)}
+            `
+          )}
         </div>
       </div>
 
       <div class="section-title">Preferences</div>
       <div class="section">
-        
         <div class="setting-row">
           <div>
             <div class="setting-label">Font Size</div>
             <div class="setting-desc">Base font size for the editor</div>
           </div>
-          <input type="number" class="text-input" style="width: 80px;" 
-            .value=${this.fontSize.toString()} 
-            @change=${(e: any) => this.updateSetting('editor.fontSize', parseInt(e.target.value))} />
+          <input
+            type="number"
+            class="text-input"
+            style="width: 80px;"
+            .value=${this.fontSize.toString()}
+            @change=${(e: Event) =>
+              this.updateSetting('editor.fontSize', parseInt((e.target as HTMLInputElement).value))}
+          />
         </div>
 
         <div class="setting-row">
@@ -923,7 +1044,12 @@ export class SettingsModal extends LitElement {
             <div class="setting-label">Word Wrap</div>
             <div class="setting-desc">Wrap lines that exceed the editor width</div>
           </div>
-          <button class="toggle-switch" role="switch" aria-checked="${this.wordWrap}" @click=${() => this.updateSetting('editor.wordWrap', !this.wordWrap)}></button>
+          <button
+            class="toggle-switch"
+            role="switch"
+            aria-checked="${this.wordWrap}"
+            @click=${() => this.updateSetting('editor.wordWrap', !this.wordWrap)}
+          ></button>
         </div>
 
         <div class="setting-row">
@@ -931,21 +1057,27 @@ export class SettingsModal extends LitElement {
             <div class="setting-label">Line Numbers</div>
             <div class="setting-desc">Show line numbers in source mode</div>
           </div>
-          <button class="toggle-switch" role="switch" aria-checked="${this.lineNumbers}" @click=${() => this.updateSetting('editor.lineNumbers', !this.lineNumbers)}></button>
+          <button
+            class="toggle-switch"
+            role="switch"
+            aria-checked="${this.lineNumbers}"
+            @click=${() => this.updateSetting('editor.lineNumbers', !this.lineNumbers)}
+          ></button>
         </div>
       </div>
     `
   }
 
-  private renderFiles() {
+  private renderFiles(): unknown {
     return html`
       <div class="section-title">Storage</div>
       <div class="section">
-        
         <div class="setting-row">
           <div>
             <div class="setting-label">Vault Location</div>
-            <div class="setting-desc" style="max-width: 400px; word-break: break-all;">${this.vaultPath || 'Default Documents/WriteMd folder'}</div>
+            <div class="setting-desc" style="max-width: 400px; word-break: break-all;">
+              ${this.vaultPath || 'Default Documents/WriteMd folder'}
+            </div>
           </div>
           <button class="control-btn" @click=${this.handleVaultSelect}>Change</button>
         </div>
@@ -955,7 +1087,12 @@ export class SettingsModal extends LitElement {
             <div class="setting-label">Auto-save</div>
             <div class="setting-desc">Automatically write modifications to disk</div>
           </div>
-          <button class="toggle-switch" role="switch" aria-checked="${this.autoSave}" @click=${() => this.updateSetting('files.autoSave', !this.autoSave)}></button>
+          <button
+            class="toggle-switch"
+            role="switch"
+            aria-checked="${this.autoSave}"
+            @click=${() => this.updateSetting('files.autoSave', !this.autoSave)}
+          ></button>
         </div>
       </div>
     `
@@ -970,9 +1107,13 @@ export class SettingsModal extends LitElement {
         <div class="setting-desc" style="margin-bottom: 8px;">
           Click a binding to rebind it. Backspace clears, Esc cancels.
         </div>
-        ${this.conflictMsg
-          ? html`<div class="setting-desc" style="color: var(--danger); margin-bottom: 8px;">${this.conflictMsg}</div>`
-          : ''}
+        ${
+          this.conflictMsg
+            ? html`<div class="setting-desc" style="color: var(--danger); margin-bottom: 8px;">
+                ${this.conflictMsg}
+              </div>`
+            : ''
+        }
       </div>
       ${categories.map(
         (cat) => html`
@@ -1007,19 +1148,24 @@ export class SettingsModal extends LitElement {
     `
   }
 
-  private renderAdvanced() {    return html`
+  private renderAdvanced(): unknown {
+    return html`
       <div class="section-title">Features</div>
       <div class="section">
-        
         <div class="setting-row">
           <div>
             <div class="setting-label">Enable Mermaid</div>
             <div class="setting-desc">Render Mermaid diagrams in live preview</div>
           </div>
-          <button class="toggle-switch" role="switch" aria-checked="${this.enableMermaid}" @click=${() => this.updateSetting('advanced.enableMermaid', !this.enableMermaid)}></button>
+          <button
+            class="toggle-switch"
+            role="switch"
+            aria-checked="${this.enableMermaid}"
+            @click=${() => this.updateSetting('advanced.enableMermaid', !this.enableMermaid)}
+          ></button>
         </div>
       </div>
-      
+
       <div class="section-title">Export</div>
       <div class="section">
         <div class="setting-row">
@@ -1027,7 +1173,11 @@ export class SettingsModal extends LitElement {
             <div class="setting-label">PDF page size</div>
             <div class="setting-desc">Paper size for PDF export</div>
           </div>
-          <select class="select-input" .value=${this.pdfPageSize} @change=${(e: Event) => this.updateSetting('export.pdfPageSize', (e.target as HTMLSelectElement).value)}>
+          <select
+            class="select-input"
+            .value=${this.pdfPageSize}
+            @change=${(e: Event) => this.updateSetting('export.pdfPageSize', (e.target as HTMLSelectElement).value)}
+          >
             <option value="A4">A4</option>
             <option value="A5">A5</option>
             <option value="Letter">Letter</option>
@@ -1041,7 +1191,11 @@ export class SettingsModal extends LitElement {
             <div class="setting-label">PDF theme</div>
             <div class="setting-desc">Color scheme for exported documents</div>
           </div>
-          <select class="select-input" .value=${this.pdfTheme} @change=${(e: Event) => this.updateSetting('export.pdfTheme', (e.target as HTMLSelectElement).value)}>
+          <select
+            class="select-input"
+            .value=${this.pdfTheme}
+            @change=${(e: Event) => this.updateSetting('export.pdfTheme', (e.target as HTMLSelectElement).value)}
+          >
             <option value="light">Light</option>
             <option value="dark">Dark</option>
           </select>
@@ -1064,7 +1218,6 @@ export class SettingsModal extends LitElement {
 
       <div class="section-title">Danger Zone</div>
       <div class="section">
-        
         <div class="setting-row">
           <div>
             <div class="setting-label">Reset Preferences</div>
@@ -1076,17 +1229,20 @@ export class SettingsModal extends LitElement {
     `
   }
 
-  private renderAI() {
+  private renderAI(): unknown {
     return html`
       <div class="section-title">AI Assistant Config</div>
       <div class="section">
-        
         <div class="setting-row">
           <div>
             <div class="setting-label">Provider</div>
             <div class="setting-desc">Select your AI backend provider</div>
           </div>
-          <select class="select-input" .value=${this.aiProvider} @change=${this.handleProviderChange}>
+          <select
+            class="select-input"
+            .value=${this.aiProvider}
+            @change=${this.handleProviderChange}
+          >
             <option value="OpenAI">OpenAI</option>
             <option value="Anthropic">Anthropic</option>
             <option value="GoogleGemini">Google Gemini</option>
@@ -1102,7 +1258,9 @@ export class SettingsModal extends LitElement {
         <div class="setting-row">
           <div>
             <div class="setting-label">Model</div>
-            <div class="setting-desc">Specify the model to use (e.g. gpt-4o, claude-3.5-sonnet, gemini-1.5-pro, llama3)</div>
+            <div class="setting-desc">
+              Specify the model to use (e.g. gpt-4o, claude-3.5-sonnet, gemini-1.5-pro, llama3)
+            </div>
           </div>
           <div style="display: flex; gap: 8px; flex-direction: column; align-items: flex-end;">
             <div style="display: flex; gap: 8px;">
@@ -1111,11 +1269,20 @@ export class SettingsModal extends LitElement {
                 .value=${this.aiModel}
                 @change=${(e: Event) => this.updateSetting('ai.model', (e.target as HTMLSelectElement).value)}
               >
-                ${this.availableModels.length > 0 
-                  ? this.availableModels.map(m => html`<option value=${m} ?selected=${this.aiModel === m}>${m}</option>`) 
-                  : html`<option value=${this.aiModel}>${this.aiModel}</option>`}
+                ${
+                  this.availableModels.length > 0
+                    ? this.availableModels.map(
+                        (m) =>
+                          html`<option value=${m} ?selected=${this.aiModel === m}>${m}</option>`
+                      )
+                    : html`<option value=${this.aiModel}>${this.aiModel}</option>`
+                }
               </select>
-              <button class="control-btn" @click=${this.fetchModels} ?disabled=${this.isFetchingModels}>
+              <button
+                class="control-btn"
+                @click=${this.fetchModels}
+                ?disabled=${this.isFetchingModels}
+              >
                 ${this.isFetchingModels ? 'Loading...' : 'Fetch'}
               </button>
             </div>
@@ -1136,7 +1303,6 @@ export class SettingsModal extends LitElement {
             @change=${(e: Event) => this.updateSetting('ai.apiKey', (e.target as HTMLInputElement).value)}
           />
         </div>
-
       </div>
     `
   }

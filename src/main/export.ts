@@ -89,9 +89,7 @@ const VALID_PAGE_SIZES = [
 type PdfPageSize = (typeof VALID_PAGE_SIZES)[number]
 
 function resolvePageSize(raw: string): PdfPageSize {
-  return (VALID_PAGE_SIZES as readonly string[]).includes(raw)
-    ? (raw as PdfPageSize)
-    : 'A4'
+  return (VALID_PAGE_SIZES as readonly string[]).includes(raw) ? (raw as PdfPageSize) : 'A4'
 }
 
 async function showExportSaveDialog(
@@ -142,7 +140,10 @@ async function renderInHiddenWindow(html: string): Promise<Buffer> {
     const settings = getSettings()
     // pdfMargin is stored in millimeters; Electron wants pixels at 96 DPI.
     // Clamped so a bad stored value can never exceed the page.
-    const marginPx = Math.min(200, Math.round(Math.max(0, settings.export.pdfMargin) * 3.7795275591))
+    const marginPx = Math.min(
+      200,
+      Math.round(Math.max(0, settings.export.pdfMargin) * 3.7795275591)
+    )
     return await win.webContents.printToPDF({
       pageSize: resolvePageSize(settings.export.pdfPageSize),
       margins: {

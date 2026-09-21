@@ -128,7 +128,9 @@ export class ConflictDialog extends LitElement {
       display: flex;
       align-items: center;
       gap: 6px;
-      transition: background var(--transition-fast), border-color var(--transition-fast);
+      transition:
+        background var(--transition-fast),
+        border-color var(--transition-fast);
       outline: none;
       user-select: none;
     }
@@ -207,11 +209,19 @@ export class ConflictDialog extends LitElement {
     const fileName = this.conflict?.path.replace(/\\/g, '/').split('/').pop() ?? 'Document'
 
     return html`
-      <div class="dialog-box" role="dialog" aria-modal="true" aria-label="Conflict Detected" @click=${(e: MouseEvent) => e.stopPropagation()}>
+      <div
+        class="dialog-box"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Conflict Detected"
+        @click=${(e: MouseEvent) => e.stopPropagation()}
+      >
         <div class="dialog-header">
           <div class="icon-wrap">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+              <path
+                d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
+              />
             </svg>
           </div>
           <div class="header-text">
@@ -220,24 +230,31 @@ export class ConflictDialog extends LitElement {
           </div>
         </div>
 
-        <div class="file-badge">
-          ${this.conflict?.path ?? ''}
-        </div>
+        <div class="file-badge">${this.conflict?.path ?? ''}</div>
 
         <div class="message">
-          <strong>${fileName}</strong> has been modified on disk by another application while you have unsaved changes.
-          Review the differences in Split View to resolve changes.
+          <strong>${fileName}</strong> has been modified on disk by another application while you
+          have unsaved changes. Review the differences in Split View to resolve changes.
         </div>
 
         <div class="actions">
-          <button class="btn btn-subtle" @click=${this.handleReload} title="Discard local edits and reload disk version">
+          <button
+            class="btn btn-subtle"
+            @click=${this.handleReload}
+            title="Discard local edits and reload disk version"
+          >
             Overwrite Local
           </button>
-          <button class="btn btn-secondary" @click=${this.handleDismiss}>
-            Keep Local
-          </button>
+          <button class="btn btn-secondary" @click=${this.handleDismiss}>Keep Local</button>
           <button class="btn btn-primary" @click=${this.handleReview}>
-            <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5">
+            <svg
+              viewBox="0 0 16 16"
+              width="14"
+              height="14"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.5"
+            >
               <rect x="2" y="2" width="12" height="12" rx="2" />
               <line x1="8" y1="2" x2="8" y2="14" />
             </svg>

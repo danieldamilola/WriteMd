@@ -1,135 +1,58 @@
-import { app } from 'electron'
+import { app, safeStorage } from 'electron'
 import { join, dirname } from 'path'
-import { readFileSync, existsSync, mkdirSync } from 'fs'
+import { readFileSync, existsSync, mkdirSync, renameSync } from 'fs'
 import { writeFile } from 'fs/promises'
+import {
+  DEFAULT_SETTINGS,
+  type WriteMDSettingsPatch,
+  type WriteMDSettings
+} from '../shared/settings-schema'
 
 export const SETTINGS_FILE = join(app.getPath('userData'), 'config.json')
 
-export interface WriteMDSettings {
-  editor: {
-    fontSize: number
-    fontFamily: string
-    lineHeight: number
-    wordWrap: boolean
-    tabSize: number
-    vimMode: boolean
-    typewriterMode: boolean
-    autoSave: boolean
-    autoSaveDelay: number
-    showLineNumbers: boolean
-    highlightActiveLine: boolean
+export type { WriteMDSettings, WriteMDSettingsPatch } from '../shared/settings-schema'
+export { DEFAULT_SETTINGS } from '../shared/settings-schema'
+
+const ENCRYPTION_PREFIX = 'enc:v1:'
+
+/**
+ * Encrypt the AI API key with safeStorage (OS keychain-backed) before it hits
+ * disk. Falls back to plaintext when safeStorage is unavailable (some Linux
+ * setups) so settings never disappear.
+ */
+export function encryptApiKey(plain: string): string {
+  if (!plain) return ''
+  try {
+    if (
+      safeStorage &&
+      typeof safeStorage.isEncryptionAvailable === 'function' &&
+      safeStorage.isEncryptionAvailable()
+    ) {
+      return ENCRYPTION_PREFIX + safeStorage.encryptString(plain).toString('base64')
+    }
+  } catch {
+    // fall through to plaintext
   }
-  preview: {
-    fontSize: number
-    fontFamily: string
-    lineHeight: number
-    maxWidth: number
-    showMargin: boolean
-  }
-  appearance: {
-    theme: string
-    customCSS: string
-    toolbarVisible: boolean
-    statusBarVisible: boolean
-    sidebarWidth: number
-  }
-  files: {
-    vaultPath: string
-    recentFilesMax: number
-    recentFiles: string[]
-    openTabs: string[]
-    activeTabPath: string | null
-    imageFolderName: string
-    cleanupUnusedImages: string
-    defaultNewFileContent: string
-    defaultNewFileName: string
-  }
-  export: {
-    pdfMargin: number
-    pdfPageSize: string
-    pdfTheme: string
-    htmlStandalone: boolean
-  }
-  advanced: {
-    enableMermaid: boolean
-    enableWikiLinks: boolean
-    spellCheck: boolean
-    portableMode: boolean
-  }
-  shortcuts: {
-    bindings: Record<string, string>
-  }
-  ai: {
-    provider: string
-    model: string
-    apiKey: string
-  }
+  console.warn(
+    'safeStorage is unavailable on this system — the AI API key is being stored ' +
+      'in plaintext in config.json.'
+  )
+  return plain
 }
 
-const DEFAULT_SETTINGS: WriteMDSettings = {
-  editor: {
-    fontSize: 15,
-    fontFamily: 'JetBrains Mono',
-    lineHeight: 1.7,
-    wordWrap: true,
-    tabSize: 2,
-    vimMode: false,
-    typewriterMode: false,
-    autoSave: true,
-    autoSaveDelay: 500,
-    showLineNumbers: false,
-    highlightActiveLine: true
-  },
-  preview: {
-    fontSize: 16,
-    fontFamily: 'Source Serif Pro',
-    lineHeight: 1.8,
-    maxWidth: 800,
-    showMargin: true
-  },
-  appearance: {
-    theme: 'dark',
-    customCSS: '',
-    toolbarVisible: true,
-    statusBarVisible: true,
-    sidebarWidth: 280
-  },
-  files: {
-    vaultPath: '',
-    recentFilesMax: 10,
-    recentFiles: [],
-    openTabs: [],
-    activeTabPath: null,
-    imageFolderName: '_assets',
-    cleanupUnusedImages: 'prompt',
-    defaultNewFileContent: '',
-    defaultNewFileName: 'Untitled.md'
-  },
-  export: {
-    pdfMargin: 24,
-    pdfPageSize: 'A4',
-    pdfTheme: 'light',
-    htmlStandalone: true
-  },
-  advanced: {
-    enableMermaid: true,
-    enableWikiLinks: false,
-    spellCheck: false,
-    portableMode: false
-  },
-  shortcuts: {
-    bindings: {}
-  },
-  ai: {
-    provider: 'OpenAI',
-    model: 'gpt-4o',
-    apiKey: ''
+export function decryptApiKey(value: string): string {
+  if (!value.startsWith(ENCRYPTION_PREFIX)) return value
+  try {
+    if (!safeStorage || typeof safeStorage.decryptString !== 'function') return ''
+    return safeStorage.decryptString(Buffer.from(value.slice(ENCRYPTION_PREFIX.length), 'base64'))
+  } catch {
+    return ''
   }
 }
 
 let settingsCache: WriteMDSettings | null = null
 
-function deepMerge(
+export function deepMerge(
   target: Record<string, unknown>,
   source: Record<string, unknown>
 ): Record<string, unknown> {
@@ -154,22 +77,32 @@ function deepMerge(
 
 export function getSettings(): WriteMDSettings {
   if (settingsCache) return settingsCache
-  let next: WriteMDSettings = { ...DEFAULT_SETTINGS }
+  let next: WriteMDSettings = structuredClone(DEFAULT_SETTINGS)
   try {
     if (existsSync(SETTINGS_FILE)) {
       next = deepMerge(
-        DEFAULT_SETTINGS as unknown as Record<string, unknown>,
+        structuredClone(DEFAULT_SETTINGS) as unknown as Record<string, unknown>,
         JSON.parse(readFileSync(SETTINGS_FILE, 'utf-8'))
       ) as unknown as WriteMDSettings
     }
-  } catch {
-    next = { ...DEFAULT_SETTINGS }
+  } catch (e) {
+    // Corrupt config.json would otherwise silently wipe all settings on next
+    // save. Move it aside so the user can recover their values.
+    try {
+      renameSync(SETTINGS_FILE, `${SETTINGS_FILE}.corrupt`)
+      console.error('config.json was unreadable, moved aside:', e)
+    } catch {
+      console.error('Failed to read settings:', e)
+    }
+    next = structuredClone(DEFAULT_SETTINGS)
   }
+  // API keys are stored encrypted at rest; decrypt into the in-memory cache.
+  next.ai.apiKey = decryptApiKey(next.ai.apiKey)
   settingsCache = next
   return next
 }
 
-export async function setSettings(partial: Partial<WriteMDSettings>): Promise<void> {
+export async function setSettings(partial: WriteMDSettingsPatch): Promise<void> {
   const current = getSettings()
   const merged = deepMerge(
     current as unknown as Record<string, unknown>,
@@ -179,7 +112,12 @@ export async function setSettings(partial: Partial<WriteMDSettings>): Promise<vo
   try {
     const dir = dirname(SETTINGS_FILE)
     if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
-    await writeFile(SETTINGS_FILE, JSON.stringify(merged, null, 2), 'utf-8')
+    // Store the API key encrypted; the in-memory cache keeps it decrypted.
+    const toPersist = {
+      ...merged,
+      ai: { ...merged.ai, apiKey: encryptApiKey(merged.ai.apiKey) }
+    }
+    await writeFile(SETTINGS_FILE, JSON.stringify(toPersist, null, 2), 'utf-8')
   } catch (e) {
     console.error('Failed to write settings:', e)
   }

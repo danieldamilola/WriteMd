@@ -27,10 +27,10 @@ function handleTab(view: EditorView, shift: boolean): boolean {
   if (!isInTable(view, pos)) return false
 
   const line = state.doc.lineAt(pos)
-  
+
   // A naive implementation to jump between `|` cells
   const text = line.text
-  
+
   // Find all pipe positions in the current line
   const pipes: number[] = []
   for (let i = 0; i < text.length; i++) {
@@ -45,7 +45,8 @@ function handleTab(view: EditorView, shift: boolean): boolean {
   if (shift) {
     // find the cell to the left
     for (let i = pipes.length - 1; i >= 0; i--) {
-      if (pipes[i] < colOffset - 1) { // -1 to handle if we are exactly at the start of a cell
+      if (pipes[i] < colOffset - 1) {
+        // -1 to handle if we are exactly at the start of a cell
         nextPipeIdx = i - 1
         break
       }
@@ -64,14 +65,14 @@ function handleTab(view: EditorView, shift: boolean): boolean {
   if (nextPipeIdx >= 0 && nextPipeIdx < pipes.length - 1) {
     const cellStart = line.from + pipes[nextPipeIdx] + 1
     const cellEnd = line.from + pipes[nextPipeIdx + 1]
-    
+
     // Skip spaces
     let start = cellStart
     while (start < cellEnd && state.doc.sliceString(start, start + 1) === ' ') start++
-    
+
     let end = cellEnd
     while (end > start && state.doc.sliceString(end - 1, end) === ' ') end--
-    
+
     view.dispatch({
       selection: EditorSelection.single(start, end)
     })
@@ -91,7 +92,7 @@ function handleTab(view: EditorView, shift: boolean): boolean {
         return true
       }
     }
-    
+
     // No next line, or next line is not a table row -> insert new row
     // Count columns from the first line of the table
     const cols = pipes.length - 1
@@ -99,7 +100,7 @@ function handleTab(view: EditorView, shift: boolean): boolean {
     for (let i = 0; i < cols; i++) {
       newRowText += '          |'
     }
-    
+
     view.dispatch({
       changes: { from: line.to, insert: newRowText },
       selection: EditorSelection.single(line.to + 3, line.to + 3)

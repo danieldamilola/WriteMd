@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron'
 import { electronAPI } from '@electron-toolkit/preload'
+import type { ChatMessage, UpdateInfo, UpdateProgress } from '../shared/electron-api'
 
 function onChannel(channel: string, callback: (...args: unknown[]) => void): () => void {
   const handler = (_: IpcRendererEvent, ...args: unknown[]): void => callback(...args)
@@ -42,7 +43,8 @@ const writemdAPI = {
       ipcRenderer.invoke('file:resolve-asset', docPath, relativePath),
     watch: (path: string) => ipcRenderer.invoke('file:watch', path),
     unwatch: (path: string) => ipcRenderer.invoke('file:unwatch', path),
-    rename: (oldPath: string, newPath: string) => ipcRenderer.invoke('file:rename', oldPath, newPath),
+    rename: (oldPath: string, newPath: string) =>
+      ipcRenderer.invoke('file:rename', oldPath, newPath),
     delete: (path: string) => ipcRenderer.invoke('file:delete', path),
     onChanged: (callback: (path: string) => void) =>
       onChannel('file:changed', callback as (...args: unknown[]) => void)
@@ -59,8 +61,15 @@ const writemdAPI = {
     set: (settings: Record<string, unknown>) => ipcRenderer.invoke('settings:set', settings)
   },
   net: {
-    fetchModels: (provider: string, apiKey: string) => ipcRenderer.invoke('net:fetch-models', provider, apiKey),
-    chat: (provider: string, model: string, apiKey: string, messages: any[], systemPrompt?: string) => ipcRenderer.invoke('net:chat', provider, model, apiKey, messages, systemPrompt)
+    fetchModels: (provider: string, apiKey: string) =>
+      ipcRenderer.invoke('net:fetch-models', provider, apiKey),
+    chat: (
+      provider: string,
+      model: string,
+      apiKey: string,
+      messages: ChatMessage[],
+      systemPrompt?: string
+    ) => ipcRenderer.invoke('net:chat', provider, model, apiKey, messages, systemPrompt)
   },
   dialog: {
     showOpenDialog: (options: Electron.OpenDialogOptions) =>
@@ -81,13 +90,13 @@ const writemdAPI = {
     check: () => ipcRenderer.invoke('updater:check'),
     download: () => ipcRenderer.invoke('updater:download'),
     install: () => ipcRenderer.invoke('updater:install'),
-    onUpdateAvailable: (callback: (info: any) => void) =>
+    onUpdateAvailable: (callback: (info: UpdateInfo) => void) =>
       onChannel('updater:update-available', callback as (...args: unknown[]) => void),
-    onUpdateNotAvailable: (callback: (info: any) => void) =>
+    onUpdateNotAvailable: (callback: (info: UpdateInfo) => void) =>
       onChannel('updater:update-not-available', callback as (...args: unknown[]) => void),
-    onUpdateDownloaded: (callback: (info: any) => void) =>
+    onUpdateDownloaded: (callback: (info: UpdateInfo) => void) =>
       onChannel('updater:update-downloaded', callback as (...args: unknown[]) => void),
-    onDownloadProgress: (callback: (info: any) => void) =>
+    onDownloadProgress: (callback: (info: UpdateProgress) => void) =>
       onChannel('updater:download-progress', callback as (...args: unknown[]) => void),
     onError: (callback: (err: string) => void) =>
       onChannel('updater:error', callback as (...args: unknown[]) => void)
@@ -102,16 +111,12 @@ const writemdAPI = {
 if (process.contextIsolated) {
   try {
     contextBridge.exposeInMainWorld('electron', electronAPI)
-    contextBridge.exposeInMainWorld('api', writemdAPI)
     contextBridge.exposeInMainWorld('electronAPI', writemdAPI)
   } catch (error) {
     console.error(error)
   }
 } else {
-  // @ts-ignore (define in dts)
-  window.electron = electronAPI
-  // @ts-ignore (define in dts)
-  window.api = writemdAPI
-  // @ts-ignore (define in dts)
-  window.electronAPI = writemdAPI
+  // Test / non-isolated environment: DOM globals instead of the bridge.
+  ;(window as unknown as { electron: unknown }).electron = electronAPI
+  ;(window as unknown as { electronAPI: unknown }).electronAPI = writemdAPI
 }

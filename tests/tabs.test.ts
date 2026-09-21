@@ -49,8 +49,6 @@ describe('multi-tab file state', () => {
     const s1 = files.getState()
     expect(s1.tabs.length).toBe(s0.tabs.length - 1)
     expect(s1.activeTab).toBeLessThan(s1.tabs.length)
-    expect(settings.get<string[]>('files.openTabs', [])).toEqual(
-      s1.tabs.map((t) => t.path)
-    )
+    expect(settings.get<string[]>('files.openTabs', [])).toEqual(s1.tabs.map((t) => t.path))
   })
 })

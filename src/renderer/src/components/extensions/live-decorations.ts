@@ -1,7 +1,13 @@
 import { ensureSyntaxTree, syntaxTree } from '@codemirror/language'
 import type { SyntaxNode } from '@lezer/common'
 import type { Range, Text } from '@codemirror/state'
-import { Decoration, EditorView, ViewPlugin, type DecorationSet, type ViewUpdate } from '@codemirror/view'
+import {
+  Decoration,
+  EditorView,
+  ViewPlugin,
+  type DecorationSet,
+  type ViewUpdate
+} from '@codemirror/view'
 
 import { BULLET_WIDGET } from '../widgets/BulletWidget'
 import { TaskCheckboxWidget } from '../widgets/TaskCheckboxWidget'
@@ -151,17 +157,18 @@ export function buildInlineDecorations(view: EditorView): DecorationSet {
             break
           }
         }
-        
+
         let language = ''
         const codeInfo = node.node.getChild('CodeInfo')
         if (codeInfo) {
           language = doc.sliceString(codeInfo.from, codeInfo.to)
         }
-        
-        const codeContent = doc.sliceString(node.from, node.to)
+
+        const codeContent = doc
+          .sliceString(node.from, node.to)
           .replace(/^```[^\n]*\n/, '')
           .replace(/\n```\s*$/, '')
-          
+
         if (language === 'mermaid' && (!anyActive || readOnly)) {
           ranges.push(
             Decoration.widget({
@@ -186,7 +193,6 @@ export function buildInlineDecorations(view: EditorView): DecorationSet {
           for (let n = firstLine; n <= lastLine; n++) activeLines.add(n)
         }
       }
-
 
       if (node.name === 'Link' && view.hasFocus && !readOnly) {
         for (const range of state.selection.ranges) {
@@ -349,7 +355,8 @@ export function buildInlineDecorations(view: EditorView): DecorationSet {
       if (node.name === 'TaskMarker' && node.from < node.to) {
         const markText = doc.sliceString(node.from, node.to)
         const checked = /\[x\]/i.test(markText)
-        const hasTrailingSpace = node.to < doc.length && doc.sliceString(node.to, node.to + 1) === ' '
+        const hasTrailingSpace =
+          node.to < doc.length && doc.sliceString(node.to, node.to + 1) === ' '
         const replaceTo = hasTrailingSpace ? node.to + 1 : node.to
         pushReplace(ranges, doc, node.from, replaceTo, {
           widget: new TaskCheckboxWidget(checked)
@@ -367,8 +374,8 @@ export function buildInlineDecorations(view: EditorView): DecorationSet {
 
   ranges.sort((a, b) => {
     if (a.from !== b.from) return a.from - b.from
-    const aIsLine = (a.value as any).isLine || false
-    const bIsLine = (b.value as any).isLine || false
+    const aIsLine = (a.value as { isLine?: boolean }).isLine === true
+    const bIsLine = (b.value as { isLine?: boolean }).isLine === true
     if (aIsLine && !bIsLine) return -1
     if (!aIsLine && bIsLine) return 1
     return 0

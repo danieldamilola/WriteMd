@@ -1,7 +1,11 @@
 import { describe, it, expect, vi } from 'vitest'
 import { EditorState, Compartment } from '@codemirror/state'
 import { markdown } from '@codemirror/lang-markdown'
-import { readOnlyExtension, readOnlyFacet, livePreviewPlugin } from '../src/renderer/src/components/LivePreview'
+import {
+  readOnlyExtension,
+  readOnlyFacet,
+  livePreviewPlugin
+} from '../src/renderer/src/components/LivePreview'
 
 vi.mock('electron', () => ({
   app: {
@@ -62,10 +66,7 @@ describe('phase 2 editor core & split view', () => {
 
     const state = EditorState.create({
       doc: docText,
-      extensions: [
-        markdown(),
-        modeComp.of([readOnlyExtension(false), livePreviewPlugin()])
-      ]
+      extensions: [markdown(), modeComp.of([readOnlyExtension(false), livePreviewPlugin()])]
     })
 
     expect(state.doc.toString()).toBe(docText)

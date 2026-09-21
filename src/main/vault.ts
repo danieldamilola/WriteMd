@@ -3,7 +3,7 @@ import { join, extname } from 'path'
 import { existsSync, mkdirSync, readdirSync, type Dirent } from 'fs'
 import { getSettings, setSettings } from './settings'
 
-const DEFAULT_VAULT_NAME = 'WriteMd'
+const DEFAULT_VAULT_NAME = 'WriteMD'
 const MARKDOWN_EXTS = ['.md', '.markdown', '.mdown', '.mkd']
 
 let vaultPathCache: string | null = null
@@ -86,4 +86,3 @@ export function getVaultTree(dir: string = getVaultPath()): VaultTreeNode {
     return { name, path: dir, isDirectory: true, children: [] }
   }
 }
-

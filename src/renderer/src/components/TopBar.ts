@@ -7,7 +7,7 @@ function api(): ElectronAPI | undefined {
   return typeof window !== 'undefined' ? window.electronAPI : undefined
 }
 
-  @customElement('writemd-top-bar')
+@customElement('writemd-top-bar')
 export class WriteMDTopBar extends LitElement {
   static styles = css`
     :host {
@@ -66,12 +66,12 @@ export class WriteMDTopBar extends LitElement {
   @property({ type: Boolean }) splitActive = false
   @property({ type: Boolean }) updateAvailable = false
   @property({ type: Boolean }) downloadingUpdate = false
-  
+
   private unsubs: Array<() => void> = []
 
   connectedCallback(): void {
     super.connectedCallback()
-    
+
     // Call updater check after 3 seconds
     setTimeout(() => {
       void api()?.updater?.check?.()
@@ -85,7 +85,7 @@ export class WriteMDTopBar extends LitElement {
       this.downloadingUpdate = false
       this.updateAvailable = true
     })
-    
+
     if (onAvail) this.unsubs.push(onAvail)
     if (onDownloaded) this.unsubs.push(onDownloaded)
   }
@@ -160,18 +160,17 @@ export class WriteMDTopBar extends LitElement {
                             />
                           </svg>
                         `
-          }
+                  }
                 </writemd-icon-button>
               `
             : ''
         }
-        
         ${
           this.updateAvailable
             ? html`
                 <button
                   style="background: var(--accent); color: var(--accent-text); border: none; border-radius: 4px; padding: 4px 8px; font-size: 11px; font-weight: 500; cursor: pointer; -webkit-app-region: no-drag;"
-                  @click=${() => this.downloadingUpdate ? null : api()?.updater?.install?.()}
+                  @click=${() => (this.downloadingUpdate ? null : api()?.updater?.install?.())}
                 >
                   ${this.downloadingUpdate ? 'Downloading update...' : 'Restart to update'}
                 </button>
@@ -205,12 +204,14 @@ export class WriteMDTopBar extends LitElement {
             variant="close"
             title="Close"
             @click=${async () => {
-              const fs = await import('../state/file-state').then(m => m.FileState);
-              const state = fs.getInstance().getState();
+              const fs = await import('../state/file-state').then((m) => m.FileState)
+              const state = fs.getInstance().getState()
               if (state.dirty || state.secondaryDoc?.dirty) {
-                const ConfirmDialog = await import('./ConfirmDialog');
-                const ok = await ConfirmDialog.showConfirm('You have unsaved changes. Close anyway?');
-                if (!ok) return;
+                const ConfirmDialog = await import('./ConfirmDialog')
+                const ok = await ConfirmDialog.showConfirm(
+                  'You have unsaved changes. Close anyway?'
+                )
+                if (!ok) return
               }
               void api()?.window?.close?.()
             }}

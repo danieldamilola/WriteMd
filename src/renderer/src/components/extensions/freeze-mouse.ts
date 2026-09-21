@@ -93,7 +93,9 @@ export const freezeMousePlugin = ViewPlugin.fromClass(
       window.addEventListener('pointercancel', this.onUp)
     }
 
-    update(): void {}
+    update(): void {
+      /* no per-update behavior; listeners are event-driven */
+    }
 
     destroy(): void {
       this.view.dom.removeEventListener('pointerdown', this.onDown, true)

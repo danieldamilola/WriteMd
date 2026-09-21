@@ -48,7 +48,7 @@ Some screens are not designed yet (menu bar, settings modal, welcome screen, exp
 
 - Electron + TypeScript strict. No `any`, no `@ts-ignore`.
 - Renderer: vanilla TS + Web Components (Lit allowed). No React, no framework tax.
-- Editor: CodeMirror 6. Preview parsing: markdown-it. Syntax highlight: Prism.js.
+- Editor: CodeMirror 6. Preview parsing: markdown-it. Syntax highlight: Lezer (@codemirror/language) in the editor, custom highlighter in preview.
 - Security: `contextIsolation: true`, `nodeIntegration: false`. All Node access through the typed preload bridge (`window.electronAPI`).
 - Styling: CSS custom properties only. Themes switch via `[data-theme="..."]`.
 - State: file state and settings are singletons with subscribe/notify. No duplicated sources of truth.

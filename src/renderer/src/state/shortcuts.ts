@@ -15,16 +15,44 @@ export const COMMANDS: CommandDef[] = [
   { id: 'open-file', title: 'Open File', category: 'File', defaultBinding: 'Ctrl+O' },
   { id: 'save', title: 'Save', category: 'File', defaultBinding: 'Ctrl+S' },
   { id: 'save-as', title: 'Save As', category: 'File', defaultBinding: 'Ctrl+Shift+S' },
+  { id: 'find', title: 'Find', category: 'Edit', defaultBinding: 'Ctrl+F' },
+  { id: 'replace', title: 'Replace', category: 'Edit', defaultBinding: 'Ctrl+H' },
   { id: 'export-pdf', title: 'Export PDF', category: 'File', defaultBinding: '' },
   { id: 'export-html', title: 'Export HTML', category: 'File', defaultBinding: '' },
-  { id: 'quick-toggle', title: 'Toggle Reading / Live', category: 'View', defaultBinding: 'Ctrl+E' },
-  { id: 'toggle-split', title: 'Toggle Split View', category: 'View', defaultBinding: 'Ctrl+Alt+S' },
-  { id: 'split-files', title: 'Show Files Panel', category: 'View', defaultBinding: 'Ctrl+Shift+E' },
-  { id: 'split-backlinks', title: 'Show Backlinks Panel', category: 'View', defaultBinding: 'Ctrl+Shift+B' },
+  {
+    id: 'quick-toggle',
+    title: 'Toggle Reading / Live',
+    category: 'View',
+    defaultBinding: 'Ctrl+E'
+  },
+  {
+    id: 'toggle-split',
+    title: 'Toggle Split View',
+    category: 'View',
+    defaultBinding: 'Ctrl+Alt+S'
+  },
+  {
+    id: 'split-files',
+    title: 'Show Files Panel',
+    category: 'View',
+    defaultBinding: 'Ctrl+Shift+E'
+  },
+  {
+    id: 'split-backlinks',
+    title: 'Show Backlinks Panel',
+    category: 'View',
+    defaultBinding: 'Ctrl+Shift+B'
+  },
   { id: 'split-ai', title: 'Show AI Panel', category: 'View', defaultBinding: 'Ctrl+Alt+A' },
   { id: 'open-settings', title: 'Open Settings', category: 'App', defaultBinding: 'Ctrl+,' },
   { id: 'command-palette', title: 'Command Palette', category: 'App', defaultBinding: 'Ctrl+P' },
-  { id: 'zoom-in', title: 'Zoom In', category: 'View', defaultBinding: 'Ctrl+=', aliases: ['Ctrl++', 'Ctrl+Shift++'] },
+  {
+    id: 'zoom-in',
+    title: 'Zoom In',
+    category: 'View',
+    defaultBinding: 'Ctrl+=',
+    aliases: ['Ctrl++', 'Ctrl+Shift++']
+  },
   { id: 'zoom-out', title: 'Zoom Out', category: 'View', defaultBinding: 'Ctrl+-' },
   { id: 'zoom-reset', title: 'Reset Zoom', category: 'View', defaultBinding: 'Ctrl+0' }
 ]

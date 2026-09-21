@@ -33,7 +33,11 @@ function parseYamlFrontmatter(yaml: string): PropertyItem[] {
         currentItem = { key, value: [], type: key.toLowerCase().includes('tag') ? 'tags' : 'list' }
         items.push(currentItem)
       } else if (rawVal.startsWith('[') && rawVal.endsWith(']')) {
-        const parts = rawVal.slice(1, -1).split(',').map(s => s.trim().replace(/^['"]|['"]$/g, '')).filter(Boolean)
+        const parts = rawVal
+          .slice(1, -1)
+          .split(',')
+          .map((s) => s.trim().replace(/^['"]|['"]$/g, ''))
+          .filter(Boolean)
         const type = key.toLowerCase().includes('tag') ? 'tags' : 'list'
         currentItem = { key, value: parts, type }
         items.push(currentItem)
@@ -125,7 +129,8 @@ class FrontmatterPropertiesWidget extends WidgetType {
       iconSpan.style.display = 'inline-flex'
       iconSpan.style.alignItems = 'center'
       iconSpan.style.opacity = '0.7'
-      iconSpan.innerHTML = prop.type === 'tags' ? tagIconSvg : prop.type === 'object' ? objIconSvg : textIconSvg
+      iconSpan.innerHTML =
+        prop.type === 'tags' ? tagIconSvg : prop.type === 'object' ? objIconSvg : textIconSvg
 
       const keySpan = document.createElement('span')
       keySpan.textContent = prop.key
@@ -160,7 +165,8 @@ class FrontmatterPropertiesWidget extends WidgetType {
         }
       } else if (prop.type === 'object') {
         const codeSpan = document.createElement('span')
-        codeSpan.textContent = typeof prop.value === 'string' ? prop.value : JSON.stringify(prop.value)
+        codeSpan.textContent =
+          typeof prop.value === 'string' ? prop.value : JSON.stringify(prop.value)
         codeSpan.style.fontFamily = 'var(--font-mono, monospace)'
         codeSpan.style.color = 'var(--syntax-list, #ffb84d)'
         codeSpan.style.fontSize = '12px'
@@ -189,8 +195,12 @@ class FrontmatterPropertiesWidget extends WidgetType {
     addBtn.style.cursor = 'pointer'
     addBtn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg><span>Add property</span>`
 
-    addBtn.onmouseenter = () => { addBtn.style.color = 'var(--text)' }
-    addBtn.onmouseleave = () => { addBtn.style.color = 'var(--text-muted)' }
+    addBtn.onmouseenter = () => {
+      addBtn.style.color = 'var(--text)'
+    }
+    addBtn.onmouseleave = () => {
+      addBtn.style.color = 'var(--text-muted)'
+    }
 
     addBtn.onclick = (e) => {
       e.preventDefault()
@@ -218,11 +228,11 @@ class FrontmatterPropertiesWidget extends WidgetType {
   }
 }
 
-function getFrontmatterDecorations(state: EditorState) {
+function getFrontmatterDecorations(state: EditorState): DecorationSet {
   const builder = new RangeSetBuilder<Decoration>()
   const readOnly = state.facet(readOnlyFacet)
   const text = state.doc.toString()
-  
+
   if (text.startsWith('---\n')) {
     let endMatch = text.indexOf('\n---\n', 4)
     let endLen = 5
@@ -236,21 +246,21 @@ function getFrontmatterDecorations(state: EditorState) {
     if (endMatch !== -1) {
       const from = 0
       const to = endMatch + endLen
-      
+
       let active = false
       if (!readOnly) {
         for (const r of state.selection.ranges) {
           // Only expand if cursor is strictly inside the frontmatter text.
-          // This prevents auto-expanding when the file is opened (cursor at 0) 
+          // This prevents auto-expanding when the file is opened (cursor at 0)
           // or when cursor is immediately after the block.
-          const inFrontmatter = (pos: number) => pos > 0 && pos < to
+          const inFrontmatter = (pos: number): boolean => pos > 0 && pos < to
           if (inFrontmatter(r.from) || inFrontmatter(r.to)) {
             active = true
             break
           }
         }
       }
-      
+
       if (!active || readOnly) {
         const innerText = text.substring(4, endMatch)
         const widget = Decoration.replace({
@@ -261,7 +271,7 @@ function getFrontmatterDecorations(state: EditorState) {
       }
     }
   }
-  
+
   return builder.finish()
 }
 
@@ -275,5 +285,5 @@ export const frontmatterPlugin = StateField.define<DecorationSet>({
     }
     return value
   },
-  provide: f => EditorView.decorations.from(f)
+  provide: (f) => EditorView.decorations.from(f)
 })

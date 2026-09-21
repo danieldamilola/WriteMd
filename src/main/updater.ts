@@ -5,9 +5,9 @@ import { ipcMain, BrowserWindow } from 'electron'
 export function setupUpdater(getWindow: () => BrowserWindow | null): void {
   log.transports.file.level = 'info'
   autoUpdater.logger = log
-  
+
   autoUpdater.autoDownload = false // Ask before downloading
-  
+
   autoUpdater.on('update-available', (info) => {
     getWindow()?.webContents.send('updater:update-available', info)
   })
@@ -19,7 +19,7 @@ export function setupUpdater(getWindow: () => BrowserWindow | null): void {
   autoUpdater.on('update-downloaded', (info) => {
     getWindow()?.webContents.send('updater:update-downloaded', info)
   })
-  
+
   autoUpdater.on('download-progress', (progressObj) => {
     getWindow()?.webContents.send('updater:download-progress', progressObj)
   })

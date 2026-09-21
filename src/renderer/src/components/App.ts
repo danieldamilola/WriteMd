@@ -10,12 +10,7 @@ import './CommandPalette'
 import type { ElectronAPI } from '../../../shared/electron-api'
 import { SettingsStore } from '../state/settings'
 import { FileState, type ConflictInfo } from '../state/file-state'
-import {
-  COMMANDS,
-  bindingFromEvent,
-  bindingsEqual,
-  effectiveBindings
-} from '../state/shortcuts'
+import { COMMANDS, bindingFromEvent, bindingsEqual, effectiveBindings } from '../state/shortcuts'
 
 function api(): ElectronAPI | undefined {
   return typeof window !== 'undefined' ? window.electronAPI : undefined
@@ -151,6 +146,8 @@ export class WriteMDApp extends LitElement {
       }
       return
     }
+    // CodeMirror handles its own bindings (e.g. Mod-F) first.
+    if (e.defaultPrevented) return
     // Never hijack keys while rebinding shortcuts in settings
     if (this.showSettings) return
     const pressed = bindingFromEvent(e)
@@ -162,7 +159,10 @@ export class WriteMDApp extends LitElement {
       if (!matched.mod && !matched.alt && !matched.shift) {
         // Bare keys must not hijack typing
         const target = e.target as HTMLElement | null
-        if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) {
+        if (
+          target &&
+          (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)
+        ) {
           continue
         }
       }
@@ -211,6 +211,12 @@ export class WriteMDApp extends LitElement {
         break
       case 'open-settings':
         this.showSettings = true
+        break
+      case 'find':
+        window.dispatchEvent(new CustomEvent('writemd-find', { detail: { mode: 'find' } }))
+        break
+      case 'replace':
+        window.dispatchEvent(new CustomEvent('writemd-find', { detail: { mode: 'replace' } }))
         break
       case 'command-palette':
         this.showPalette = true
@@ -292,12 +298,14 @@ export class WriteMDApp extends LitElement {
             }}
           ></writemd-welcome-screen>
           ${this.showSettings ? html`<writemd-settings-modal @close=${() => (this.showSettings = false)}></writemd-settings-modal>` : ''}
-          ${this.showPalette
-            ? html`<writemd-command-palette
-                @close=${() => (this.showPalette = false)}
-                @run-command=${(e: CustomEvent<{ id: string }>) => void this.runCommand(e.detail.id)}
-              ></writemd-command-palette>`
-            : ''}
+          ${
+            this.showPalette
+              ? html`<writemd-command-palette
+                  @close=${() => (this.showPalette = false)}
+                  @run-command=${(e: CustomEvent<{ id: string }>) => void this.runCommand(e.detail.id)}
+                ></writemd-command-palette>`
+              : ''
+          }
           ${this.conflict ? html`<writemd-conflict-dialog .conflict=${this.conflict}></writemd-conflict-dialog>` : ''}
         </div>
       `
@@ -380,17 +388,17 @@ export class WriteMDApp extends LitElement {
               ></writemd-settings-modal>`
             : ''
         }
-        ${this.showPalette
-          ? html`<writemd-command-palette
-              @close=${() => (this.showPalette = false)}
-              @run-command=${(e: CustomEvent<{ id: string }>) => void this.runCommand(e.detail.id)}
-            ></writemd-command-palette>`
-          : ''}
+        ${
+          this.showPalette
+            ? html`<writemd-command-palette
+                @close=${() => (this.showPalette = false)}
+                @run-command=${(e: CustomEvent<{ id: string }>) => void this.runCommand(e.detail.id)}
+              ></writemd-command-palette>`
+            : ''
+        }
         ${
           this.conflict
-            ? html`<writemd-conflict-dialog
-                .conflict=${this.conflict}
-              ></writemd-conflict-dialog>`
+            ? html`<writemd-conflict-dialog .conflict=${this.conflict}></writemd-conflict-dialog>`
             : ''
         }
       </div>

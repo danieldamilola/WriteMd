@@ -24,7 +24,11 @@ export function clearFormatting(text: string): string {
   while (changed) {
     changed = false
     for (const [before, after] of FORMATTING_PAIRS) {
-      if (out.length >= before.length + after.length && out.startsWith(before) && out.endsWith(after)) {
+      if (
+        out.length >= before.length + after.length &&
+        out.startsWith(before) &&
+        out.endsWith(after)
+      ) {
         out = out.slice(before.length, out.length - after.length)
         changed = true
       }

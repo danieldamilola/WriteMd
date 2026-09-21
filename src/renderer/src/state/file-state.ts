@@ -1,4 +1,5 @@
 import { SettingsStore } from './settings'
+import { applyConflictReview, applyConflictReload, applyConflictDismiss } from './conflict'
 import type { ElectronAPI } from '../../../shared/electron-api'
 import { showConfirm } from '../components/ConfirmDialog'
 
@@ -45,10 +46,12 @@ export function isOwnEcho(tab: TabDoc, diskContent: string): boolean {
   const normOriginal = tab.originalContent.replace(/\r\n/g, '\n')
   const normLastWritten = tab.lastWritten ? tab.lastWritten.replace(/\r\n/g, '\n') : null
   const normPending = tab.pendingWrite ? tab.pendingWrite.replace(/\r\n/g, '\n') : null
-  
-  return normDisk === normOriginal || 
-         (normLastWritten !== null && normDisk === normLastWritten) ||
-         (normPending !== null && normDisk === normPending)
+
+  return (
+    normDisk === normOriginal ||
+    (normLastWritten !== null && normDisk === normLastWritten) ||
+    (normPending !== null && normDisk === normPending)
+  )
 }
 
 export interface FileStateData {
@@ -308,9 +311,7 @@ export class FileState {
         } else {
           // Background tab with unsaved work: rebase without touching the buffer
           const tabs = this.state.tabs.map((t, i) =>
-            i === tabIndex
-              ? { ...t, originalContent: result.content, mtime: result.mtime }
-              : t
+            i === tabIndex ? { ...t, originalContent: result.content, mtime: result.mtime } : t
           )
           this.state = { ...this.state, tabs }
           this.syncMirror()
@@ -380,13 +381,22 @@ export class FileState {
       const contentToSave = tab.content
       this.state = {
         ...this.state,
-        tabs: this.state.tabs.map((t, i) => i === this.state.activeTab ? { ...t, pendingWrite: contentToSave } : t)
+        tabs: this.state.tabs.map((t, i) =>
+          i === this.state.activeTab ? { ...t, pendingWrite: contentToSave } : t
+        )
       }
       const result = await api()?.file?.write?.(tab.path, contentToSave)
       if (result) {
         const tabs = this.state.tabs.map((t, i) =>
           i === this.state.activeTab
-            ? { ...t, originalContent: contentToSave, mtime: result.mtime, dirty: false, lastWritten: contentToSave, pendingWrite: null }
+            ? {
+                ...t,
+                originalContent: contentToSave,
+                mtime: result.mtime,
+                dirty: false,
+                lastWritten: contentToSave,
+                pendingWrite: null
+              }
             : t
         )
         this.state = { ...this.state, tabs }
@@ -403,7 +413,9 @@ export class FileState {
       // Clear pending on error
       this.state = {
         ...this.state,
-        tabs: this.state.tabs.map((t, i) => i === this.state.activeTab ? { ...t, pendingWrite: null } : t)
+        tabs: this.state.tabs.map((t, i) =>
+          i === this.state.activeTab ? { ...t, pendingWrite: null } : t
+        )
       }
     }
     return false
@@ -651,54 +663,19 @@ export class FileState {
 
   resolveConflictReview(): void {
     if (!this.state.conflict) return
-    const { path, diskContent, diskMtime } = this.state.conflict
-    this.state = {
-      ...this.state,
-      conflict: null,
-      splitActive: true,
-      splitSurface: 'file',
-      secondaryDoc: {
-        path,
-        content: this.state.content,
-        originalContent: diskContent,
-        mtime: diskMtime,
-        dirty: false,
-        viewMode: 'source',
-        isDiff: true
-      }
-    }
+    this.state = { ...this.state, ...applyConflictReview(this.state) }
     this.notify()
   }
 
   resolveConflictReload(): void {
     if (!this.state.conflict) return
-    const { diskContent, diskMtime } = this.state.conflict
-    const tabs = this.state.tabs.map((t, i) =>
-      i === this.state.activeTab
-        ? {
-            ...t,
-            content: diskContent,
-            originalContent: diskContent,
-            mtime: diskMtime,
-            dirty: false
-          }
-        : t
-    )
-    this.state = {
-      ...this.state,
-      tabs,
-      conflict: null,
-      ...(this.state.secondaryDoc?.isDiff ? { splitActive: false, secondaryDoc: null } : {})
-    }
+    this.state = { ...this.state, ...applyConflictReload(this.state) }
     this.syncMirror()
     this.notify()
   }
 
   resolveConflictDismiss(): void {
-    this.state = {
-      ...this.state,
-      conflict: null
-    }
+    this.state = { ...this.state, ...applyConflictDismiss() }
     this.notify()
   }
 

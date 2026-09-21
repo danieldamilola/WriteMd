@@ -1,4 +1,8 @@
-import { autocompletion, type CompletionContext, type CompletionResult } from '@codemirror/autocomplete'
+import {
+  autocompletion,
+  type CompletionContext,
+  type CompletionResult
+} from '@codemirror/autocomplete'
 
 function slashCompletions(context: CompletionContext): CompletionResult | null {
   const word = context.matchBefore(/^\/\w*$/)

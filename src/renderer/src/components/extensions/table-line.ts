@@ -1,5 +1,11 @@
 import { ensureSyntaxTree, syntaxTree } from '@codemirror/language'
-import { Decoration, EditorView, ViewPlugin, type DecorationSet, type ViewUpdate } from '@codemirror/view'
+import {
+  Decoration,
+  EditorView,
+  ViewPlugin,
+  type DecorationSet,
+  type ViewUpdate
+} from '@codemirror/view'
 import type { Range, Extension } from '@codemirror/state'
 import { treeGrowthEffect } from './tree-progress'
 

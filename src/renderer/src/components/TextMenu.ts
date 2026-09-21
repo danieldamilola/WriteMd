@@ -1,7 +1,11 @@
 import { html, css, LitElement } from 'lit'
-import { customElement, property } from 'lit/decorators.js'
+import { customElement, property, state } from 'lit/decorators.js'
 import { EditorView } from '@codemirror/view'
 import { menuStyles, menuIcon } from './menu-styles'
+import type { ElectronAPI, VaultTreeNode } from '../../../shared/electron-api'
+import { FileState } from '../state/file-state'
+import { SettingsStore } from '../state/settings'
+import { basenameNoExt, isWebUrl, normalizeExternalUrl, shortPath } from '../utils/links'
 import {
   wrapInline,
   clearFormatting,
@@ -12,6 +16,10 @@ import {
   codeFence,
   mathBlock
 } from './text-format'
+
+function api(): ElectronAPI | undefined {
+  return typeof window !== 'undefined' ? window.electronAPI : undefined
+}
 
 interface MenuItem {
   id: string
@@ -76,34 +84,37 @@ export class TextMenu extends LitElement {
   static styles = [
     menuStyles,
     css`
-    :host {
-      position: fixed;
-      inset: 0;
-      z-index: 400;
-    }
-    .submenu {
-      display: none;
-      position: absolute;
-      top: -4px;
-      left: 100%;
-      margin-left: 4px;
-      min-width: 180px;
-      background: #141414;
-      border: 1px solid #2e2e32;
-      border-radius: 8px;
-      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
-      padding: 4px;
-    }
-    .submenu.left {
-      left: auto;
-      right: 100%;
-      margin-left: 0;
-      margin-right: 4px;
-    }
-    .has-sub:hover > .submenu {
-      display: block;
-    }
-  `
+      :host {
+        position: fixed;
+        inset: 0;
+        z-index: 400;
+      }
+      .submenu {
+        display: none;
+        position: absolute;
+        top: -4px;
+        left: 100%;
+        margin-left: 4px;
+        min-width: 180px;
+        max-width: 280px;
+        max-height: 280px;
+        overflow-y: auto;
+        background: #141414;
+        border: 1px solid #2e2e32;
+        border-radius: 8px;
+        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+        padding: 4px;
+      }
+      .submenu.left {
+        left: auto;
+        right: 100%;
+        margin-left: 0;
+        margin-right: 4px;
+      }
+      .has-sub:hover > .submenu {
+        display: block;
+      }
+    `
   ]
 
   @property({ type: Number }) x = 0
@@ -111,10 +122,41 @@ export class TextMenu extends LitElement {
   @property({ type: Boolean }) flip = false
   @property({ attribute: false }) view: EditorView | null = null
 
+  @state() private linkFiles: Array<{ path: string; label: string }> = []
+
+  private fileState = FileState.getInstance()
+  private settingsStore = SettingsStore.getInstance()
+
   connectedCallback(): void {
     super.connectedCallback()
     this.addEventListener('click', this.handleBackdropClick)
     window.addEventListener('keydown', this.handleKeyDown)
+    void this.loadLinkFiles()
+  }
+
+  /** Files linkable from here: open tabs, recent files, vault — any folder. */
+  private async loadLinkFiles(): Promise<void> {
+    const seen = new Set<string>()
+    const out: Array<{ path: string; label: string }> = []
+    const push = (p: string | null): void => {
+      if (!p || seen.has(p)) return
+      seen.add(p)
+      out.push({ path: p, label: shortPath(p) })
+    }
+    for (const tab of this.fileState.getState().tabs) push(tab.path)
+    const collect = (node: VaultTreeNode): void => {
+      if (node.isDirectory) {
+        for (const child of node.children ?? []) collect(child)
+      } else {
+        push(node.path)
+      }
+    }
+    const tree = await api()
+      ?.vault?.getTree?.()
+      .catch(() => undefined)
+    if (tree) collect(tree)
+    for (const p of this.settingsStore.get<string[]>('files.recentFiles', [])) push(p)
+    this.linkFiles = out.slice(0, 15)
   }
 
   disconnectedCallback(): void {
@@ -176,6 +218,63 @@ export class TextMenu extends LitElement {
     view.focus()
   }
 
+  /** Insert `[[file]]`, or `[[file|selected text]]` when text is selected. */
+  private insertWikiLink(targetPath: string, sel: string): void {
+    const view = this.view
+    if (!view) return
+    const stem = basenameNoExt(targetPath)
+    const insert = sel && sel !== stem ? `[[${stem}|${sel}]]` : `[[${stem}]]`
+    const r = view.state.selection.main
+    view.dispatch({ changes: { from: r.from, to: r.to, insert } })
+    view.dispatch({ selection: { anchor: r.from + insert.length } })
+    view.focus()
+  }
+
+  private async browseForLink(sel: string): Promise<void> {
+    const result = await api()?.file?.openDialog?.({
+      properties: ['openFile'],
+      filters: [{ name: 'Markdown', extensions: ['md', 'markdown', 'mdown', 'mkd'] }]
+    })
+    const picked = result && !result.canceled ? result.filePaths[0] : undefined
+    if (picked) this.insertWikiLink(picked, sel)
+    else this.view?.focus()
+  }
+
+  /**
+   * Insert a website link `[label](https://…)`:
+   * - clipboard holds a URL → use it (selection becomes the label)
+   * - selection itself is a URL → linkify in place as `[url](url)`
+   * - otherwise insert `[label](https://)` with the URL selected for typing
+   */
+  private async insertExternalLink(sel: string): Promise<void> {
+    const view = this.view
+    if (!view) return
+    let pastedUrl = ''
+    try {
+      const clip = await navigator.clipboard.readText()
+      if (clip && isWebUrl(clip)) pastedUrl = normalizeExternalUrl(clip)
+    } catch {
+      // Clipboard denied: fall through to manual entry.
+    }
+    const r = view.state.selection.main
+    if (isWebUrl(sel)) {
+      const url = normalizeExternalUrl(sel)
+      const text = `[${sel}](${url})`
+      view.dispatch({ changes: { from: r.from, to: r.to, insert: text } })
+      view.dispatch({ selection: { anchor: r.from + text.length } })
+    } else if (pastedUrl) {
+      const text = sel ? `[${sel}](${pastedUrl})` : `[${pastedUrl}](${pastedUrl})`
+      view.dispatch({ changes: { from: r.from, to: r.to, insert: text } })
+      view.dispatch({ selection: { anchor: r.from + text.length } })
+    } else {
+      const text = wrapInline(sel, '[', '](https://)')
+      view.dispatch({ changes: { from: r.from, to: r.to, insert: text } })
+      const urlFrom = r.from + text.length - 1
+      view.dispatch({ selection: { anchor: urlFrom, head: urlFrom + 8 } })
+    }
+    view.focus()
+  }
+
   private async run(id: string): Promise<void> {
     const view = this.view
     if (!view) {
@@ -183,23 +282,24 @@ export class TextMenu extends LitElement {
       return
     }
     const sel = this.mainText()
+    if (id === 'link-browse') {
+      await this.browseForLink(sel)
+      this.close()
+      return
+    }
+    if (id.startsWith('link-file::')) {
+      this.insertWikiLink(id.slice('link-file::'.length), sel)
+      this.close()
+      return
+    }
     switch (id) {
       case 'add-link': {
-        const text = wrapInline(sel, '[', '](url)')
-        const r = view.state.selection.main
-        const urlFrom = r.from + text.length - 4
-        view.dispatch({ changes: { from: r.from, to: r.to, insert: text } })
-        view.dispatch({ selection: { anchor: urlFrom, head: urlFrom + 3 } })
-        view.focus()
+        // No submenu (e.g. keyboard invocation): fall back to file browser.
+        await this.browseForLink(sel)
         break
       }
       case 'add-external-link': {
-        const text = wrapInline(sel, '[', ']()')
-        const r = view.state.selection.main
-        view.dispatch({ changes: { from: r.from, to: r.to, insert: text } })
-        const cursor = r.from + text.length - 1
-        view.dispatch({ selection: { anchor: cursor } })
-        view.focus()
+        await this.insertExternalLink(sel)
         break
       }
       case 'bold':
@@ -317,36 +417,67 @@ export class TextMenu extends LitElement {
     this.close()
   }
 
+  /** Add-link entry expands to linkable files plus a file browser. */
+  private linkMenuItem(): MenuItem {
+    return {
+      id: 'add-link',
+      label: 'Add link',
+      icon: 'link',
+      children: [
+        ...this.linkFiles.map((f) => ({
+          id: `link-file::${f.path}`,
+          label: f.label,
+          icon: 'file'
+        })),
+        {
+          id: 'link-browse',
+          label: 'Browse for file…',
+          icon: 'folder',
+          dividerBefore: this.linkFiles.length > 0
+        }
+      ]
+    }
+  }
+
   render(): unknown {
+    const items = MENU.map((item) => (item.id === 'add-link' ? this.linkMenuItem() : item))
     return html`
-      <div class="m-panel" style="left: ${this.x}px; top: ${this.y}px" @click=${(e: MouseEvent) => e.stopPropagation()}>
-        ${MENU.map((item) => html`
-          ${item.dividerBefore ? html`<div class="m-divider"></div>` : ''}
-          ${item.children
-            ? html`
-                <div class="m-item has-sub">
-                  ${menuIcon(item.icon)}
-                  <span>${item.label}</span>
-                  <span class="m-chevron">›</span>
-                  <div class="submenu ${this.flip ? 'left' : ''}">
-                    ${item.children.map(
-                      (sub) => html`
-                        <div class="m-item" @click=${() => void this.run(sub.id)}>
-                          ${menuIcon(sub.icon)}
-                          <span>${sub.label}</span>
-                        </div>
-                      `
-                    )}
-                  </div>
-                </div>
-              `
-            : html`
-                <div class="m-item" @click=${() => void this.run(item.id)}>
-                  ${menuIcon(item.icon)}
-                  <span>${item.label}</span>
-                </div>
-              `}
-        `)}
+      <div
+        class="m-panel"
+        style="left: ${this.x}px; top: ${this.y}px"
+        @click=${(e: MouseEvent) => e.stopPropagation()}
+      >
+        ${items.map(
+          (item) => html`
+            ${item.dividerBefore ? html`<div class="m-divider"></div>` : ''}
+            ${
+              item.children
+                ? html`
+                    <div class="m-item has-sub">
+                      ${menuIcon(item.icon)}
+                      <span>${item.label}</span>
+                      <span class="m-chevron">›</span>
+                      <div class="submenu ${this.flip ? 'left' : ''}">
+                        ${item.children.map(
+                          (sub) => html`
+                            <div class="m-item" @click=${() => void this.run(sub.id)}>
+                              ${menuIcon(sub.icon)}
+                              <span>${sub.label}</span>
+                            </div>
+                          `
+                        )}
+                      </div>
+                    </div>
+                  `
+                : html`
+                    <div class="m-item" @click=${() => void this.run(item.id)}>
+                      ${menuIcon(item.icon)}
+                      <span>${item.label}</span>
+                    </div>
+                  `
+            }
+          `
+        )}
       </div>
     `
   }

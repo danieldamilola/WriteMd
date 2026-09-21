@@ -1,3 +1,5 @@
+import type { WriteMDSettings, WriteMDSettingsPatch } from './settings-schema'
+
 export interface FileReadResult {
   content: string
   mtime: number
@@ -28,6 +30,25 @@ export interface ExportResult {
   ok: boolean
   path?: string
   reason?: string
+}
+
+/** A single chat message sent to an AI provider. */
+export interface ChatMessage {
+  role: 'user' | 'assistant' | 'system'
+  content: string
+}
+
+/** Update info pushed by electron-updater. Only version is contractual. */
+export interface UpdateInfo {
+  version?: string
+}
+
+/** Download progress pushed by electron-updater. */
+export interface UpdateProgress {
+  percent?: number
+  bytesPerSecond?: number
+  transferred?: number
+  total?: number
 }
 
 export interface ElectronAPI {
@@ -74,12 +95,18 @@ export interface ElectronAPI {
     getTree: () => Promise<VaultTreeNode>
   }
   settings: {
-    get: () => Promise<Record<string, unknown>>
-    set: (settings: Record<string, unknown>) => Promise<void>
+    get: () => Promise<WriteMDSettings>
+    set: (settings: WriteMDSettingsPatch) => Promise<void>
   }
   net: {
     fetchModels: (provider: string, apiKey: string) => Promise<string[]>
-    chat: (provider: string, model: string, apiKey: string, messages: any[], systemPrompt?: string) => Promise<string>
+    chat: (
+      provider: string,
+      model: string,
+      apiKey: string,
+      messages: ChatMessage[],
+      systemPrompt?: string
+    ) => Promise<string>
   }
   dialog: {
     showOpenDialog: (options: Electron.OpenDialogOptions) => Promise<Electron.OpenDialogReturnValue>
@@ -94,13 +121,13 @@ export interface ElectronAPI {
     html: (markdown: string, docPath: string | null) => Promise<ExportResult>
   }
   updater: {
-    check: () => Promise<any>
-    download: () => Promise<any>
+    check: () => Promise<{ updateInfo: UpdateInfo } | null>
+    download: () => Promise<string[]>
     install: () => void
-    onUpdateAvailable: (callback: (info: any) => void) => () => void
-    onUpdateNotAvailable: (callback: (info: any) => void) => () => void
-    onUpdateDownloaded: (callback: (info: any) => void) => () => void
-    onDownloadProgress: (callback: (info: any) => void) => () => void
+    onUpdateAvailable: (callback: (info: UpdateInfo) => void) => () => void
+    onUpdateNotAvailable: (callback: (info: UpdateInfo) => void) => () => void
+    onUpdateDownloaded: (callback: (info: UpdateInfo) => void) => () => void
+    onDownloadProgress: (callback: (info: UpdateProgress) => void) => () => void
     onError: (callback: (err: string) => void) => () => void
   }
   onFileOpenExternal: (callback: (path: string) => void) => () => void

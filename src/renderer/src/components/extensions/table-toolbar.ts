@@ -2,9 +2,9 @@ import { EditorView, showTooltip, type Tooltip } from '@codemirror/view'
 import { StateField, EditorState } from '@codemirror/state'
 import { ensureSyntaxTree, syntaxTree } from '@codemirror/language'
 
-function getTableRange(state: EditorState, pos: number): { from: number, to: number } | null {
+function getTableRange(state: EditorState, pos: number): { from: number; to: number } | null {
   const tree = ensureSyntaxTree(state, pos, 100) ?? syntaxTree(state)
-  let range: { from: number, to: number } | null = null
+  let range: { from: number; to: number } | null = null
   tree.iterate({
     from: pos,
     to: pos,
@@ -32,7 +32,7 @@ export function getTableTooltip(state: EditorState): Tooltip | null {
     create: (view: EditorView) => {
       const dom = document.createElement('div')
       dom.className = 'cm-table-toolbar'
-      
+
       const btnAddRow = document.createElement('button')
       btnAddRow.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg> Col`
       btnAddRow.title = 'Add Column Right'
@@ -43,14 +43,19 @@ export function getTableTooltip(state: EditorState): Tooltip | null {
         const line = view.state.doc.lineAt(pos)
         // Check how many pipes
         const pipes = line.text.split('|').length - 1
-        let newRow = '\n|' + Array(Math.max(1, pipes - 1)).fill('          ').join('|') + '|'
+        const newRow =
+          '\n|' +
+          Array(Math.max(1, pipes - 1))
+            .fill('          ')
+            .join('|') +
+          '|'
         view.dispatch({
           changes: { from: line.to, insert: newRow },
           selection: { anchor: line.to + 3 }
         })
         view.focus()
       }
-      
+
       const btnAddCol = document.createElement('button')
       btnAddCol.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg> Row`
       btnAddCol.title = 'Add Row Below'
@@ -58,12 +63,12 @@ export function getTableTooltip(state: EditorState): Tooltip | null {
         e.preventDefault()
         const tableRange = getTableRange(view.state, view.state.selection.main.head)
         if (!tableRange) return
-        
-        const changes: { from: number, insert: string }[] = []
+
+        const changes: { from: number; insert: string }[] = []
         const doc = view.state.doc
         const startLine = doc.lineAt(tableRange.from)
         const endLine = doc.lineAt(tableRange.to)
-        
+
         for (let l = startLine.number; l <= endLine.number; l++) {
           const line = doc.line(l)
           // Insert " |" at the end of every line, or " --- |" for the separator
@@ -73,19 +78,19 @@ export function getTableTooltip(state: EditorState): Tooltip | null {
             changes.push({ from: line.to, insert: '          |' })
           }
         }
-        
+
         view.dispatch({ changes })
         view.focus()
       }
 
-      const setColumnAlignment = (align: 'left' | 'center' | 'right') => {
+      const setColumnAlignment = (align: 'left' | 'center' | 'right'): void => {
         const pos = view.state.selection.main.head
         const tableRange = getTableRange(view.state, pos)
         if (!tableRange) return
-        
+
         const doc = view.state.doc
         const startLine = doc.lineAt(tableRange.from)
-        
+
         const currentLine = doc.lineAt(pos)
         const prefix = currentLine.text.substring(0, pos - currentLine.from)
         let colIdx = (prefix.match(/\|/g) || []).length - 1
@@ -93,12 +98,12 @@ export function getTableTooltip(state: EditorState): Tooltip | null {
 
         const sepLine = doc.line(startLine.number + 1)
         const cells = sepLine.text.split('|')
-        
+
         let actualColIdx = colIdx
         if (sepLine.text.trim().startsWith('|')) {
           actualColIdx += 1
         }
-        
+
         if (actualColIdx >= cells.length - 1) return
 
         let newCell = ' -------- '
@@ -118,17 +123,26 @@ export function getTableTooltip(state: EditorState): Tooltip | null {
       const btnAlignLeft = document.createElement('button')
       btnAlignLeft.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="21" y1="6" x2="3" y2="6"></line><line x1="15" y1="12" x2="3" y2="12"></line><line x1="17" y1="18" x2="3" y2="18"></line></svg>`
       btnAlignLeft.title = 'Align Left'
-      btnAlignLeft.onclick = (e) => { e.preventDefault(); setColumnAlignment('left') }
-      
+      btnAlignLeft.onclick = (e) => {
+        e.preventDefault()
+        setColumnAlignment('left')
+      }
+
       const btnAlignCenter = document.createElement('button')
       btnAlignCenter.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="21" y1="6" x2="3" y2="6"></line><line x1="19" y1="12" x2="5" y2="12"></line><line x1="19" y1="18" x2="5" y2="18"></line></svg>`
       btnAlignCenter.title = 'Align Center'
-      btnAlignCenter.onclick = (e) => { e.preventDefault(); setColumnAlignment('center') }
-      
+      btnAlignCenter.onclick = (e) => {
+        e.preventDefault()
+        setColumnAlignment('center')
+      }
+
       const btnAlignRight = document.createElement('button')
       btnAlignRight.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="21" y1="6" x2="3" y2="6"></line><line x1="21" y1="12" x2="9" y2="12"></line><line x1="21" y1="18" x2="7" y2="18"></line></svg>`
       btnAlignRight.title = 'Align Right'
-      btnAlignRight.onclick = (e) => { e.preventDefault(); setColumnAlignment('right') }
+      btnAlignRight.onclick = (e) => {
+        e.preventDefault()
+        setColumnAlignment('right')
+      }
 
       // We just do a simple Add Row for MVP
       dom.appendChild(btnAddRow)

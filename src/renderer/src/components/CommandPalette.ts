@@ -2,79 +2,74 @@ import { html, css, LitElement } from 'lit'
 import { customElement, state } from 'lit/decorators.js'
 import { SettingsStore } from '../state/settings'
 import { scrollbarStyles } from './scrollbars'
-import {
-  COMMANDS,
-  effectiveBinding,
-  formatBinding,
-  fuzzyMatch
-} from '../state/shortcuts'
+import { COMMANDS, effectiveBinding, formatBinding, fuzzyMatch } from '../state/shortcuts'
 
 @customElement('writemd-command-palette')
 export class CommandPalette extends LitElement {
   static styles = [
     scrollbarStyles,
     css`
-    :host {
-      position: fixed;
-      inset: 0;
-      z-index: 400;
-      display: flex;
-      justify-content: center;
-      align-items: flex-start;
-      padding-top: 12vh;
-      background: rgba(0, 0, 0, 0.5);
-    }
-    .panel {
-      width: min(560px, 92vw);
-      background: #141414;
-      border: 1px solid #2e2e32;
-      border-radius: 8px;
-      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
-      overflow: hidden;
-    }
-    input {
-      width: 100%;
-      box-sizing: border-box;
-      background: transparent;
-      border: none;
-      border-bottom: 1px solid #2a2a2e;
-      padding: 12px 16px;
-      color: #e8e8e8;
-      font-size: 14px;
-      outline: none;
-      font-family: inherit;
-    }
-    .list {
-      max-height: 320px;
-      overflow-y: auto;
-      padding: 4px;
-    }
-    .item {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      padding: 8px 12px;
-      border-radius: 4px;
-      cursor: pointer;
-      color: #c9c9c9;
-      font-size: 13px;
-    }
-    .item.selected {
-      background: #2b2b2f;
-      color: #ffffff;
-    }
-    .hint {
-      color: #8a8a8a;
-      font-size: 12px;
-      font-family: var(--font-mono, monospace);
-    }
-    .empty {
-      padding: 16px;
-      color: #8a8a8a;
-      font-size: 13px;
-      text-align: center;
-    }
-  `
+      :host {
+        position: fixed;
+        inset: 0;
+        z-index: 400;
+        display: flex;
+        justify-content: center;
+        align-items: flex-start;
+        padding-top: 12vh;
+        background: rgba(0, 0, 0, 0.5);
+      }
+      .panel {
+        width: min(560px, 92vw);
+        background: #141414;
+        border: 1px solid #2e2e32;
+        border-radius: 8px;
+        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+        overflow: hidden;
+      }
+      input {
+        width: 100%;
+        box-sizing: border-box;
+        background: transparent;
+        border: none;
+        border-bottom: 1px solid #2a2a2e;
+        padding: 12px 16px;
+        color: #e8e8e8;
+        font-size: 14px;
+        outline: none;
+        font-family: inherit;
+      }
+      .list {
+        max-height: 320px;
+        overflow-y: auto;
+        padding: 4px;
+      }
+      .item {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 8px 12px;
+        border-radius: 4px;
+        cursor: pointer;
+        color: #c9c9c9;
+        font-size: 13px;
+      }
+      .item.selected {
+        background: #2b2b2f;
+        color: #ffffff;
+      }
+      .hint {
+        color: #8a8a8a;
+        font-size: 12px;
+        font-family: var(--font-mono, monospace);
+      }
+      .empty {
+        padding: 16px;
+        color: #8a8a8a;
+        font-size: 13px;
+        text-align: center;
+      }
+    `
   ]
 
   @state() private query = ''
@@ -115,7 +110,9 @@ export class CommandPalette extends LitElement {
   }
 
   private run(id: string): void {
-    this.dispatchEvent(new CustomEvent('run-command', { detail: { id }, bubbles: true, composed: true }))
+    this.dispatchEvent(
+      new CustomEvent('run-command', { detail: { id }, bubbles: true, composed: true })
+    )
   }
 
   private handleInput(e: InputEvent): void {
@@ -143,7 +140,12 @@ export class CommandPalette extends LitElement {
   render(): unknown {
     const list = this.filtered
     return html`
-      <div class="panel" role="dialog" aria-modal="true" @click=${(e: MouseEvent) => e.stopPropagation()}>
+      <div
+        class="panel"
+        role="dialog"
+        aria-modal="true"
+        @click=${(e: MouseEvent) => e.stopPropagation()}
+      >
         <input
           type="text"
           placeholder="Type a command..."
@@ -152,22 +154,24 @@ export class CommandPalette extends LitElement {
           @keydown=${this.handleKeyDown}
         />
         <div class="list">
-          ${list.length === 0
-            ? html`<div class="empty">No matching commands</div>`
-            : list.map(
-                (c, i) => html`
-                  <div
-                    class=${i === this.selected ? 'item selected' : 'item'}
-                    @click=${() => this.run(c.id)}
-                    @mousemove=${() => {
-                      if (this.selected !== i) this.selected = i
-                    }}
-                  >
-                    <span>${c.title}</span>
-                    <span class="hint">${this.bindingLabel(c.id)}</span>
-                  </div>
-                `
-              )}
+          ${
+            list.length === 0
+              ? html`<div class="empty">No matching commands</div>`
+              : list.map(
+                  (c, i) => html`
+                    <div
+                      class=${i === this.selected ? 'item selected' : 'item'}
+                      @click=${() => this.run(c.id)}
+                      @mousemove=${() => {
+                        if (this.selected !== i) this.selected = i
+                      }}
+                    >
+                      <span>${c.title}</span>
+                      <span class="hint">${this.bindingLabel(c.id)}</span>
+                    </div>
+                  `
+                )
+          }
         </div>
       </div>
     `

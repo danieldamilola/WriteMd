@@ -1,4 +1,5 @@
 import type { ElectronAPI } from '../../../shared/electron-api'
+import { DEFAULT_SETTINGS, type WriteMDSettings } from '../../../shared/settings-schema'
 
 function api(): ElectronAPI | undefined {
   return typeof window !== 'undefined' ? window.electronAPI : undefined
@@ -13,7 +14,7 @@ export function applySettingsToDOM(store: SettingsStore): void {
   const lineHeight = store.get('editor.lineHeight', 1.7)
   const fontFamily = store.get('editor.fontFamily', 'JetBrains Mono')
   const accentColor = store.get('appearance.accentColor', '') as string
-  
+
   const root = document.documentElement
   root.style.setProperty('--editor-font-size', `${fontSize}px`)
   root.style.setProperty('--editor-line-height', String(lineHeight))
@@ -29,7 +30,7 @@ export function applySettingsToDOM(store: SettingsStore): void {
     root.style.removeProperty('--accent')
     root.style.removeProperty('--accent-hover')
     root.style.removeProperty('--border-focus')
-    
+
     // Fallback to monochrome for UI elements but keep syntax highlights
     root.style.setProperty('--accent', 'var(--text)')
     root.style.setProperty('--accent-hover', 'var(--text-secondary)')
@@ -39,7 +40,7 @@ export function applySettingsToDOM(store: SettingsStore): void {
 
 export class SettingsStore {
   private static instance: SettingsStore
-  private settings: Record<string, unknown> = {}
+  private settings: WriteMDSettings = structuredClone(DEFAULT_SETTINGS)
   private listeners = new Map<string, Set<(value: unknown) => void>>()
   private initialized = false
 
@@ -53,16 +54,18 @@ export class SettingsStore {
   async init(): Promise<void> {
     if (this.initialized) return
     try {
-      this.settings = (await api()?.settings?.get?.()) ?? {}
+      const loaded = (await api()?.settings?.get?.()) as WriteMDSettings | undefined
+      this.settings = { ...structuredClone(DEFAULT_SETTINGS), ...(loaded ?? {}) }
     } catch {
-      this.settings = {}
+      this.settings = structuredClone(DEFAULT_SETTINGS)
     }
     this.initialized = true
     applySettingsToDOM(this)
   }
 
+  /** Reset to factory defaults and persist. */
   reset(): void {
-    this.settings = {}
+    this.settings = structuredClone(DEFAULT_SETTINGS)
     void api()?.settings?.set?.(this.settings)
     applySettingsToDOM(this)
   }
@@ -79,7 +82,7 @@ export class SettingsStore {
 
   set(key: string, value: unknown): void {
     const keys = key.split('.')
-    let target = this.settings as Record<string, unknown>
+    let target = this.settings as unknown as Record<string, unknown>
     for (let i = 0; i < keys.length - 1; i++) {
       const k = keys[i]
       const next = target[k]
@@ -112,4 +115,3 @@ export class SettingsStore {
     }
   }
 }
-

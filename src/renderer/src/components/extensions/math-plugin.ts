@@ -4,10 +4,10 @@ import { RangeSetBuilder } from '@codemirror/state'
 import { readOnlyFacet } from './read-only'
 import { MathWidget } from '../widgets/MathWidget'
 
-function getMathDecorations(state: EditorState) {
+function getMathDecorations(state: EditorState): DecorationSet {
   const builder = new RangeSetBuilder<Decoration>()
   const readOnly = state.facet(readOnlyFacet)
-  
+
   const activeLines = new Set<number>()
   if (!readOnly) {
     for (const r of state.selection.ranges) {
@@ -19,28 +19,32 @@ function getMathDecorations(state: EditorState) {
 
   // A very simple regex for matching $$...$$ and $...$
   const text = state.doc.toString()
-  
+
   const blockRegex = /\$\$([\s\S]*?)\$\$/g
   let match
-  const blockMatches: {from: number, to: number}[] = []
-  const decos: {from: number, to: number, deco: Decoration}[] = []
-  
+  const blockMatches: { from: number; to: number }[] = []
+  const decos: { from: number; to: number; deco: Decoration }[] = []
+
   while ((match = blockRegex.exec(text)) !== null) {
     const from = match.index
     const to = from + match[0].length
     const content = match[1].trim()
-    blockMatches.push({from, to})
-    
+    blockMatches.push({ from, to })
+
     let active = false
     const startLine = state.doc.lineAt(from).number
     const endLine = state.doc.lineAt(to).number
     for (let n = startLine; n <= endLine; n++) {
-      if (activeLines.has(n)) { active = true; break; }
+      if (activeLines.has(n)) {
+        active = true
+        break
+      }
     }
-    
+
     if (!active || readOnly) {
       decos.push({
-        from, to,
+        from,
+        to,
         deco: Decoration.replace({
           widget: new MathWidget(content, true),
           block: true
@@ -55,26 +59,27 @@ function getMathDecorations(state: EditorState) {
     const from = match.index
     const to = from + match[0].length
     const content = match[1].trim()
-    
+
     // Ensure it doesn't overlap with block matches
-    if (blockMatches.some(m => from >= m.from && to <= m.to)) continue
-    
+    if (blockMatches.some((m) => from >= m.from && to <= m.to)) continue
+
     const line = state.doc.lineAt(from).number
     if (!activeLines.has(line) || readOnly) {
       decos.push({
-        from, to,
+        from,
+        to,
         deco: Decoration.replace({
           widget: new MathWidget(content, false)
         })
       })
     }
   }
-  
+
   decos.sort((a, b) => a.from - b.from)
   for (const d of decos) {
     builder.add(d.from, d.to, d.deco)
   }
-  
+
   return builder.finish()
 }
 
@@ -88,5 +93,5 @@ export const mathPlugin = StateField.define<DecorationSet>({
     }
     return value
   },
-  provide: f => EditorView.decorations.from(f)
+  provide: (f) => EditorView.decorations.from(f)
 })

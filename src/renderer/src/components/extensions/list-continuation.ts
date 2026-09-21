@@ -10,7 +10,7 @@ export function insertTightListItem(view: EditorView): boolean {
   const line = state.doc.lineAt(from)
 
   const tree = syntaxTree(state)
-  let cursor = tree.resolveInner(from, -1).cursor()
+  const cursor = tree.resolveInner(from, -1).cursor()
   let inBulletList = false
   for (;;) {
     if (cursor.name === 'BulletList') {

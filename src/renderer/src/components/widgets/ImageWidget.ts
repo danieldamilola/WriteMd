@@ -13,11 +13,7 @@ export class ImageWidget extends WidgetType {
   }
 
   eq(other: ImageWidget): boolean {
-    return (
-      other.src === this.src &&
-      other.alt === this.alt &&
-      other.docPath === this.docPath
-    )
+    return other.src === this.src && other.alt === this.alt && other.docPath === this.docPath
   }
 
   toDOM(view: EditorView): HTMLElement {

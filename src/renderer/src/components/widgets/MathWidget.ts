@@ -1,4 +1,4 @@
-import { WidgetType, EditorView } from '@codemirror/view'
+import { WidgetType } from '@codemirror/view'
 import katex from 'katex'
 
 export class MathWidget extends WidgetType {
@@ -13,23 +13,23 @@ export class MathWidget extends WidgetType {
     return other.content === this.content && other.isBlock === this.isBlock
   }
 
-  toDOM(_view: EditorView): HTMLElement {
+  toDOM(): HTMLElement {
     const span = document.createElement('span')
     span.className = this.isBlock ? 'cm-live-math cm-live-math-block' : 'cm-live-math'
-    
+
     const renderContainer = document.createElement('span')
     renderContainer.className = 'cm-math-render'
-    
+
     try {
       katex.render(this.content, renderContainer, {
         displayMode: this.isBlock,
         throwOnError: false,
         errorColor: '#ff6b6b'
       })
-    } catch (e) {
+    } catch {
       renderContainer.textContent = `[Math Error] ${this.content}`
     }
-    
+
     span.appendChild(renderContainer)
 
     if (this.isBlock) {
@@ -41,7 +41,9 @@ export class MathWidget extends WidgetType {
         e.stopPropagation()
         navigator.clipboard.writeText(this.content)
         copyBtn.style.color = 'var(--success)'
-        setTimeout(() => { copyBtn.style.color = '' }, 2000)
+        setTimeout(() => {
+          copyBtn.style.color = ''
+        }, 2000)
       }
       span.appendChild(copyBtn)
     }
