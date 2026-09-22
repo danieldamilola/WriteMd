@@ -130,6 +130,26 @@ async function atomicWrite(targetPath: string, data: string | Buffer): Promise<n
   return stats.mtimeMs
 }
 
+const PAGE_SIZE_MM: Record<PdfPageSize, { width: number; height: number }> = {
+  A0: { width: 841, height: 1189 },
+  A1: { width: 594, height: 841 },
+  A2: { width: 420, height: 594 },
+  A3: { width: 297, height: 420 },
+  A4: { width: 210, height: 297 },
+  A5: { width: 148, height: 210 },
+  A6: { width: 105, height: 148 },
+  Legal: { width: 215.9, height: 355.6 },
+  Letter: { width: 215.9, height: 279.4 },
+  Tabloid: { width: 279.4, height: 431.8 },
+  Ledger: { width: 431.8, height: 279.4 }
+}
+
+function pageSizePx(pageSize: PdfPageSize): { width: number; height: number } {
+  const mm = PAGE_SIZE_MM[pageSize]
+  const toPx = (v: number): number => Math.round(v * 3.7795275591)
+  return { width: toPx(mm.width), height: toPx(mm.height) }
+}
+
 async function renderInHiddenWindow(html: string): Promise<Buffer> {
   const win = new BrowserWindow({
     show: false,
@@ -138,14 +158,15 @@ async function renderInHiddenWindow(html: string): Promise<Buffer> {
   try {
     await win.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`)
     const settings = getSettings()
-    // pdfMargin is stored in millimeters; Electron wants pixels at 96 DPI.
-    // Clamped so a bad stored value can never exceed the page.
-    const marginPx = Math.min(
-      200,
-      Math.round(Math.max(0, settings.export.pdfMargin) * 3.7795275591)
-    )
+    const pageSize = resolvePageSize(settings.export.pdfPageSize)
+    const { width, height } = pageSizePx(pageSize)
+    const rawMargin = Number(settings.export.pdfMargin)
+    const marginMm = Number.isFinite(rawMargin) ? Math.max(0, rawMargin) : 24
+    // Convert mm to px (96 DPI) and clamp to < half page minus 20px breathing room
+    const maxMarginPx = Math.max(0, Math.floor(Math.min(width, height) / 2 - 20))
+    const marginPx = Math.min(maxMarginPx, Math.round(marginMm * 3.7795275591))
     return await win.webContents.printToPDF({
-      pageSize: resolvePageSize(settings.export.pdfPageSize),
+      pageSize,
       margins: {
         marginType: 'custom',
         top: marginPx,
@@ -172,13 +193,17 @@ export async function exportPdf(
     'pdf'
   )
   if (!filePath) return { ok: false, reason: 'canceled' }
-  const html = renderExportHtml(markdown, {
-    title: titleFromPath(docPath),
-    theme: resolveTheme()
-  })
-  const pdfData = await renderInHiddenWindow(html)
-  await atomicWrite(filePath, pdfData)
-  return { ok: true, path: filePath }
+  try {
+    const html = renderExportHtml(markdown, {
+      title: titleFromPath(docPath),
+      theme: resolveTheme()
+    })
+    const pdfData = await renderInHiddenWindow(html)
+    await atomicWrite(filePath, pdfData)
+    return { ok: true, path: filePath }
+  } catch (e) {
+    return { ok: false, reason: e instanceof Error ? e.message : String(e) }
+  }
 }
 
 export async function exportHtml(
