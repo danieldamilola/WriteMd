@@ -417,6 +417,17 @@ export class WelcomeScreen extends LitElement {
       mask-image: linear-gradient(to right, black 80%, transparent 100%);
     }
 
+    /* ───── Vertical panel ───── */
+    .main-content.vertical {
+      width: min(406px, 92%);
+      flex-direction: column;
+      gap: 48px;
+    }
+    .main-content.vertical .recent-files,
+    .main-content.vertical .buttons {
+      width: 100%;
+    }
+
     /* ───── Responsive ───── */
     @container (max-width: 1000px) {
       .main-content {
@@ -435,13 +446,19 @@ export class WelcomeScreen extends LitElement {
   `
 
   @state() private recentFiles: RecentFile[] = []
+  @state() private panelOrientation: 'horizontal' | 'vertical' = 'horizontal'
   private readonly watermarkUrl = watermarkPng as string
   private settingsStore = SettingsStore.getInstance()
 
   async connectedCallback(): Promise<void> {
     super.connectedCallback()
+    this.panelOrientation = this.settingsStore.get('appearance.panelOrientation', 'horizontal') as 'horizontal' | 'vertical'
+    this.settingsStore.subscribe('appearance.panelOrientation', (v) => {
+      this.panelOrientation = (v as 'horizontal' | 'vertical') ?? 'horizontal'
+    })
     try {
       await this.settingsStore.init()
+      this.panelOrientation = this.settingsStore.get('appearance.panelOrientation', 'horizontal') as 'horizontal' | 'vertical'
       const storedRecent = this.settingsStore.get<string[]>('files.recentFiles', [])
       if (storedRecent && storedRecent.length > 0) {
         this.recentFiles = storedRecent.slice(0, 4).map((fullPath) => {
@@ -574,7 +591,7 @@ export class WelcomeScreen extends LitElement {
           <img src="${this.watermarkUrl}" alt="" />
         </div>
 
-        <div class="main-content">
+        <div class="main-content ${this.panelOrientation === 'vertical' ? 'vertical' : ''}">
           <!-- Recent Files -->
           <div class="recent-files">
             <div class="recent-header">Recent files</div>
