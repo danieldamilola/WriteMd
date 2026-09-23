@@ -358,12 +358,9 @@ export class WelcomeScreen extends LitElement {
       align-items: center;
     }
 
-    /* Gradient-border button wrapper */
     .btn-wrap {
       position: relative;
       border-radius: 5px;
-      background: linear-gradient(180deg, #282828 0%, #000000 100%);
-      padding: 1px;
     }
     .btn-wrap.w-160 {
       width: 160px;
