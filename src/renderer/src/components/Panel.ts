@@ -19,23 +19,6 @@ export class WriteMdPanel extends LitElement {
       container-type: size;
     }
 
-    /* 1px Gradient border */
-    :host::before {
-      content: '';
-      position: absolute;
-      inset: 0;
-      border-radius: 10px;
-      padding: 1px;
-      background: linear-gradient(180deg, #282828 0%, #000000 100%);
-      -webkit-mask:
-        linear-gradient(#fff 0 0) content-box,
-        linear-gradient(#fff 0 0);
-      -webkit-mask-composite: xor;
-      mask-composite: exclude;
-      pointer-events: none;
-      z-index: 1;
-    }
-
     .fade-bar {
       position: absolute;
       top: 0;
