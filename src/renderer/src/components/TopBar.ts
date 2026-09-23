@@ -13,8 +13,8 @@ export class WriteMdTopBar extends LitElement {
     :host {
       display: flex;
       align-items: center;
-      height: 56px;
-      padding: 12px 0 12px 28px;
+      height: 40px;
+      padding: 6px 0 6px 28px;
       flex-shrink: 0;
       -webkit-app-region: drag;
       user-select: none;
@@ -58,7 +58,7 @@ export class WriteMdTopBar extends LitElement {
       display: flex;
       gap: 0;
       align-self: stretch;
-      margin: -12px 0;
+      margin: -6px 0;
     }
   `
 
