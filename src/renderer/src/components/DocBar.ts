@@ -21,11 +21,13 @@ export class DocBar extends LitElement {
     css`
       :host {
         display: flex;
-        flex: 1;
         min-width: 0;
         min-height: 0;
         /* Top-bar slot is a window-drag region; opt out so clicks land. */
         -webkit-app-region: no-drag;
+      }
+      :host([compact]) {
+        flex: 1;
       }
       .sub-header {
         display: flex;
