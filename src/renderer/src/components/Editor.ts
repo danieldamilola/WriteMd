@@ -783,7 +783,7 @@ CRITICAL INSTRUCTION FOR FILE TRACKING: You MUST check which file you started th
     this.fileState.quickToggle()
   }
 
-  private async handleExport(kind: 'pdf' | 'html'): Promise<void> {
+  private async handleExport(kind: 'pdf' | 'html' | 'docx'): Promise<void> {
     this.showMoreMenu = false
     const bridge = api()?.export
     if (!bridge) {
@@ -974,6 +974,7 @@ CRITICAL INSTRUCTION FOR FILE TRACKING: You MUST check which file you started th
       { id: 'rename', label: 'Rename', icon: 'pencil', dividerBefore: true },
       { id: 'move', label: 'Move file to', icon: 'folder' },
       { id: 'pdf', label: 'Export to PDF', icon: 'file', dividerBefore: true },
+      { id: 'docx', label: 'Export to Word', icon: 'file' },
       { id: 'find', label: 'Find', icon: 'search', dividerBefore: true },
       { id: 'replace', label: 'Replace', icon: 'search' },
       { id: 'copy-path', label: 'Copy path', icon: 'copy', dividerBefore: true },
@@ -1009,6 +1010,9 @@ CRITICAL INSTRUCTION FOR FILE TRACKING: You MUST check which file you started th
         break
       case 'pdf':
         await this.handleExport('pdf')
+        break
+      case 'docx':
+        await this.handleExport('docx')
         break
       case 'find':
         this.openFind('find')

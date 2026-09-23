@@ -119,6 +119,7 @@ export interface ElectronAPI {
   export: {
     pdf: (markdown: string, docPath: string | null) => Promise<ExportResult>
     html: (markdown: string, docPath: string | null) => Promise<ExportResult>
+    docx: (markdown: string, docPath: string | null) => Promise<ExportResult>
   }
   updater: {
     check: () => Promise<{ updateInfo: UpdateInfo } | null>

@@ -84,7 +84,9 @@ const writemdAPI = {
     pdf: (markdown: string, docPath: string | null) =>
       ipcRenderer.invoke('export:pdf', markdown, docPath),
     html: (markdown: string, docPath: string | null) =>
-      ipcRenderer.invoke('export:html', markdown, docPath)
+      ipcRenderer.invoke('export:html', markdown, docPath),
+    docx: (markdown: string, docPath: string | null) =>
+      ipcRenderer.invoke('export:docx', markdown, docPath)
   },
   updater: {
     check: () => ipcRenderer.invoke('updater:check'),

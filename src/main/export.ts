@@ -225,3 +225,61 @@ export async function exportHtml(
   await atomicWrite(filePath, html)
   return { ok: true, path: filePath }
 }
+
+// ---------------------------------------------------------------------------
+// DOCX export — mirrors Paperling's approach (pure JS, no headless PDF)
+// Uses @turbodocx/html-to-docx to convert the same markdown-rendered HTML
+// into a real Office Open XML document. Light, print-style, white background.
+// ---------------------------------------------------------------------------
+type HtmlToDocx = (html: string, header?: string | null, options?: Record<string, unknown>, footer?: string | null) => Promise<ArrayBuffer | Blob | Uint8Array>
+
+async function ensureDocxRuntime(): Promise<void> {
+  const g = globalThis as Record<string, unknown>
+  if (typeof g.global === 'undefined') g.global = g
+  if (typeof g.process === 'undefined') g.process = { env: {} }
+  if (typeof g.Buffer === 'undefined') {
+    const { Buffer } = await import('buffer')
+    g.Buffer = Buffer
+  }
+}
+
+export async function exportDocx(
+  getWindow: () => BrowserWindowType | null,
+  markdown: string,
+  docPath: string | null
+): Promise<ExportResult> {
+  if (!markdown || markdown.trim() === '') {
+    return { ok: false, reason: 'Document is empty' }
+  }
+  const title = titleFromPath(docPath)
+  const body = md.render(markdown)
+  const docHtml = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${escapeHtml(title)}</title></head><body><article>${body}</article></body></html>`
+
+  const filePath = await showExportSaveDialog(getWindow, defaultExportPath(docPath, 'docx'), 'Word Document', 'docx')
+  if (!filePath) return { ok: false, reason: 'canceled' }
+
+  try {
+    await ensureDocxRuntime()
+    const mod = await import('@turbodocx/html-to-docx')
+    const convert = ((mod as { default?: HtmlToDocx }).default ?? (mod as unknown as HtmlToDocx)) as HtmlToDocx
+    const out = await convert(docHtml, null, {
+      title,
+      creator: 'WriteMd',
+      footer: false,
+      pageNumber: false,
+      font: 'Calibri',
+      fontSize: 22,
+      table: { row: { cantSplit: true } }
+    })
+    const bytes =
+      out instanceof Blob
+        ? new Uint8Array(await out.arrayBuffer())
+        : out instanceof Uint8Array
+          ? out
+          : new Uint8Array(out as ArrayBuffer)
+    await atomicWrite(filePath, Buffer.from(bytes))
+    return { ok: true, path: filePath }
+  } catch (e) {
+    return { ok: false, reason: e instanceof Error ? e.message : String(e) }
+  }
+}

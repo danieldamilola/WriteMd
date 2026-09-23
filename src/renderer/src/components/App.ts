@@ -194,6 +194,9 @@ export class WriteMdApp extends LitElement {
       case 'export-html':
         await this.handleExport('html')
         break
+      case 'export-docx':
+        await this.handleExport('docx')
+        break
       case 'quick-toggle':
         this.fileState.quickToggle()
         break
@@ -245,7 +248,7 @@ export class WriteMdApp extends LitElement {
     }
   }
 
-  private async handleExport(kind: 'pdf' | 'html'): Promise<void> {
+  private async handleExport(kind: 'pdf' | 'html' | 'docx'): Promise<void> {
     const s = this.fileState.getState()
     try {
       const result = await api()?.export?.[kind]?.(s.content, s.path)
