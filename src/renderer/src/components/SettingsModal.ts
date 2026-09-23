@@ -55,7 +55,8 @@ const FONT_FAMILIES = [
   { id: 'Lora', name: 'Lora', type: 'Serif' },
   { id: 'Source Serif Pro', name: 'Source Serif', type: 'Serif' },
   { id: 'Fira Sans', name: 'Fira Sans', type: 'Sans-serif' },
-  { id: 'JetBrains Mono', name: 'JetBrains Mono', type: 'Monospace' }
+  { id: 'JetBrains Mono', name: 'JetBrains Mono', type: 'Monospace' },
+  { id: 'Geist Mono', name: 'Geist Mono', type: 'Monospace' }
 ]
 
 @customElement('writemd-settings-modal')
