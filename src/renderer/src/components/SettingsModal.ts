@@ -84,7 +84,7 @@ export class SettingsModal extends LitElement {
 
     .modal-dialog {
       width: min(900px, 94vw);
-      height: min(620px, 88vh);
+      height: min(700px, 90vh);
       display: flex;
       background: var(--bg-elevated);
       border: 1px solid var(--border-subtle);
