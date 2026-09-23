@@ -163,20 +163,7 @@ export class Editor extends LitElement {
         background: rgba(255, 255, 255, 0.1);
       }
 
-      .workspace.vertical {
-        flex-direction: column;
-      }
-      .workspace.vertical .resizer {
-        width: auto;
-        height: 5px;
-        cursor: row-resize;
-      }
-      .workspace.vertical .pane {
-        min-height: 100px;
-        min-width: 0;
-        width: 100%;
-        height: auto;
-      }
+
 
       input.title-input {
         background: transparent;
@@ -340,10 +327,6 @@ export class Editor extends LitElement {
     window.addEventListener('writemd-open-wikilink', this.handleOpenWikiLink)
     this.settingsStore = SettingsStore.getInstance()
     this.panelOrientation = this.settingsStore.get('appearance.panelOrientation', 'horizontal') as 'horizontal' | 'vertical'
-    if (this.panelOrientation === 'vertical') {
-      const st = this.fileState.getState()
-      if (!st.splitActive) this.fileState.setSplitSurface('files')
-    }
     this.checkAiConfigured()
     this.settingsUnsubs.push(
       this.settingsStore.subscribe('ai.apiKey', () => this.checkAiConfigured())
@@ -353,11 +336,7 @@ export class Editor extends LitElement {
     )
     this.settingsUnsubs.push(
       this.settingsStore.subscribe('appearance.panelOrientation', (v) => {
-        const next = (v as 'horizontal' | 'vertical') ?? 'horizontal'
-        this.panelOrientation = next
-        if (next === 'vertical' && !this.fileState.getState().splitActive) {
-          this.fileState.setSplitSurface('files')
-        }
+        this.panelOrientation = (v as 'horizontal' | 'vertical') ?? 'horizontal'
       })
     )
     const current = this.fileState.getState()
@@ -1221,7 +1200,7 @@ CRITICAL INSTRUCTION FOR FILE TRACKING: You MUST check which file you started th
     const titleDisplay = this.getDisplayTitle(this.filePath)
 
     return html`
-      <div class="workspace ${this.panelOrientation === 'vertical' ? 'vertical' : ''}">
+      <div class="workspace">
         ${
           this.findOpen && this.editorView
             ? html`<writemd-find-panel

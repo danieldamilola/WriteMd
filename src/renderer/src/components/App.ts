@@ -7,6 +7,7 @@ import './SettingsModal'
 import './WelcomeScreen'
 import './ConflictDialog'
 import './CommandPalette'
+import './VaultExplorer'
 import type { ElectronAPI } from '../../../shared/electron-api'
 import { SettingsStore } from '../state/settings'
 import { FileState, type ConflictInfo } from '../state/file-state'
@@ -42,6 +43,15 @@ export class WriteMdApp extends LitElement {
       overflow: hidden;
       min-height: 0;
     }
+    .vertical-panel {
+      width: 230px;
+      flex-shrink: 0;
+      background: var(--bg-elevated);
+      border-right: 1px solid var(--border-subtle);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
     .editor-wrapper {
       flex: 1;
       display: flex;
@@ -70,6 +80,7 @@ export class WriteMdApp extends LitElement {
   @state() private showSettings = false
   @state() private showPalette = false
   @state() private splitActive = false
+  @state() private panelOrientation: 'horizontal' | 'vertical' = 'horizontal'
   @state() private tabs: Array<{ path: string | null; dirty: boolean }> = []
   @state() private activeTab = 0
   @state() private secondaryPath: string | null = null
@@ -78,10 +89,15 @@ export class WriteMdApp extends LitElement {
   private settingsStore = SettingsStore.getInstance()
   private fileState = FileState.getInstance()
   private unsubscribeFileState: (() => void) | null = null
+  private unsubscribeOrientation: (() => void) | null = null
 
   async connectedCallback(): Promise<void> {
     super.connectedCallback()
     await this.settingsStore.init()
+    this.panelOrientation = this.settingsStore.get('appearance.panelOrientation', 'horizontal') as 'horizontal' | 'vertical'
+    this.unsubscribeOrientation = this.settingsStore.subscribe('appearance.panelOrientation', (v) => {
+      this.panelOrientation = (v as 'horizontal' | 'vertical') ?? 'horizontal'
+    })
     document.documentElement.setAttribute(
       'data-theme',
       this.settingsStore.get('appearance.theme', 'dark')
@@ -113,6 +129,7 @@ export class WriteMdApp extends LitElement {
     window.removeEventListener('dragover', this.handleWindowDragOver)
     window.removeEventListener('drop', this.handleWindowDrop)
     this.unsubscribeFileState?.()
+    this.unsubscribeOrientation?.()
     super.disconnectedCallback()
   }
 
@@ -379,6 +396,9 @@ export class WriteMdApp extends LitElement {
         </writemd-top-bar>
 
         <div class="main-area">
+          ${this.panelOrientation === 'vertical'
+            ? html`<div class="vertical-panel"><writemd-vault-explorer></writemd-vault-explorer></div>`
+            : ''}
           <div class="editor-wrapper">
             <writemd-editor></writemd-editor>
           </div>
