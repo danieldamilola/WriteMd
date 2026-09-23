@@ -391,9 +391,15 @@ export class WelcomeScreen extends LitElement {
       line-height: 18px;
       cursor: pointer;
       box-sizing: border-box;
+      box-shadow:
+        0 1px 2px rgba(0, 0, 0, 0.3),
+        0 4px 12px rgba(0, 0, 0, 0.25);
     }
     .btn:hover {
       background: #1e1e1e;
+      box-shadow:
+        0 2px 4px rgba(0, 0, 0, 0.35),
+        0 6px 16px rgba(0, 0, 0, 0.3);
     }
     .btn.vault {
       font-size: 16px;
