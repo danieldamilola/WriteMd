@@ -1,4 +1,5 @@
 allowBuilds:
+  '@turbodocx/html-to-docx': true
   electron: true
   electron-winstaller: true
   esbuild: true
