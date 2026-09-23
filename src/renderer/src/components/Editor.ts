@@ -340,6 +340,10 @@ export class Editor extends LitElement {
     window.addEventListener('writemd-open-wikilink', this.handleOpenWikiLink)
     this.settingsStore = SettingsStore.getInstance()
     this.panelOrientation = this.settingsStore.get('appearance.panelOrientation', 'horizontal') as 'horizontal' | 'vertical'
+    if (this.panelOrientation === 'vertical') {
+      const st = this.fileState.getState()
+      if (!st.splitActive) this.fileState.setSplitSurface('files')
+    }
     this.checkAiConfigured()
     this.settingsUnsubs.push(
       this.settingsStore.subscribe('ai.apiKey', () => this.checkAiConfigured())
@@ -349,7 +353,11 @@ export class Editor extends LitElement {
     )
     this.settingsUnsubs.push(
       this.settingsStore.subscribe('appearance.panelOrientation', (v) => {
-        this.panelOrientation = (v as 'horizontal' | 'vertical') ?? 'horizontal'
+        const next = (v as 'horizontal' | 'vertical') ?? 'horizontal'
+        this.panelOrientation = next
+        if (next === 'vertical' && !this.fileState.getState().splitActive) {
+          this.fileState.setSplitSurface('files')
+        }
       })
     )
     const current = this.fileState.getState()
