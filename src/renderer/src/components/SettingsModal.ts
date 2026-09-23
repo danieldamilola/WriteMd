@@ -1,6 +1,7 @@
 import { html, css, LitElement } from 'lit'
 import { customElement, state } from 'lit/decorators.js'
 import type { ElectronAPI } from '../../../shared/electron-api'
+import { DEFAULT_AI_SYSTEM_PROMPT } from '../../../shared/settings-schema'
 import { SettingsStore } from '../state/settings'
 import { showConfirm } from './ConfirmDialog'
 import { scrollbarStyles } from './scrollbars'
@@ -447,6 +448,15 @@ export class SettingsModal extends LitElement {
     .text-input:focus {
       border-color: var(--border-focus);
     }
+    textarea.text-input.prompt-input {
+      width: 100%;
+      min-height: 160px;
+      resize: vertical;
+      line-height: 1.5;
+      font-family: inherit;
+      box-sizing: border-box;
+      flex-shrink: 1;
+    }
 
     .danger-btn {
       background: transparent;
@@ -529,6 +539,7 @@ export class SettingsModal extends LitElement {
   @state() private aiProvider = 'OpenAI'
   @state() private aiModel = 'gpt-4o'
   @state() private aiApiKey = ''
+  @state() private aiSystemPrompt = DEFAULT_AI_SYSTEM_PROMPT
   @state() private availableModels: string[] = []
   @state() private isFetchingModels = false
   @state() private fetchError = ''
@@ -606,6 +617,7 @@ export class SettingsModal extends LitElement {
     this.aiProvider = s.get('ai.provider', 'OpenAI')
     this.aiModel = s.get('ai.model', 'gpt-4o')
     this.aiApiKey = s.get('ai.apiKey', '')
+    this.aiSystemPrompt = s.get('ai.systemPrompt', DEFAULT_AI_SYSTEM_PROMPT)
 
     const defaults: Record<string, string[]> = {
       OpenAI: ['gpt-4o', 'gpt-4-turbo', 'gpt-3.5-turbo'],
@@ -1064,8 +1076,8 @@ export class SettingsModal extends LitElement {
       <div class="section">
         <div class="setting-row">
           <div>
-            <div class="setting-label">Vertical panel</div>
-            <div class="setting-desc">Stack split panes vertically instead of side by side</div>
+            <div class="setting-label">Vertical tabs</div>
+            <div class="setting-desc">Show tabs in a side rail instead of the top bar</div>
           </div>
           <button
             class="toggle-switch"
@@ -1393,6 +1405,34 @@ export class SettingsModal extends LitElement {
             .value=${this.aiApiKey}
             @change=${(e: Event) => this.updateSetting('ai.apiKey', (e.target as HTMLInputElement).value)}
           />
+        </div>
+      </div>
+
+      <div class="section-title">System Prompt</div>
+      <div class="section">
+        <div class="setting-desc" style="margin-bottom: 8px;">
+          Instructions sent with every request. The open file's content is appended automatically.
+        </div>
+        <textarea
+          class="text-input prompt-input"
+          rows="10"
+          .value=${this.aiSystemPrompt}
+          @change=${(e: Event) => {
+            const v = (e.target as HTMLTextAreaElement).value
+            this.aiSystemPrompt = v
+            this.updateSetting('ai.systemPrompt', v)
+          }}
+        ></textarea>
+        <div style="display: flex; justify-content: flex-end; margin-top: 8px;">
+          <button
+            class="control-btn"
+            @click=${() => {
+              this.aiSystemPrompt = DEFAULT_AI_SYSTEM_PROMPT
+              this.updateSetting('ai.systemPrompt', DEFAULT_AI_SYSTEM_PROMPT)
+            }}
+          >
+            Reset to default
+          </button>
         </div>
       </div>
     `

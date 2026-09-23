@@ -2,12 +2,13 @@ import { html, css, LitElement } from 'lit'
 import { customElement, state } from 'lit/decorators.js'
 import './TopBar'
 import './Tab'
+import './VerticalTabBar'
+import './DocBar'
 import './Editor'
 import './SettingsModal'
 import './WelcomeScreen'
 import './ConflictDialog'
 import './CommandPalette'
-import './VaultExplorer'
 import type { ElectronAPI } from '../../../shared/electron-api'
 import { SettingsStore } from '../state/settings'
 import { FileState, type ConflictInfo } from '../state/file-state'
@@ -43,15 +44,6 @@ export class WriteMdApp extends LitElement {
       overflow: hidden;
       min-height: 0;
     }
-    .vertical-panel {
-      width: 230px;
-      flex-shrink: 0;
-      background: var(--bg-elevated);
-      border-right: 1px solid var(--border-subtle);
-      display: flex;
-      flex-direction: column;
-      overflow: hidden;
-    }
     .editor-wrapper {
       flex: 1;
       display: flex;
@@ -81,6 +73,7 @@ export class WriteMdApp extends LitElement {
   @state() private showPalette = false
   @state() private splitActive = false
   @state() private panelOrientation: 'horizontal' | 'vertical' = 'horizontal'
+  @state() private verticalPanelCollapsed = false
   @state() private tabs: Array<{ path: string | null; dirty: boolean }> = []
   @state() private activeTab = 0
   @state() private secondaryPath: string | null = null
@@ -300,6 +293,16 @@ export class WriteMdApp extends LitElement {
     }
   }
 
+  private handleCloseSecondary = (): void => {
+    if (
+      this.secondaryDirty &&
+      !confirm('You have unsaved changes in the split document. Close anyway?')
+    ) {
+      return
+    }
+    this.fileState.closeSecondaryFile()
+  }
+
   render(): unknown {
     if (this.showWelcome) {
       return html`
@@ -339,65 +342,76 @@ export class WriteMdApp extends LitElement {
       <div class="app-container">
         <writemd-top-bar
           .splitActive=${this.splitActive}
+          .showPanelToggle=${this.panelOrientation === 'vertical'}
+          .panelCollapsed=${this.verticalPanelCollapsed}
           @open-menu=${() => (this.showPalette = true)}
           @open-settings=${() => (this.showSettings = true)}
           @toggle-split=${() => this.fileState.toggleSplitView()}
+          @toggle-panel=${() => (this.verticalPanelCollapsed = !this.verticalPanelCollapsed)}
         >
-          <div slot="tabs" style="display: flex; gap: 10px; align-items: center;">
-            ${this.tabs.map(
-              (t, i) => html`
-                <writemd-tab
-                  label=${t.path?.split(/[/\\]/).pop() ?? 'Untitled.md'}
-                  ?active=${i === this.activeTab}
-                  .dirty=${t.dirty}
-                  @select=${() => this.fileState.switchTab(i)}
-                  @close=${() => void this.fileState.closeTab(i)}
-                ></writemd-tab>
-              `
-            )}
-            <div
-              class="tab-add"
-              title="Open file in new tab"
-              @click=${() => void this.openFileDialog()}
-            >
-              <svg
-                width="14"
-                height="14"
-                viewBox="0 0 14 14"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="1.5"
-              >
-                <line x1="7" y1="2" x2="7" y2="12" />
-                <line x1="2" y1="7" x2="12" y2="7" />
-              </svg>
-            </div>
-            ${
-              secondaryName
-                ? html`
-                    <writemd-tab
-                      label=${secondaryName}
-                      ?active=${false}
-                      .dirty=${this.secondaryDirty}
-                      @close=${() => {
-                        if (
-                          this.secondaryDirty &&
-                          !confirm('You have unsaved changes in the split document. Close anyway?')
-                        ) {
-                          return
-                        }
-                        this.fileState.closeSecondaryFile()
-                      }}
-                    ></writemd-tab>
-                  `
-                : ''
-            }
+          <div
+            slot="tabs"
+            style="display: flex; gap: 10px; align-items: center;${this.panelOrientation === 'vertical' ? ' flex: 1; min-width: 0;' : ''}"
+          >
+            ${this.panelOrientation === 'vertical'
+              ? html`<writemd-doc-bar compact></writemd-doc-bar>`
+              : html`
+                  ${this.tabs.map(
+                    (t, i) => html`
+                      <writemd-tab
+                        label=${t.path?.split(/[/\\]/).pop() ?? 'Untitled.md'}
+                        ?active=${i === this.activeTab}
+                        .dirty=${t.dirty}
+                        @select=${() => this.fileState.switchTab(i)}
+                        @close=${() => void this.fileState.closeTab(i)}
+                      ></writemd-tab>
+                    `
+                  )}
+                  <div
+                    class="tab-add"
+                    title="Open file in new tab"
+                    @click=${() => void this.openFileDialog()}
+                  >
+                    <svg
+                      width="14"
+                      height="14"
+                      viewBox="0 0 14 14"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="1.5"
+                    >
+                      <line x1="7" y1="2" x2="7" y2="12" />
+                      <line x1="2" y1="7" x2="12" y2="7" />
+                    </svg>
+                  </div>
+                  ${secondaryName
+                    ? html`
+                        <writemd-tab
+                          label=${secondaryName}
+                          ?active=${false}
+                          .dirty=${this.secondaryDirty}
+                          @close=${this.handleCloseSecondary}
+                        ></writemd-tab>
+                      `
+                    : ''}
+                `}
           </div>
         </writemd-top-bar>
 
         <div class="main-area">
-          ${this.panelOrientation === 'vertical'
-            ? html`<div class="vertical-panel"><writemd-vault-explorer></writemd-vault-explorer></div>`
+          ${this.panelOrientation === 'vertical' && !this.verticalPanelCollapsed
+            ? html`<writemd-vertical-tab-bar
+                .tabs=${this.tabs}
+                .activeTab=${this.activeTab}
+                .secondaryPath=${this.secondaryPath}
+                .secondaryDirty=${this.secondaryDirty}
+                @select-tab=${(e: CustomEvent<{ index: number }>) =>
+                  this.fileState.switchTab(e.detail.index)}
+                @close-tab=${(e: CustomEvent<{ index: number }>) =>
+                  void this.fileState.closeTab(e.detail.index)}
+                @add-tab=${() => void this.openFileDialog()}
+                @close-secondary=${this.handleCloseSecondary}
+              ></writemd-vertical-tab-bar>`
             : ''}
           <div class="editor-wrapper">
             <writemd-editor></writemd-editor>

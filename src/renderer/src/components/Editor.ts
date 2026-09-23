@@ -2,7 +2,6 @@ import { html, css, LitElement, unsafeCSS } from 'lit'
 import { customElement, state } from 'lit/decorators.js'
 import katexCss from 'katex/dist/katex.min.css?inline'
 import { findNext, findPrevious, getSearchQuery } from '@codemirror/search'
-import { menuStyles, menuIcon, menuCheck } from './menu-styles'
 import { scrollbarStyles } from './scrollbars'
 import { SettingsStore } from '../state/settings'
 import { type AiMessage } from './AiPanel'
@@ -42,10 +41,12 @@ import { tableToolbarField } from './extensions/table-toolbar'
 import { FileState, ViewMode, SplitSurface, SecondaryDocState } from '../state/file-state'
 import './Panel'
 import './InfoPill'
+import './DocBar'
 import './SurfaceLauncher'
 import './TextMenu'
 import './VaultExplorer'
 import type { ElectronAPI } from '../../../shared/electron-api'
+import { DEFAULT_AI_SYSTEM_PROMPT } from '../../../shared/settings-schema'
 import type { VaultTreeNode } from '../../../shared/electron-api'
 import { basenameNoExt, cleanWikiTarget } from '../utils/links'
 
@@ -57,7 +58,6 @@ function api(): ElectronAPI | undefined {
 export class Editor extends LitElement {
   static styles = [
     unsafeCSS(katexCss),
-    menuStyles,
     scrollbarStyles,
     css`
       :host {
@@ -79,6 +79,13 @@ export class Editor extends LitElement {
         gap: 0;
         position: relative;
         height: 100%;
+      }
+
+      .panes {
+        display: flex;
+        flex: 1;
+        min-height: 0;
+        min-width: 0;
       }
 
       writemd-find-panel {
@@ -302,7 +309,6 @@ export class Editor extends LitElement {
   @state() private splitActive = false
   @state() private splitSurface: SplitSurface = 'launcher'
   @state() private secondaryDoc: SecondaryDocState | null = null
-  @state() private showMoreMenu = false
   @state() private textMenu: { x: number; y: number } | null = null
   @state() private findOpen = false
   @state() private findMode: 'find' | 'replace' = 'find'
@@ -449,8 +455,11 @@ export class Editor extends LitElement {
       const model = this.settingsStore.get('ai.model', '')
       const key = this.settingsStore.get('ai.apiKey', '')
 
-      // Construct system prompt with current document content
-      const systemPrompt = `CRITICAL INSTRUCTION: You are a helpful AI assistant operating directly inside the WriteMd application interface. You must strictly adhere to the "unslop" communication style. Never use filler phrases like "Here is...", "This will...", "I'll help...", "Let me...", "Great!", "Excellent!", or "Perfect!". No preamble, no postamble, no summaries unless asked. Deliver direct, concise, and human-sounding output. Format your responses in markdown.
+      // Custom instructions from Settings → AI Assistant, with live file context appended
+      const customPrompt =
+        this.settingsStore.get('ai.systemPrompt', DEFAULT_AI_SYSTEM_PROMPT) ||
+        DEFAULT_AI_SYSTEM_PROMPT
+      const systemPrompt = `${customPrompt}
 
 The user is currently editing the file: ${currentPath}
 Here is the current content of the active file:
@@ -459,15 +468,7 @@ Here is the current content of the active file:
 ${this.content}
 \`\`\`
 
-If the user asks questions about their file, use the above content to answer.
-
-CRITICAL INSTRUCTION FOR FILE EDITS: If the user asks you to modify, rewrite, or clear the file, you MUST output the completely updated file content wrapped exactly in a \`\`\`writemd-replace\`\`\` code block. For example:
-\`\`\`writemd-replace
-(the new content goes here)
-\`\`\`
-The application will intercept this block and automatically apply the changes to the user's document.
-
-CRITICAL INSTRUCTION FOR FILE TRACKING: You MUST check which file you started the conversation from and keep that in mind. Each user message will specify the active file at the time they sent the message. Before taking action or making any edits on a request, CHECK if the active file is still the same file. If the user changed files and you notice they are now in a new file compared to the previous context, you MUST immediately inform the user that they are in a new file, and ask them if they want to continue the request in this new file before making any edits.`
+If the user asks questions about their file, use the above content to answer.`
 
       // We bypass the ipc.ts system prompt handling completely to avoid needing an app restart.
       // We inject the system context as a 'user' message at the very beginning of the payload.
@@ -788,36 +789,12 @@ CRITICAL INSTRUCTION FOR FILE TRACKING: You MUST check which file you started th
     reader.readAsDataURL(file)
   }
 
-  private handleQuickToggle(): void {
-    this.fileState.quickToggle()
-  }
-
-  private async handleExport(kind: 'pdf' | 'html' | 'docx'): Promise<void> {
-    this.showMoreMenu = false
-    const bridge = api()?.export
-    if (!bridge) {
-      alert('Export is unavailable. Restart the app to load the latest version.')
-      return
-    }
-    const content = this.editorView ? this.editorView.state.doc.toString() : this.content
-    try {
-      const result = await bridge[kind](content, this.filePath)
-      if (!result.ok && result.reason !== 'canceled') {
-        alert(`Export failed: ${result.reason ?? 'unknown error'}`)
-      }
-    } catch (err) {
-      console.error(`Export ${kind} failed:`, err)
-      alert(`Export failed: ${err instanceof Error ? err.message : String(err)}`)
-    }
-  }
-
   private handleExplicitModeChange(e: CustomEvent<{ mode: ViewMode }>): void {
     this.fileState.setExplicitMode(e.detail.mode)
   }
 
   private handleTextMenu = (e: MouseEvent): void => {
     e.preventDefault()
-    this.showMoreMenu = false
     this.textMenu = { x: e.clientX, y: e.clientY }
   }
 
@@ -960,110 +937,6 @@ CRITICAL INSTRUCTION FOR FILE TRACKING: You MUST check which file you started th
     this.findPanel()?.doReplaceAll()
   }
 
-  private noteMenuItems(): Array<{
-    id: string
-    label: string
-    icon: string
-    dividerBefore?: boolean
-    danger?: boolean
-    checked?: boolean
-  }> {
-    const mode = this.viewMode === 'wysiwyg' ? 'live' : this.viewMode
-    return [
-      { id: 'backlinks', label: 'Backlinks in document', icon: 'backlinks' },
-      {
-        id: 'reading',
-        label: 'Reading view',
-        icon: 'eye',
-        dividerBefore: true,
-        checked: mode === 'reading'
-      },
-      { id: 'source', label: 'Source mode', icon: 'code', checked: mode === 'source' },
-      { id: 'split', label: 'Split right', icon: 'split', dividerBefore: true },
-      { id: 'rename', label: 'Rename', icon: 'pencil', dividerBefore: true },
-      { id: 'move', label: 'Move file to', icon: 'folder' },
-      { id: 'pdf', label: 'Export to PDF', icon: 'file', dividerBefore: true },
-      { id: 'docx', label: 'Export to Word', icon: 'file' },
-      { id: 'find', label: 'Find', icon: 'search', dividerBefore: true },
-      { id: 'replace', label: 'Replace', icon: 'search' },
-      { id: 'copy-path', label: 'Copy path', icon: 'copy', dividerBefore: true },
-      { id: 'reveal-explorer', label: 'Show in system explorer', icon: 'external' },
-      { id: 'reveal-nav', label: 'Reveal file in navigation', icon: 'reveal' },
-      { id: 'delete', label: 'Delete file', icon: 'trash', dividerBefore: true, danger: true }
-    ]
-  }
-
-  private async handleNoteAction(id: string): Promise<void> {
-    this.showMoreMenu = false
-    switch (id) {
-      case 'backlinks':
-        this.fileState.setSplitSurface('backlinks')
-        break
-      case 'reading':
-        this.fileState.setExplicitMode('reading')
-        break
-      case 'source':
-        this.fileState.setExplicitMode('source')
-        break
-      case 'split':
-        this.fileState.toggleSplitView(true)
-        break
-      case 'rename': {
-        const input = this.shadowRoot?.querySelector('.title-input') as HTMLInputElement | null
-        input?.focus()
-        input?.select()
-        break
-      }
-      case 'move':
-        await this.fileState.moveActiveFile()
-        break
-      case 'pdf':
-        await this.handleExport('pdf')
-        break
-      case 'docx':
-        await this.handleExport('docx')
-        break
-      case 'find':
-        this.openFind('find')
-        break
-      case 'replace':
-        this.openFind('replace')
-        break
-      case 'copy-path':
-        if (this.filePath) {
-          try {
-            await navigator.clipboard.writeText(this.filePath)
-          } catch (err) {
-            console.error('Copy path failed:', err)
-          }
-        }
-        break
-      case 'reveal-explorer':
-        if (this.filePath) {
-          await api()
-            ?.shell?.showInFolder?.(this.filePath)
-            .catch(() => undefined)
-        }
-        break
-      case 'reveal-nav':
-        this.fileState.setSplitSurface('files')
-        break
-      case 'delete': {
-        if (!this.filePath) break
-        const base = this.filePath.split(/[/\\]/).pop() ?? this.filePath
-        if (!confirm(`Move ${base} to trash?`)) break
-        const ok = await api()?.file?.delete?.(this.filePath)
-        if (!ok) {
-          alert('Could not delete file')
-          break
-        }
-        const idx = this.fileState.getState().tabs.findIndex((t) => t.path === this.filePath)
-        if (idx >= 0) await this.fileState.closeTab(idx)
-        break
-      }
-    }
-  }
-
   private handleSurfaceSelection = async (
     e: CustomEvent<{ surface: SplitSurface }>
   ): Promise<void> => {
@@ -1099,25 +972,6 @@ CRITICAL INSTRUCTION FOR FILE TRACKING: You MUST check which file you started th
     return fileName.replace(/\.[^/.]+$/, '')
   }
 
-  private renderQuickToggleIcon(mode: ViewMode): unknown {
-    const isReading = mode === 'reading'
-    if (isReading) {
-      // In reading mode, quick toggle shows edit/pencil to return to live
-      return html`
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z" />
-        </svg>
-      `
-    }
-    // In live/source mode, quick toggle shows book to switch to reading
-    return html`
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-        <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z" />
-        <path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z" />
-      </svg>
-    `
-  }
-
   private async handleRename(e: Event, isSecondary: boolean): Promise<void> {
     const input = e.target as HTMLInputElement
     const newName = input.value.trim()
@@ -1151,7 +1005,7 @@ CRITICAL INSTRUCTION FOR FILE TRACKING: You MUST check which file you started th
     this.isDraggingResizer = true
     document.addEventListener('mousemove', this.doResize)
     document.addEventListener('mouseup', this.stopResize)
-    document.body.style.cursor = this.panelOrientation === 'vertical' ? 'row-resize' : 'col-resize'
+    document.body.style.cursor = 'col-resize'
   }
 
   private doResize = (e: MouseEvent): void => {
@@ -1160,14 +1014,8 @@ CRITICAL INSTRUCTION FOR FILE TRACKING: You MUST check which file you started th
     if (container) {
       const rect = container.getBoundingClientRect()
       // Clamp between 20% and 80%
-      let newWidth: number
-      if (this.panelOrientation === 'vertical') {
-        newWidth = ((e.clientY - rect.top) / rect.height) * 100
-      } else {
-        newWidth = ((e.clientX - rect.left) / rect.width) * 100
-      }
-      newWidth = Math.max(20, Math.min(80, newWidth))
-      this.leftPaneWidth = newWidth
+      const newWidth = ((e.clientX - rect.left) / rect.width) * 100
+      this.leftPaneWidth = Math.max(20, Math.min(80, newWidth))
     }
   }
 
@@ -1196,8 +1044,7 @@ CRITICAL INSTRUCTION FOR FILE TRACKING: You MUST check which file you started th
       `
     }
 
-    const pathDisplay = this.getDisplayPath(this.filePath)
-    const titleDisplay = this.getDisplayTitle(this.filePath)
+    const isVerticalTabs = this.panelOrientation === 'vertical'
 
     return html`
       <div class="workspace">
@@ -1220,70 +1067,12 @@ CRITICAL INSTRUCTION FOR FILE TRACKING: You MUST check which file you started th
             : ''
         }
         <!-- split view - 1 (Responsive Left Pane) -->
+        <div class="panes">
         <writemd-panel
           class="pane"
           style=${this.splitActive ? `flex: 0 0 calc(${this.leftPaneWidth}% - 2.5px);` : ''}
         >
-          <!-- Sub-Header inside editor panel -->
-          <div class="sub-header">
-            <div class="sub-header-left" title=${this.filePath ?? ''}>${pathDisplay}</div>
-            <div class="sub-header-center">
-              <input
-                type="text"
-                class="title-input"
-                .value=${titleDisplay}
-                @blur=${(e: Event) => this.handleRename(e, false)}
-                @keydown=${(e: KeyboardEvent) => this.handleRenameKeyDown(e, false)}
-              />
-            </div>
-            <div class="sub-header-right">
-              <div
-                class="icon-action"
-                title="Toggle Reading / Live Mode"
-                @click=${() => this.handleQuickToggle()}
-              >
-                ${this.renderQuickToggleIcon(this.viewMode)}
-              </div>
-              <div class="menu-wrap">
-                <div
-                  class="icon-action faint"
-                  title="More Options"
-                  @click=${() => (this.showMoreMenu = !this.showMoreMenu)}
-                >
-                  <svg viewBox="0 0 24 24" fill="currentColor">
-                    <circle cx="5" cy="12" r="2" />
-                    <circle cx="12" cy="12" r="2" />
-                    <circle cx="19" cy="12" r="2" />
-                  </svg>
-                </div>
-                ${
-                  this.showMoreMenu
-                    ? html`
-                        <div
-                          class="menu-backdrop"
-                          @click=${() => (this.showMoreMenu = false)}
-                        ></div>
-                        <div class="m-panel note-menu">
-                          ${this.noteMenuItems().map(
-                            (item) => html`
-                              ${item.dividerBefore ? html`<div class="m-divider"></div>` : ''}
-                              <div
-                                class=${item.danger ? 'm-item danger' : 'm-item'}
-                                @click=${() => void this.handleNoteAction(item.id)}
-                              >
-                                ${menuIcon(item.icon)}
-                                <span>${item.label}</span>
-                                ${item.checked ? menuCheck() : ''}
-                              </div>
-                            `
-                          )}
-                        </div>
-                      `
-                    : ''
-                }
-              </div>
-            </div>
-          </div>
+          ${isVerticalTabs ? '' : html`<writemd-doc-bar></writemd-doc-bar>`}
 
           <!-- Body Content Area (CodeMirror permanently mounted, reconfigured via Compartment) -->
           <div
@@ -1529,6 +1318,7 @@ CRITICAL INSTRUCTION FOR FILE TRACKING: You MUST check which file you started th
               `
             : ''
         }
+        </div>
       </div>
     `
   }

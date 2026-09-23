@@ -64,6 +64,8 @@ export class WriteMdTopBar extends LitElement {
 
   @property({ type: Boolean }) showSplitButton = true
   @property({ type: Boolean }) splitActive = false
+  @property({ type: Boolean }) showPanelToggle = false
+  @property({ type: Boolean }) panelCollapsed = false
 
   private emit(event: string): void {
     this.dispatchEvent(new CustomEvent(event, { bubbles: true, composed: true }))
@@ -99,6 +101,34 @@ export class WriteMdTopBar extends LitElement {
             />
           </svg>
         </writemd-icon-button>
+        ${this.showPanelToggle
+          ? html`
+              <writemd-icon-button
+                title=${this.panelCollapsed ? 'Expand panel' : 'Collapse panel'}
+                @click=${() => this.emit('toggle-panel')}
+              >
+                <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
+                  <rect
+                    x="1.5"
+                    y="1.5"
+                    width="15"
+                    height="15"
+                    rx="2"
+                    stroke="currentColor"
+                    stroke-width="1.2"
+                  />
+                  <line
+                    x1="6.5"
+                    y1="1.5"
+                    x2="6.5"
+                    y2="16.5"
+                    stroke="currentColor"
+                    stroke-width="1.2"
+                  />
+                </svg>
+              </writemd-icon-button>
+            `
+          : ''}
       </div>
 
       <div class="tabs-slot">
