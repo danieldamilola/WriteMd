@@ -139,14 +139,6 @@ export class SettingsModal extends LitElement {
       padding: 12px 12px 4px 12px;
     }
 
-    .nav-footer {
-      padding: 12px 16px;
-      font-size: 12px;
-      color: var(--text-muted);
-      border-top: 1px solid var(--border-subtle);
-      line-height: 1.5;
-    }
-
     .nav-btn {
       display: flex;
       align-items: center;
@@ -921,9 +913,6 @@ export class SettingsModal extends LitElement {
               </svg>
               About
             </button>
-          </div>
-          <div class="nav-footer">
-            WriteMd Desktop${this.appVersion ? html`<br />v${this.appVersion}` : ''}
           </div>
         </div>
 
