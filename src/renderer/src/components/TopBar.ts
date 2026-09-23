@@ -64,36 +64,6 @@ export class WriteMdTopBar extends LitElement {
 
   @property({ type: Boolean }) showSplitButton = true
   @property({ type: Boolean }) splitActive = false
-  @property({ type: Boolean }) updateAvailable = false
-  @property({ type: Boolean }) downloadingUpdate = false
-
-  private unsubs: Array<() => void> = []
-
-  connectedCallback(): void {
-    super.connectedCallback()
-
-    // Call updater check after 3 seconds
-    setTimeout(() => {
-      void api()?.updater?.check?.()
-    }, 3000)
-
-    const onAvail = api()?.updater?.onUpdateAvailable?.(() => {
-      this.updateAvailable = true
-      this.downloadingUpdate = true
-    })
-    const onDownloaded = api()?.updater?.onUpdateDownloaded?.(() => {
-      this.downloadingUpdate = false
-      this.updateAvailable = true
-    })
-
-    if (onAvail) this.unsubs.push(onAvail)
-    if (onDownloaded) this.unsubs.push(onDownloaded)
-  }
-
-  disconnectedCallback(): void {
-    super.disconnectedCallback()
-    this.unsubs.forEach((unsub) => unsub())
-  }
 
   private emit(event: string): void {
     this.dispatchEvent(new CustomEvent(event, { bubbles: true, composed: true }))
@@ -165,19 +135,6 @@ export class WriteMdTopBar extends LitElement {
               `
             : ''
         }
-        ${
-          this.updateAvailable
-            ? html`
-                <button
-                  style="background: var(--accent); color: var(--accent-text); border: none; border-radius: 4px; padding: 4px 8px; font-size: 11px; font-weight: 500; cursor: pointer; -webkit-app-region: no-drag;"
-                  @click=${() => (this.downloadingUpdate ? null : api()?.updater?.install?.())}
-                >
-                  ${this.downloadingUpdate ? 'Downloading update...' : 'Restart to update'}
-                </button>
-              `
-            : ''
-        }
-
         <div class="window-controls">
           <writemd-icon-button
             size="caption"

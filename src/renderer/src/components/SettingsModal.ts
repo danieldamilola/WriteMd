@@ -18,7 +18,7 @@ function api(): ElectronAPI | undefined {
   return typeof window !== 'undefined' ? window.electronAPI : undefined
 }
 
-type SettingsTab = 'general' | 'appearance' | 'editor' | 'files' | 'shortcuts' | 'advanced' | 'ai'
+type SettingsTab = 'general' | 'appearance' | 'editor' | 'files' | 'shortcuts' | 'advanced' | 'ai' | 'about'
 
 interface ThemeDefinition {
   id: string
@@ -523,8 +523,14 @@ export class SettingsModal extends LitElement {
   @state() private pdfTheme = 'light'
   @state() private pdfMargin = 24
   @state() private appVersion = ''
+  @state() private updateStatus: 'idle' | 'checking' | 'available' | 'downloading' | 'downloaded' | 'up-to-date' | 'error' = 'idle'
+  @state() private updateVersion = ''
+  @state() private updateError = ''
+  @state() private downloadProgress = 0
   @state() private capturingId: string | null = null
   @state() private conflictMsg = ''
+
+  private updaterUnsubs: Array<() => void> = []
 
   // AI State
   @state() private aiProvider = 'OpenAI'
@@ -545,11 +551,44 @@ export class SettingsModal extends LitElement {
       ?.app?.getVersion?.()
       .then((v) => (this.appVersion = v))
       .catch(() => undefined)
+
+    const updater = api()?.updater
+    if (updater) {
+      const u1 = updater.onUpdateAvailable?.((info) => {
+        this.updateStatus = 'available'
+        this.updateVersion = info?.version ?? ''
+        this.updateError = ''
+      })
+      const u2 = updater.onUpdateNotAvailable?.(() => {
+        this.updateStatus = 'up-to-date'
+        this.updateError = ''
+      })
+      const u3 = updater.onUpdateDownloaded?.((info) => {
+        this.updateStatus = 'downloaded'
+        this.updateVersion = info?.version ?? this.updateVersion
+        this.downloadProgress = 100
+      })
+      const u4 = updater.onDownloadProgress?.((p) => {
+        this.updateStatus = 'downloading'
+        this.downloadProgress = Math.round(p.percent ?? 0)
+      })
+      const u5 = updater.onError?.((err) => {
+        this.updateStatus = 'error'
+        this.updateError = err
+      })
+      if (u1) this.updaterUnsubs.push(u1)
+      if (u2) this.updaterUnsubs.push(u2)
+      if (u3) this.updaterUnsubs.push(u3)
+      if (u4) this.updaterUnsubs.push(u4)
+      if (u5) this.updaterUnsubs.push(u5)
+    }
   }
 
   disconnectedCallback(): void {
     window.removeEventListener('keydown', this.handleKeyDown)
     this.removeEventListener('click', this.handleBackdropClick)
+    this.updaterUnsubs.forEach((fn) => fn())
+    this.updaterUnsubs = []
     super.disconnectedCallback()
   }
 
@@ -747,6 +786,39 @@ export class SettingsModal extends LitElement {
     }
   }
 
+  private async handleCheckForUpdates(): Promise<void> {
+    const updater = api()?.updater
+    if (!updater) return
+    this.updateStatus = 'checking'
+    this.updateError = ''
+    try {
+      const result = await updater.check()
+      if (!result) {
+        this.updateStatus = 'up-to-date'
+      }
+    } catch (e) {
+      this.updateStatus = 'error'
+      this.updateError = e instanceof Error ? e.message : String(e)
+    }
+  }
+
+  private async handleDownloadUpdate(): Promise<void> {
+    const updater = api()?.updater
+    if (!updater) return
+    this.updateStatus = 'downloading'
+    this.downloadProgress = 0
+    try {
+      await updater.download()
+    } catch (e) {
+      this.updateStatus = 'error'
+      this.updateError = e instanceof Error ? e.message : String(e)
+    }
+  }
+
+  private handleInstallUpdate(): void {
+    void api()?.updater?.install?.()
+  }
+
   render(): unknown {
     return html`
       <div
@@ -838,6 +910,17 @@ export class SettingsModal extends LitElement {
               </svg>
               AI Assistant
             </button>
+            <button
+              class="nav-btn ${this.tab === 'about' ? 'active' : ''}"
+              @click=${() => (this.tab = 'about')}
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="12" cy="12" r="10" />
+                <path d="M12 16v-4" />
+                <path d="M12 8h.01" />
+              </svg>
+              About
+            </button>
           </div>
           <div class="nav-footer">
             WriteMd Desktop${this.appVersion ? html`<br />v${this.appVersion}` : ''}
@@ -873,6 +956,7 @@ export class SettingsModal extends LitElement {
             ${this.tab === 'shortcuts' ? this.renderShortcuts() : ''}
             ${this.tab === 'advanced' ? this.renderAdvanced() : ''}
             ${this.tab === 'ai' ? this.renderAI() : ''}
+            ${this.tab === 'about' ? this.renderAbout() : ''}
           </div>
         </div>
       </div>
@@ -1303,6 +1387,63 @@ export class SettingsModal extends LitElement {
             @change=${(e: Event) => this.updateSetting('ai.apiKey', (e.target as HTMLInputElement).value)}
           />
         </div>
+      </div>
+    `
+  }
+
+  private renderAbout(): unknown {
+    const statusText = (() => {
+      switch (this.updateStatus) {
+        case 'checking':
+          return 'Checking for updates...'
+        case 'available':
+          return this.updateVersion ? `Update available: v${this.updateVersion}` : 'Update available'
+        case 'downloading':
+          return `Downloading... ${this.downloadProgress}%`
+        case 'downloaded':
+          return this.updateVersion ? `Update v${this.updateVersion} ready` : 'Update ready'
+        case 'up-to-date':
+          return 'You are up to date'
+        case 'error':
+          return this.updateError || 'Update check failed'
+        default:
+          return 'Check for new versions'
+      }
+    })()
+
+    return html`
+      <div class="section-title">About</div>
+      <div class="section">
+        <div class="setting-row">
+          <div>
+            <div class="setting-label">WriteMd Desktop</div>
+            <div class="setting-desc">v${this.appVersion || '1.0.0'}</div>
+          </div>
+        </div>
+        <div class="setting-row">
+          <div>
+            <div class="setting-label">Updates</div>
+            <div class="setting-desc">${statusText}</div>
+          </div>
+          <div style="display: flex; gap: 8px; align-items: center;">
+            ${this.updateStatus === 'available'
+              ? html`<button class="control-btn" @click=${this.handleDownloadUpdate}>Download</button>`
+              : ''}
+            ${this.updateStatus === 'downloaded'
+              ? html`<button class="control-btn" style="background: var(--accent); color: var(--accent-text); border-color: var(--accent);" @click=${this.handleInstallUpdate}>Restart to update</button>`
+              : ''}
+            ${this.updateStatus === 'checking' || this.updateStatus === 'downloading'
+              ? html`<button class="control-btn" disabled>
+                  ${this.updateStatus === 'checking' ? 'Checking...' : `${this.downloadProgress}%`}
+                </button>`
+              : html`<button class="control-btn" @click=${this.handleCheckForUpdates}>Check for updates</button>`}
+          </div>
+        </div>
+        ${this.updateStatus === 'error'
+          ? html`<div class="setting-desc" style="color: var(--danger); padding: 8px 0 8px 0;">
+              ${this.updateError}
+            </div>`
+          : ''}
       </div>
     `
   }
