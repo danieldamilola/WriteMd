@@ -163,6 +163,21 @@ export class Editor extends LitElement {
         background: rgba(255, 255, 255, 0.1);
       }
 
+      .workspace.vertical {
+        flex-direction: column;
+      }
+      .workspace.vertical .resizer {
+        width: auto;
+        height: 5px;
+        cursor: row-resize;
+      }
+      .workspace.vertical .pane {
+        min-height: 100px;
+        min-width: 0;
+        width: 100%;
+        height: auto;
+      }
+
       input.title-input {
         background: transparent;
         border: 1px solid transparent;
@@ -311,6 +326,7 @@ export class Editor extends LitElement {
 
   @state() private leftPaneWidth = 50 // percentage
   @state() private isDraggingResizer = false
+  @state() private panelOrientation: 'horizontal' | 'vertical' = 'horizontal'
   @state() private isAiConfigured = false
   @state() private aiMessages: AiMessage[] = []
   @state() private aiIsLoading = false
@@ -323,12 +339,18 @@ export class Editor extends LitElement {
     window.addEventListener('writemd-find', this.handleGlobalFind)
     window.addEventListener('writemd-open-wikilink', this.handleOpenWikiLink)
     this.settingsStore = SettingsStore.getInstance()
+    this.panelOrientation = this.settingsStore.get('appearance.panelOrientation', 'horizontal') as 'horizontal' | 'vertical'
     this.checkAiConfigured()
     this.settingsUnsubs.push(
       this.settingsStore.subscribe('ai.apiKey', () => this.checkAiConfigured())
     )
     this.settingsUnsubs.push(
       this.settingsStore.subscribe('ai.provider', () => this.checkAiConfigured())
+    )
+    this.settingsUnsubs.push(
+      this.settingsStore.subscribe('appearance.panelOrientation', (v) => {
+        this.panelOrientation = (v as 'horizontal' | 'vertical') ?? 'horizontal'
+      })
     )
     const current = this.fileState.getState()
     this.content = current.content
@@ -1142,7 +1164,7 @@ CRITICAL INSTRUCTION FOR FILE TRACKING: You MUST check which file you started th
     this.isDraggingResizer = true
     document.addEventListener('mousemove', this.doResize)
     document.addEventListener('mouseup', this.stopResize)
-    document.body.style.cursor = 'col-resize'
+    document.body.style.cursor = this.panelOrientation === 'vertical' ? 'row-resize' : 'col-resize'
   }
 
   private doResize = (e: MouseEvent): void => {
@@ -1151,7 +1173,12 @@ CRITICAL INSTRUCTION FOR FILE TRACKING: You MUST check which file you started th
     if (container) {
       const rect = container.getBoundingClientRect()
       // Clamp between 20% and 80%
-      let newWidth = ((e.clientX - rect.left) / rect.width) * 100
+      let newWidth: number
+      if (this.panelOrientation === 'vertical') {
+        newWidth = ((e.clientY - rect.top) / rect.height) * 100
+      } else {
+        newWidth = ((e.clientX - rect.left) / rect.width) * 100
+      }
       newWidth = Math.max(20, Math.min(80, newWidth))
       this.leftPaneWidth = newWidth
     }
@@ -1186,7 +1213,7 @@ CRITICAL INSTRUCTION FOR FILE TRACKING: You MUST check which file you started th
     const titleDisplay = this.getDisplayTitle(this.filePath)
 
     return html`
-      <div class="workspace">
+      <div class="workspace ${this.panelOrientation === 'vertical' ? 'vertical' : ''}">
         ${
           this.findOpen && this.editorView
             ? html`<writemd-find-panel

@@ -9,6 +9,8 @@ export function applySettingsToDOM(store: SettingsStore): void {
   if (typeof document === 'undefined') return
   const theme = store.get('appearance.theme', 'dark')
   document.documentElement.setAttribute('data-theme', theme)
+  const orientation = store.get('appearance.panelOrientation', 'horizontal')
+  document.documentElement.setAttribute('data-panel-orientation', orientation as string)
 
   const fontSize = store.get('editor.fontSize', 15)
   const lineHeight = store.get('editor.lineHeight', 1.7)

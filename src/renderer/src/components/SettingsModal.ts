@@ -515,6 +515,7 @@ export class SettingsModal extends LitElement {
   @state() private pdfTheme = 'light'
   @state() private pdfMargin = 24
   @state() private appVersion = ''
+  @state() private panelOrientation: 'horizontal' | 'vertical' = 'horizontal'
   @state() private updateStatus: 'idle' | 'checking' | 'available' | 'downloading' | 'downloaded' | 'up-to-date' | 'error' = 'idle'
   @state() private updateVersion = ''
   @state() private updateError = ''
@@ -601,6 +602,7 @@ export class SettingsModal extends LitElement {
     this.pdfPageSize = s.get('export.pdfPageSize', 'A4')
     this.pdfTheme = s.get('export.pdfTheme', 'light')
     this.pdfMargin = s.get('export.pdfMargin', 24)
+    this.panelOrientation = s.get('appearance.panelOrientation', 'horizontal') as 'horizontal' | 'vertical'
     this.aiProvider = s.get('ai.provider', 'OpenAI')
     this.aiModel = s.get('ai.model', 'gpt-4o')
     this.aiApiKey = s.get('ai.apiKey', '')
@@ -1055,6 +1057,22 @@ export class SettingsModal extends LitElement {
               </div>
             `
           )}
+        </div>
+      </div>
+
+      <div class="section-title">Panel Layout</div>
+      <div class="section">
+        <div class="setting-row">
+          <div>
+            <div class="setting-label">Vertical panel</div>
+            <div class="setting-desc">Stack split panes vertically instead of side by side</div>
+          </div>
+          <button
+            class="toggle-switch"
+            role="switch"
+            aria-checked="${this.panelOrientation === 'vertical'}"
+            @click=${() => this.updateSetting('appearance.panelOrientation', this.panelOrientation === 'vertical' ? 'horizontal' : 'vertical')}
+          ></button>
         </div>
       </div>
     `

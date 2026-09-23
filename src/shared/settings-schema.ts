@@ -31,6 +31,7 @@ export interface WriteMdSettings {
     toolbarVisible: boolean
     statusBarVisible: boolean
     sidebarWidth: number
+    panelOrientation: 'horizontal' | 'vertical'
   }
   files: {
     vaultPath: string
@@ -97,7 +98,8 @@ export const DEFAULT_SETTINGS: WriteMdSettings = {
     customCSS: '',
     toolbarVisible: true,
     statusBarVisible: true,
-    sidebarWidth: 280
+    sidebarWidth: 280,
+    panelOrientation: 'horizontal'
   },
   files: {
     vaultPath: '',
