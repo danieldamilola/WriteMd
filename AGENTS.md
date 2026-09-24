@@ -63,4 +63,5 @@ Some screens are not designed yet (menu bar, settings modal, welcome screen, exp
 - `pnpm typecheck` must pass before anything is considered done.
 - `pnpm test` for touched areas. Add a test when fixing a bug.
 - Verify in the running app when the change is visual. Screenshots or it didn't happen.
+- Version rule: when the developer asks for a rebuild/installer for version X, bump `package.json` to X first so artifacts carry the right name. Any code written after that build belongs to the next version (v1.2.0 or v1.1.1) - never the version just built.
 - Commit only when asked. Never push.
