@@ -122,6 +122,9 @@ export class WriteMdTab extends LitElement {
   }
 
   private handleSelectKey(e: KeyboardEvent): void {
+    // Ignore key events bubbled from child controls (e.g. the close button
+    // keeps its native Enter/Space activation).
+    if (e.target !== e.currentTarget) return
     if (e.key === 'Enter' || e.key === ' ') {
       e.preventDefault()
       this.handleSelect()

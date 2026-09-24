@@ -449,11 +449,12 @@ export class WelcomeScreen extends LitElement {
   @state() private panelOrientation: 'horizontal' | 'vertical' = 'horizontal'
   private readonly watermarkUrl = watermarkPng as string
   private settingsStore = SettingsStore.getInstance()
+  private unsubscribeOrientation: (() => void) | null = null
 
   async connectedCallback(): Promise<void> {
     super.connectedCallback()
     this.panelOrientation = this.settingsStore.get('appearance.panelOrientation', 'horizontal') as 'horizontal' | 'vertical'
-    this.settingsStore.subscribe('appearance.panelOrientation', (v) => {
+    this.unsubscribeOrientation = this.settingsStore.subscribe('appearance.panelOrientation', (v) => {
       this.panelOrientation = (v as 'horizontal' | 'vertical') ?? 'horizontal'
     })
     try {
@@ -487,6 +488,12 @@ export class WelcomeScreen extends LitElement {
     } catch {
       this.recentFiles = []
     }
+  }
+
+  disconnectedCallback(): void {
+    this.unsubscribeOrientation?.()
+    this.unsubscribeOrientation = null
+    super.disconnectedCallback()
   }
 
   private emit = (action: string, detail?: unknown): void => {

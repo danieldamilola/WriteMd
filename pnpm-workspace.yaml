@@ -1,3 +1,6 @@
+packages:
+  - '.'
+
 allowBuilds:
   '@turbodocx/html-to-docx': true
   electron: true

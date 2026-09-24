@@ -476,8 +476,7 @@ If the user asks questions about their file, use the above content to answer.`
         { role: 'user', content: systemPrompt },
         {
           role: 'assistant',
-          content:
-            'Acknowledged. I am operating within WriteMd and can see the file content. I will adhere to the unslop style, track file changes, and use the writemd-replace block if requested to modify the file.'
+          content: 'Understood.'
         },
         ...this.aiMessages.map((m): ChatMessage => {
           if (m.role === 'user') {
