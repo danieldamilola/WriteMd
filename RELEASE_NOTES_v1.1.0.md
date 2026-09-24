@@ -1,18 +1,21 @@
 # Release Notes - v1.1.0
 
-**Branch:** `fix/pdf-export` (based on `main` at `d005b4d`)
-**Date:** 2026-09-23
+**Branch:** `main`
+**Date:** 2026-09-24
 **Type:** Minor feature + polish
 
 ## Overview
 
-v1.1.0 adds Word export, moves the updater into Settings, and polishes the main chrome per Figma vertical screens at `node-id=148-127`. The vertical layouts reviewed show a tighter top bar, slimmer tabs, and a borderless inner panel with flat welcome buttons and soft shadows. This release matches that direction while fixing the pnpm build pipeline that blocked `pnpm install` and `pnpm build` on clean clones.
+v1.1.0 adds Word export, moves the updater into Settings, and rebuilds the main chrome per Figma vertical screens at `node-id=148-127`. The vertical layouts reviewed show a tighter top bar, side tabs, a single top-bar document strip, and a borderless inner panel with flat welcome buttons and soft shadows. This release matches that direction, makes the AI system prompt editable, self-hosts the Geist Mono UI font so it loads offline, and fixes the pnpm build pipeline that blocked `pnpm install` and `pnpm build` on clean clones.
 
 ## Highlights
 
 - **Export to Word** - one-click `.docx` from the editor and command palette, using the same HTML as PDF export
 - **Updater moved out of the top bar** - manual check and install now live in Settings → About
-- **Chrome tightening** - TopBar and tabs slimmer so the editor gains vertical space, inner panel and welcome buttons borderless with subtle shadows
+- **Vertical tabs** - side tab rail replaces top tabs when vertical mode is on, per Figma
+- **Single top-bar row** - path, title, mode toggle, and note menu sit in the top bar in vertical mode
+- **Editable AI system prompt** - Settings → AI Assistant, full unslop text as default
+- **Self-hosted Geist Mono** - UI font bundles with the app, loads offline
 
 ## New Features
 
@@ -22,6 +25,24 @@ v1.1.0 adds Word export, moves the updater into Settings, and polishes the main 
 - IPC `src/main/ipc.ts:286` `export:docx`, preload `src/preload/index.ts:88`, types `src/shared/electron-api.ts:122`
 - Renderer `src/renderer/src/components/App.ts:197` and `src/renderer/src/components/Editor.ts:786` `handleExport('docx')`, menu `Editor.ts:977` `Export to Word`, command `src/renderer/src/state/shortcuts.ts:22` `export-docx`
 - Save dialog defaults to same name with `.docx`, empty document returns `Document is empty`
+- Doc-relative images that stay in the folder embed as data URIs; remote, escaping, and unknown-type assets pass through unchanged
+
+### Vertical tabs (Figma 148-127)
+- New `src/renderer/src/components/VerticalTabBar.ts` side rail (196px, 32px tabs) replaces top tabs when `appearance.panelOrientation` is vertical
+- Active tab X close matches Figma Vector 6 (8px); fixed invalid nested-button markup and Enter/Space handling so the close button keeps native activation
+- Panel collapse toggle beside Settings drawn from Figma Component 29 (rect + divider)
+
+### Document strip in the top bar row
+- New self-contained `src/renderer/src/components/DocBar.ts` (parent/file path, renameable title, reading toggle, note menu) driven by FileState directly
+- Vertical mode: strip renders compact in the top bar tabs slot as one row (menu, settings, toggle, path, centered title, book, dots, split, window controls); panel holds only the body
+- Horizontal mode: strip renders inside the panel as before
+- Note menu renders fixed-positioned under the dots button so the top bar `overflow:hidden` slot cannot clip it; DocBar opts out of the window-drag region so clicks land
+- Splits stay side-by-side in all modes with horizontal-only resize drag
+
+### Editable AI system prompt
+- New `ai.systemPrompt` key in `src/shared/settings-schema.ts` defaulting to the full unslop instruction text (style, file-edit blocks, file tracking)
+- Settings → AI Assistant gains a System Prompt textarea with Reset to default; open file context is still appended at runtime
+- Fixed assistant acknowledgement is now neutral (`Understood.`) so it cannot reintroduce instructions a custom prompt omits
 
 ## Improvements
 
@@ -52,13 +73,15 @@ Note: Figma file requires sign-in to inspect pixel values, so sizes were matched
 
 ## Fixes
 
-- **Build** `pnpm-workspace.yaml:2` placeholder `set this to true or false` → `true` for `@turbodocx/html-to-docx`, fixes `ERR_PNPM_IGNORED_BUILDS` and postinstall `node scripts/postinstall.js`. Removed deprecated `package.json:67` `pnpm.onlyBuiltDependencies` field now handled by `allowBuilds`.
-- **PDF margins** `src/main/export.ts:163` clamp margins per page size and handle `NaN`, from `462cdd1`.
+- **Build** `pnpm-workspace.yaml` gains `packages: ['.']` so `pnpm install --frozen-lockfile` passes in CI; `allowBuilds` kept for `@turbodocx/html-to-docx` postinstall. Removed deprecated `package.json` `pnpm.onlyBuiltDependencies` field now handled by `allowBuilds`.
+- **PDF margins** `src/main/export.ts` converts mm to inches for `printToPDF` custom margins (previously sent px) and clamps against page size in inches.
+- **Fonts** Geist Mono self-hosted (`src/renderer/src/styles/fonts/`, latin + latin-ext woff2 via `@font-face` in `global.css`); dropped from the Google Fonts CDN URL. UI referenced it everywhere but fell back to system monospace offline. Also added to the editor font picker.
+- **WelcomeScreen** retains the `appearance.panelOrientation` unsubscribe and releases it on detach.
 - **Dev/Preview** `pnpm dev` blank white and `pnpm start` stale `out/` were caused by incomplete install, now `pnpm install` succeeds and `pnpm build` produces `out/main` `out/preload` `out/renderer`.
 
 ## Technical
 
-- `vite v7.3.6` builds: `out/main/index.js 37.49kB`, `out/preload/index.js 4.59kB`, `out/renderer` 2326 modules.
+- `vite v7.3.6` builds: `out/main/index.js 39.05kB`, `out/preload/index.js 4.48kB`, bundled GeistMono latin + latin-ext woff2 in `out/renderer/assets`.
 - `pnpm 12.3.4` workspace, `electron 39.2.6`, `electron-builder 26.0.12`.
 - Security unchanged: `contextIsolation:true`, `nodeIntegration:false`, via `window.electronAPI`.
 
@@ -69,22 +92,23 @@ Note: Figma file requires sign-in to inspect pixel values, so sizes were matched
 ## How to Test
 
 ```bash
-git checkout fix/pdf-export
+git checkout main
 pnpm install
 pnpm typecheck
-pnpm dev    # live reload, check Welcome buttons shadows, Settings → About → Check for updates, TopBar height, Tab height, heading
+pnpm dev    # live reload, check vertical rail, top-bar strip, Settings AI prompt, fonts
 pnpm build  # produce out/
 pnpm start  # preview built app
 ```
 
 Manual checks:
-- Command palette → Export Word, editor … menu → Export to Word
+- Settings → Appearance → Vertical tabs on: side rail, top-bar strip, collapse toggle
+- Command palette → Export Word, editor … menu → Export to Word (with images)
+- Settings → AI Assistant → edit System Prompt, Reset to default
 - Settings → About → Check for updates → Download → Restart
 - Resize window tall, confirm Figma vertical proportions feel right
 
 ## Commits in this release
 
-- `19d0cb2` fix(build): allow html-to-docx build, remove deprecated pnpm field
 - `14ff774` feat(export): add Word docx export via html-to-docx, mimic Paperling
 - `8e50e18` feat(settings): add About section with manual update check, remove TopBar updater button
 - `797e589` fix(settings): remove sidebar footer version
@@ -93,3 +117,9 @@ Manual checks:
 - `b038e3f` fix(ui): remove inner panel border again per request
 - `3e4f627` fix(welcome): remove gradient border from buttons
 - `ce7da5e` fix(welcome): add subtle drop shadows to buttons
+- `6926ce7` feat(vertical-panel): add toggle in Settings for vertical split layout
+- `8252a52` docs: add v1.1.0 release notes
+- vertical-panel series: welcome screen layout, auto-open panel, sidebar-first, rail + DocBar + collapse toggle, compact fixes, side-by-side splits
+- `96faf5b` fix(fonts): self-host Geist Mono so the UI font actually loads
+- `e973254` fix(review): CI workspace, PDF margin units, DOCX images, neutral AI ack, tab keys, welcome unsubscribe
+- `74ae898` chore: replace em/en dashes with hyphens project-wide
