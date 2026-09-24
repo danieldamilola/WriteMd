@@ -19,6 +19,7 @@ export const COMMANDS: CommandDef[] = [
   { id: 'replace', title: 'Replace', category: 'Edit', defaultBinding: 'Ctrl+H' },
   { id: 'export-pdf', title: 'Export PDF', category: 'File', defaultBinding: '' },
   { id: 'export-html', title: 'Export HTML', category: 'File', defaultBinding: '' },
+  { id: 'export-docx', title: 'Export Word', category: 'File', defaultBinding: '' },
   {
     id: 'quick-toggle',
     title: 'Toggle Reading / Live',

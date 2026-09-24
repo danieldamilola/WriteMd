@@ -11,7 +11,7 @@ import {
   getVaultTree
 } from './vault'
 import { getSettings, setSettings, type WriteMdSettingsPatch } from './settings'
-import { exportHtml, exportPdf } from './export'
+import { exportDocx, exportHtml, exportPdf } from './export'
 import { getAiProvider } from '../shared/ai-providers'
 import type { ChatMessage } from '../shared/electron-api'
 import {
@@ -281,6 +281,10 @@ export function setupIpc(getWindow: () => BrowserWindow | null): void {
 
   ipcMain.handle('export:html', async (_, markdown: string, docPath: string | null) =>
     exportHtml(getWindow, markdown, docPath)
+  )
+
+  ipcMain.handle('export:docx', async (_, markdown: string, docPath: string | null) =>
+    exportDocx(getWindow, markdown, docPath)
   )
 
   async function assertOk(res: Response): Promise<void> {

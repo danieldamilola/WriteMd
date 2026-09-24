@@ -13,8 +13,8 @@ export class WriteMdTopBar extends LitElement {
     :host {
       display: flex;
       align-items: center;
-      height: 56px;
-      padding: 12px 0 12px 28px;
+      height: 40px;
+      padding: 6px 0 6px 28px;
       flex-shrink: 0;
       -webkit-app-region: drag;
       user-select: none;
@@ -58,42 +58,14 @@ export class WriteMdTopBar extends LitElement {
       display: flex;
       gap: 0;
       align-self: stretch;
-      margin: -12px 0;
+      margin: -6px 0;
     }
   `
 
   @property({ type: Boolean }) showSplitButton = true
   @property({ type: Boolean }) splitActive = false
-  @property({ type: Boolean }) updateAvailable = false
-  @property({ type: Boolean }) downloadingUpdate = false
-
-  private unsubs: Array<() => void> = []
-
-  connectedCallback(): void {
-    super.connectedCallback()
-
-    // Call updater check after 3 seconds
-    setTimeout(() => {
-      void api()?.updater?.check?.()
-    }, 3000)
-
-    const onAvail = api()?.updater?.onUpdateAvailable?.(() => {
-      this.updateAvailable = true
-      this.downloadingUpdate = true
-    })
-    const onDownloaded = api()?.updater?.onUpdateDownloaded?.(() => {
-      this.downloadingUpdate = false
-      this.updateAvailable = true
-    })
-
-    if (onAvail) this.unsubs.push(onAvail)
-    if (onDownloaded) this.unsubs.push(onDownloaded)
-  }
-
-  disconnectedCallback(): void {
-    super.disconnectedCallback()
-    this.unsubs.forEach((unsub) => unsub())
-  }
+  @property({ type: Boolean }) showPanelToggle = false
+  @property({ type: Boolean }) panelCollapsed = false
 
   private emit(event: string): void {
     this.dispatchEvent(new CustomEvent(event, { bubbles: true, composed: true }))
@@ -129,6 +101,34 @@ export class WriteMdTopBar extends LitElement {
             />
           </svg>
         </writemd-icon-button>
+        ${this.showPanelToggle
+          ? html`
+              <writemd-icon-button
+                title=${this.panelCollapsed ? 'Expand panel' : 'Collapse panel'}
+                @click=${() => this.emit('toggle-panel')}
+              >
+                <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
+                  <rect
+                    x="1.5"
+                    y="1.5"
+                    width="15"
+                    height="15"
+                    rx="2"
+                    stroke="currentColor"
+                    stroke-width="1.2"
+                  />
+                  <line
+                    x1="6.5"
+                    y1="1.5"
+                    x2="6.5"
+                    y2="16.5"
+                    stroke="currentColor"
+                    stroke-width="1.2"
+                  />
+                </svg>
+              </writemd-icon-button>
+            `
+          : ''}
       </div>
 
       <div class="tabs-slot">
@@ -165,19 +165,6 @@ export class WriteMdTopBar extends LitElement {
               `
             : ''
         }
-        ${
-          this.updateAvailable
-            ? html`
-                <button
-                  style="background: var(--accent); color: var(--accent-text); border: none; border-radius: 4px; padding: 4px 8px; font-size: 11px; font-weight: 500; cursor: pointer; -webkit-app-region: no-drag;"
-                  @click=${() => (this.downloadingUpdate ? null : api()?.updater?.install?.())}
-                >
-                  ${this.downloadingUpdate ? 'Downloading update...' : 'Restart to update'}
-                </button>
-              `
-            : ''
-        }
-
         <div class="window-controls">
           <writemd-icon-button
             size="caption"

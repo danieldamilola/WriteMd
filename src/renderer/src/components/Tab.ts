@@ -10,7 +10,7 @@ export class WriteMdTab extends LitElement {
       min-width: 80px;
       max-width: 169px;
       flex: 0 1 169px;
-      height: 32px;
+      height: 26px;
       position: relative;
       box-sizing: border-box;
       user-select: none;
@@ -23,7 +23,7 @@ export class WriteMdTab extends LitElement {
       width: 100%;
       height: 100%;
       border-radius: 5px;
-      padding: 0 7px 0 11px;
+      padding: 0 10px 0 11px;
       cursor: pointer;
       gap: 8px;
       box-sizing: border-box;
@@ -47,6 +47,11 @@ export class WriteMdTab extends LitElement {
       background: rgba(255, 255, 255, 0.05);
       color: #d4d4d4;
       font-weight: 600;
+    }
+
+    .tab-btn:focus-visible {
+      outline: 1px solid var(--border-focus, rgba(255, 255, 255, 0.2));
+      outline-offset: -1px;
     }
 
     .separator {
@@ -85,8 +90,7 @@ export class WriteMdTab extends LitElement {
       background: none;
       padding: 0;
       cursor: pointer;
-      opacity: 0.5;
-      color: currentColor;
+      color: var(--text-muted);
     }
 
     .dirty-dot {
@@ -99,7 +103,7 @@ export class WriteMdTab extends LitElement {
     }
 
     .close-btn:hover {
-      opacity: 1;
+      color: var(--text);
     }
   `
 
@@ -117,10 +121,26 @@ export class WriteMdTab extends LitElement {
     this.dispatchEvent(new CustomEvent('select', { bubbles: true, composed: true }))
   }
 
+  private handleSelectKey(e: KeyboardEvent): void {
+    // Ignore key events bubbled from child controls (e.g. the close button
+    // keeps its native Enter/Space activation).
+    if (e.target !== e.currentTarget) return
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault()
+      this.handleSelect()
+    }
+  }
+
   render(): unknown {
     return html`
       <span class="separator"></span>
-      <button class="tab-btn" type="button" @click=${this.handleSelect}>
+      <div
+        class="tab-btn"
+        role="button"
+        tabindex="0"
+        @click=${this.handleSelect}
+        @keydown=${this.handleSelectKey}
+      >
         <span class="label">${this.label}</span>
         ${this.dirty ? html`<span class="dirty-dot" title="Unsaved changes"></span>` : ''}
         ${
@@ -133,21 +153,21 @@ export class WriteMdTab extends LitElement {
                   aria-label="Close tab"
                 >
                   <svg
-                    width="12"
-                    height="12"
-                    viewBox="0 0 12 12"
+                    width="8"
+                    height="8"
+                    viewBox="0 0 8 8"
                     fill="none"
                     stroke="currentColor"
-                    stroke-width="1.5"
+                    stroke-width="1.2"
                   >
-                    <line x1="2" y1="2" x2="10" y2="10" />
-                    <line x1="10" y1="2" x2="2" y2="10" />
+                    <line x1="0" y1="8" x2="8" y2="0" />
+                    <line x1="8" y1="8" x2="0" y2="0" />
                   </svg>
                 </button>
               `
             : ''
         }
-      </button>
+      </div>
     `
   }
 }

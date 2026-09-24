@@ -1,6 +1,6 @@
 import { BrowserWindow, dialog, type BrowserWindow as BrowserWindowType } from 'electron'
-import { writeFile, rename, stat } from 'fs/promises'
-import { dirname } from 'path'
+import { writeFile, rename, stat, readFile } from 'fs/promises'
+import { dirname, resolve, relative, extname } from 'path'
 import { mkdirSync } from 'fs'
 import MarkdownIt from 'markdown-it'
 import { getSettings } from './settings'
@@ -130,6 +130,20 @@ async function atomicWrite(targetPath: string, data: string | Buffer): Promise<n
   return stats.mtimeMs
 }
 
+const PAGE_SIZE_MM: Record<PdfPageSize, { width: number; height: number }> = {
+  A0: { width: 841, height: 1189 },
+  A1: { width: 594, height: 841 },
+  A2: { width: 420, height: 594 },
+  A3: { width: 297, height: 420 },
+  A4: { width: 210, height: 297 },
+  A5: { width: 148, height: 210 },
+  A6: { width: 105, height: 148 },
+  Legal: { width: 215.9, height: 355.6 },
+  Letter: { width: 215.9, height: 279.4 },
+  Tabloid: { width: 279.4, height: 431.8 },
+  Ledger: { width: 431.8, height: 279.4 }
+}
+
 async function renderInHiddenWindow(html: string): Promise<Buffer> {
   const win = new BrowserWindow({
     show: false,
@@ -138,20 +152,26 @@ async function renderInHiddenWindow(html: string): Promise<Buffer> {
   try {
     await win.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`)
     const settings = getSettings()
-    // pdfMargin is stored in millimeters; Electron wants pixels at 96 DPI.
-    // Clamped so a bad stored value can never exceed the page.
-    const marginPx = Math.min(
-      200,
-      Math.round(Math.max(0, settings.export.pdfMargin) * 3.7795275591)
+    const pageSize = resolvePageSize(settings.export.pdfPageSize)
+    const rawMargin = Number(settings.export.pdfMargin)
+    const marginMm = Number.isFinite(rawMargin) ? Math.max(0, rawMargin) : 24
+    // printToPDF custom margins are in inches: convert mm and clamp to
+    // < half page minus breathing room (20px at 96 DPI)
+    const pageMM = PAGE_SIZE_MM[pageSize]
+    const toInches = (mm: number): number => mm / 25.4
+    const maxMarginIn = Math.max(
+      0,
+      Math.min(toInches(pageMM.width), toInches(pageMM.height)) / 2 - 20 / 96
     )
+    const marginIn = Math.min(maxMarginIn, toInches(marginMm))
     return await win.webContents.printToPDF({
-      pageSize: resolvePageSize(settings.export.pdfPageSize),
+      pageSize,
       margins: {
         marginType: 'custom',
-        top: marginPx,
-        bottom: marginPx,
-        left: marginPx,
-        right: marginPx
+        top: marginIn,
+        bottom: marginIn,
+        left: marginIn,
+        right: marginIn
       },
       printBackground: true
     })
@@ -172,13 +192,17 @@ export async function exportPdf(
     'pdf'
   )
   if (!filePath) return { ok: false, reason: 'canceled' }
-  const html = renderExportHtml(markdown, {
-    title: titleFromPath(docPath),
-    theme: resolveTheme()
-  })
-  const pdfData = await renderInHiddenWindow(html)
-  await atomicWrite(filePath, pdfData)
-  return { ok: true, path: filePath }
+  try {
+    const html = renderExportHtml(markdown, {
+      title: titleFromPath(docPath),
+      theme: resolveTheme()
+    })
+    const pdfData = await renderInHiddenWindow(html)
+    await atomicWrite(filePath, pdfData)
+    return { ok: true, path: filePath }
+  } catch (e) {
+    return { ok: false, reason: e instanceof Error ? e.message : String(e) }
+  }
 }
 
 export async function exportHtml(
@@ -199,4 +223,102 @@ export async function exportHtml(
   if (!filePath) return { ok: false, reason: 'canceled' }
   await atomicWrite(filePath, html)
   return { ok: true, path: filePath }
+}
+
+// ---------------------------------------------------------------------------
+// DOCX export — mirrors Paperling's approach (pure JS, no headless PDF)
+// Uses @turbodocx/html-to-docx to convert the same markdown-rendered HTML
+// into a real Office Open XML document. Light, print-style, white background.
+// ---------------------------------------------------------------------------
+type HtmlToDocx = (html: string, header?: string | null, options?: Record<string, unknown>, footer?: string | null) => Promise<ArrayBuffer | Blob | Uint8Array>
+
+const IMAGE_MIME: Record<string, string> = {
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.gif': 'image/gif',
+  '.webp': 'image/webp',
+  '.svg': 'image/svg+xml',
+  '.bmp': 'image/bmp'
+}
+
+/**
+ * Embed document-relative <img> assets as data URIs so converters without a
+ * file base (html-to-docx) can resolve them. Only paths that stay inside the
+ * document directory are embedded; absolute URLs, data URIs, unknown types,
+ * and paths escaping the directory pass through unchanged.
+ */
+async function embedLocalImages(html: string, docPath: string | null): Promise<string> {
+  if (!docPath) return html
+  const baseDir = dirname(docPath)
+  let out = html
+  for (const m of html.matchAll(/<img\b[^>]*\bsrc="([^"]+)"[^>]*>/g)) {
+    const src = m[1]
+    if (/^(https?:|data:|file:)/i.test(src)) continue
+    const clean = src.split('?')[0].split('#')[0]
+    const abs = resolve(baseDir, clean)
+    if (relative(baseDir, abs).startsWith('..')) continue
+    const mime = IMAGE_MIME[extname(clean).toLowerCase()]
+    if (!mime) continue
+    try {
+      const bytes = await readFile(abs)
+      const replacement = m[0].replace(`src="${src}"`, `src="data:${mime};base64,${bytes.toString('base64')}"`)
+      out = out.replace(m[0], () => replacement)
+    } catch {
+      // Unreadable asset: leave the tag as-is
+    }
+  }
+  return out
+}
+
+async function ensureDocxRuntime(): Promise<void> {
+  const g = globalThis as Record<string, unknown>
+  if (typeof g.global === 'undefined') g.global = g
+  if (typeof g.process === 'undefined') g.process = { env: {} }
+  if (typeof g.Buffer === 'undefined') {
+    const { Buffer } = await import('buffer')
+    g.Buffer = Buffer
+  }
+}
+
+export async function exportDocx(
+  getWindow: () => BrowserWindowType | null,
+  markdown: string,
+  docPath: string | null
+): Promise<ExportResult> {
+  if (!markdown || markdown.trim() === '') {
+    return { ok: false, reason: 'Document is empty' }
+  }
+  const title = titleFromPath(docPath)
+  const body = md.render(markdown)
+  const rawHtml = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${escapeHtml(title)}</title></head><body><article>${body}</article></body></html>`
+  const docHtml = await embedLocalImages(rawHtml, docPath)
+
+  const filePath = await showExportSaveDialog(getWindow, defaultExportPath(docPath, 'docx'), 'Word Document', 'docx')
+  if (!filePath) return { ok: false, reason: 'canceled' }
+
+  try {
+    await ensureDocxRuntime()
+    const mod = await import('@turbodocx/html-to-docx')
+    const convert = ((mod as { default?: HtmlToDocx }).default ?? (mod as unknown as HtmlToDocx)) as HtmlToDocx
+    const out = await convert(docHtml, null, {
+      title,
+      creator: 'WriteMd',
+      footer: false,
+      pageNumber: false,
+      font: 'Calibri',
+      fontSize: 22,
+      table: { row: { cantSplit: true } }
+    })
+    const bytes =
+      out instanceof Blob
+        ? new Uint8Array(await out.arrayBuffer())
+        : out instanceof Uint8Array
+          ? out
+          : new Uint8Array(out as ArrayBuffer)
+    await atomicWrite(filePath, Buffer.from(bytes))
+    return { ok: true, path: filePath }
+  } catch (e) {
+    return { ok: false, reason: e instanceof Error ? e.message : String(e) }
+  }
 }
