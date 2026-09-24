@@ -619,7 +619,7 @@ If the user asks questions about their file, use the above content to answer.`
             key: 'F3',
             run: (view) => {
               // findNext opens the built-in search panel on an invalid
-              // query — we render our own panel, so swallow it instead.
+              // query - we render our own panel, so swallow it instead.
               const q = getSearchQuery(view.state)
               if (q?.valid && q.search) return findNext(view)
               return true

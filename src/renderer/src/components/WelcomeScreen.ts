@@ -545,7 +545,7 @@ export class WelcomeScreen extends LitElement {
         </div>
 
         <div class="tab-bar">
-          ${nothing /* Tabs are populated when files are open — empty on welcome */}
+          ${nothing /* Tabs are populated when files are open - empty on welcome */}
         </div>
 
         <div class="top-bar-right">

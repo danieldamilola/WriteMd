@@ -226,7 +226,7 @@ export async function exportHtml(
 }
 
 // ---------------------------------------------------------------------------
-// DOCX export — mirrors Paperling's approach (pure JS, no headless PDF)
+// DOCX export - mirrors Paperling's approach (pure JS, no headless PDF)
 // Uses @turbodocx/html-to-docx to convert the same markdown-rendered HTML
 // into a real Office Open XML document. Light, print-style, white background.
 // ---------------------------------------------------------------------------

@@ -1,7 +1,7 @@
 import type { ChatMessage } from './electron-api'
 
 /**
- * Pure AI provider adapters. No Electron imports — `ipc.ts` executes the
+ * Pure AI provider adapters. No Electron imports - `ipc.ts` executes the
  * requests they describe, and unit tests can exercise them without mocking.
  */
 

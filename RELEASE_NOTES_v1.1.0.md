@@ -1,4 +1,4 @@
-# Release Notes — v1.1.0
+# Release Notes - v1.1.0
 
 **Branch:** `fix/pdf-export` (based on `main` at `d005b4d`)
 **Date:** 2026-09-23
@@ -10,9 +10,9 @@ v1.1.0 adds Word export, moves the updater into Settings, and polishes the main 
 
 ## Highlights
 
-- **Export to Word** — one-click `.docx` from the editor and command palette, using the same HTML as PDF export
-- **Updater moved out of the top bar** — manual check and install now live in Settings → About
-- **Chrome tightening** — TopBar and tabs slimmer so the editor gains vertical space, inner panel and welcome buttons borderless with subtle shadows
+- **Export to Word** - one-click `.docx` from the editor and command palette, using the same HTML as PDF export
+- **Updater moved out of the top bar** - manual check and install now live in Settings → About
+- **Chrome tightening** - TopBar and tabs slimmer so the editor gains vertical space, inner panel and welcome buttons borderless with subtle shadows
 
 ## New Features
 
@@ -37,7 +37,7 @@ v1.1.0 adds Word export, moves the updater into Settings, and polishes the main 
 ### Settings footer
 - Removed sidebar footer `WriteMd Desktop v1.0.0` at `SettingsModal.ts:925` and its CSS at `SettingsModal.ts:142` `.nav-footer`. Version lives only in About to match Figma vertical screens.
 
-## UI Polish — Figma Vertical Screens (148-127)
+## UI Polish - Figma Vertical Screens (148-127)
 
 Reviewed `https://www.figma.com/design/ctsfPaeg9sQl7OfXhy4eUT/Projects--UI?node-id=148-127&m=dev`. The vertical variants use a 40-43px top bar, compact tabs, and a borderless central panel with flat buttons.
 

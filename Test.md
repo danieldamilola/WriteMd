@@ -1,6 +1,6 @@
 ---
 name: appllama-app-design-skill
-description: Build native-feeling, benchmark-quality mobile app screens (Expo / React Native). Use when designing or implementing any mobile UI — screens, flows, onboarding, paywalls, tab bars, sheets, settings, empty states.
+description: Build native-feeling, benchmark-quality mobile app screens (Expo / React Native). Use when designing or implementing any mobile UI - screens, flows, onboarding, paywalls, tab bars, sheets, settings, empty states.
 license: MIT
 tags: [markdown, test]
 ---

@@ -134,7 +134,7 @@ export class TextMenu extends LitElement {
     void this.loadLinkFiles()
   }
 
-  /** Files linkable from here: open tabs, recent files, vault — any folder. */
+  /** Files linkable from here: open tabs, recent files, vault - any folder. */
   private async loadLinkFiles(): Promise<void> {
     const seen = new Set<string>()
     const out: Array<{ path: string; label: string }> = []

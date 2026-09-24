@@ -1,12 +1,12 @@
-# AGENTS.md — WriteMd Development Guide
+# AGENTS.md - WriteMd Development Guide
 
 ## Project Overview
 
-**WriteMd** — Frictionless Markdown Editor. Hybrid vault model: new files go to vault (`~/Documents/WriteMd Vault/`), existing files open/edit/save in place. No accounts, no sync, no lock-in.
+**WriteMd** - Frictionless Markdown Editor. Hybrid vault model: new files go to vault (`~/Documents/WriteMd Vault/`), existing files open/edit/save in place. No accounts, no sync, no lock-in.
 
-**PRD:** `PRD.md` — single source of truth for scope, architecture, and decisions.
+**PRD:** `PRD.md` - single source of truth for scope, architecture, and decisions.
 
-**Phases:** `phases.md` — implementation roadmap with acceptance criteria per task.
+**Phases:** `phases.md` - implementation roadmap with acceptance criteria per task.
 
 **Figma Design:** https://www.figma.com/design/ctsfPaeg9sQl7OfXhy4eUT/Projects--UI?node-id=114-127&m=dev
 
@@ -14,7 +14,7 @@
 
 ## Mandatory Skills
 
-### unslop — ALWAYS ACTIVE
+### unslop - ALWAYS ACTIVE
 
 Every response, every code change, every doc edit goes through `unslop` first. Cut AI tells: "Here is...", "This will...", "I'll help...", "Let me...", "Great!", "Excellent!", "Perfect!". No preamble, no postamble, no summaries unless asked. Direct, concise, human-sounding output. If you catch filler while writing, stop, delete, rewrite.
 

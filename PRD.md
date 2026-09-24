@@ -1,8 +1,8 @@
-# PRD: WriteMd — Frictionless Markdown Editor 
+# PRD: WriteMd - Frictionless Markdown Editor 
 
 ## 1. Product Vision By daniel and also 
 
-**WriteMd** is a local-first markdown editor that opens **any `.md` file directly** — no vault, no import, no copy-paste. Double-click a file, edit in a beautiful WYSIWYG interface, save. Done.
+**WriteMd** is a local-first markdown editor that opens **any `.md` file directly** - no vault, no import, no copy-paste. Double-click a file, edit in a beautiful WYSIWYG interface, save. Done.
 
 **Core philosophy:** "Open → Edit → Save". Zero friction. Zero setup.
 
@@ -87,7 +87,7 @@
 | **Math**             | KaTeX (fast, no MathJax bloat)                     | Client-side rendering                          |
 | **Diagrams**         | Mermaid.js (lazy-loaded)                           | Optional, on-demand                            |
 | **Styling**          | CSS Custom Properties + PostCSS                    | Themeable, no runtime CSS-in-JS                |
-| **UI Framework**     | **None** — Vanilla TS + Web Components             | Like Obsidian: lightweight, no framework tax   |
+| **UI Framework**     | **None** - Vanilla TS + Web Components             | Like Obsidian: lightweight, no framework tax   |
 | **State**            | Signals (Preact signals or custom)                 | Fine-grained reactivity, tiny                  |
 | **Build**            | Vite + electron-builder                            | Fast dev, optimized production                 |
 | **Testing**          | Vitest + Playwright (E2E)                          | Unit + integration                             |
@@ -131,12 +131,12 @@ Following Obsidian's approach: **single editor, two views via decorations**
 CodeMirror 6 EditorView
 ├── State: EditorState (doc, selection, extensions)
 ├── Extensions:
-│   ├── markdown() — Lezer parser for Markdown
-│   ├── livePreviewDecorations — Widget decorations that REPLACE
+│   ├── markdown() - Lezer parser for Markdown
+│   ├── livePreviewDecorations - Widget decorations that REPLACE
 │   │   markdown syntax with rendered DOM (images, math, etc.)
-│   ├── syntaxHighlighting — Lezer-based token colors
-│   ├── keymap — Custom bindings (formatting, shortcuts)
-│   ├── history — Undo/redo
+│   ├── syntaxHighlighting - Lezer-based token colors
+│   ├── keymap - Custom bindings (formatting, shortcuts)
+│   ├── history - Undo/redo
 │   ├── lineNumbers / highlightActiveLineGutter
 │   └── placeholder / autocompletion (wiki-links, emoji, etc.)
 └── View: EditorView (DOM rendering, decorations, coordinates)
@@ -221,7 +221,7 @@ The following functional capabilities are fully specified in the PRD logic and s
 - **Default:** `~/Documents/WriteMd Vault/` (created on first launch)
 - **Changeable:** Settings → "Default Vault Location"
 - **Structure:** Flat or user-created folders (no enforced structure)
-- **No database/index** — just a filesystem folder. File Explorer sidebar shows vault contents.
+- **No database/index** - just a filesystem folder. File Explorer sidebar shows vault contents.
 
 ### 6.3 Open Any File
 
@@ -601,11 +601,11 @@ writemd/
 
 ## 15. Open Questions
 
-1. **Plugin system?** — Not for MVP. Consider after v1.0 if demand exists.
-2. **Sync?** — Out of scope. Users can use Syncthing, iCloud, Dropbox on the vault folder.
-3. **Mobile?** — Capacitor wrapper later. Desktop first.
-4. **License?** — MIT or AGPL? Recommend MIT for adoption.
-5. **Name "WriteMd"** — Confirm trademark availability.
+1. **Plugin system?** - Not for MVP. Consider after v1.0 if demand exists.
+2. **Sync?** - Out of scope. Users can use Syncthing, iCloud, Dropbox on the vault folder.
+3. **Mobile?** - Capacitor wrapper later. Desktop first.
+4. **License?** - MIT or AGPL? Recommend MIT for adoption.
+5. **Name "WriteMd"** - Confirm trademark availability.
 
 ---
 
@@ -613,7 +613,7 @@ writemd/
 
 | Non-Goal                       | Reason                                                                  |
 | ------------------------------ | ----------------------------------------------------------------------- |
-| **User accounts / cloud sync** | "Install and use" — local-first, no backend                             |
+| **User accounts / cloud sync** | "Install and use" - local-first, no backend                             |
 | **Plugin marketplace**         | MVP scope; core editing first                                           |
 | **Collaboration / real-time**  | Different product category                                              |
 | **Database / index**           | Filesystem is the source of truth                                       |

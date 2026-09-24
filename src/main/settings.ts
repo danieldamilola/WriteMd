@@ -34,7 +34,7 @@ export function encryptApiKey(plain: string): string {
     // fall through to plaintext
   }
   console.warn(
-    'safeStorage is unavailable on this system — the AI API key is being stored ' +
+    'safeStorage is unavailable on this system - the AI API key is being stored ' +
       'in plaintext in config.json.'
   )
   return plain

@@ -2,7 +2,7 @@ import type { FileStateData } from './file-state'
 
 /**
  * Pure conflict-resolution state transitions for FileState.
- * No side effects — the store applies the returned patch, then syncs
+ * No side effects - the store applies the returned patch, then syncs
  * mirrors and notifies subscribers itself.
  */
 

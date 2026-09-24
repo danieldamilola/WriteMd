@@ -10,17 +10,17 @@
   </p>
 </div>
 
-WriteMd is a fast, private, local-first Markdown editor. Double-click any `.md` file and edit it where it lives — no vault to configure, no import step, no account. New notes land in your vault (`~/Documents/WriteMd Vault/`); existing files always save back in place.
+WriteMd is a fast, private, local-first Markdown editor. Double-click any `.md` file and edit it where it lives - no vault to configure, no import step, no account. New notes land in your vault (`~/Documents/WriteMd Vault/`); existing files always save back in place.
 
 ## Highlights
 
-- **Zero friction** — open any `.md` from Explorer, drag-drop, or `Ctrl+O`; auto-save keeps you safe
-- **Live Preview (WYSIWYG)** — Obsidian-style editing powered by CodeMirror 6, plus a source mode and split view
-- **Private by default** — everything stays on your machine; no telemetry, no sync, no lock-in (see [PRIVACY.md](PRIVACY.md))
-- **Links that work** — `[[wiki-links]]` with click-to-open, file picker, cross-folder backlinks panel, and smart website-link insertion
-- **AI assistant (optional)** — bring your own key (OpenAI, Gemini, Anthropic, Ollama) to draft and edit in place
-- **Rich Markdown** — tables, math (KaTeX), Mermaid diagrams, frontmatter, footnotes, callouts
-- **Keyboard-first** — command palette (`Ctrl+P`), customizable shortcuts, find/replace (`Ctrl+F` / `Ctrl+H`)
+- **Zero friction** - open any `.md` from Explorer, drag-drop, or `Ctrl+O`; auto-save keeps you safe
+- **Live Preview (WYSIWYG)** - Obsidian-style editing powered by CodeMirror 6, plus a source mode and split view
+- **Private by default** - everything stays on your machine; no telemetry, no sync, no lock-in (see [PRIVACY.md](PRIVACY.md))
+- **Links that work** - `[[wiki-links]]` with click-to-open, file picker, cross-folder backlinks panel, and smart website-link insertion
+- **AI assistant (optional)** - bring your own key (OpenAI, Gemini, Anthropic, Ollama) to draft and edit in place
+- **Rich Markdown** - tables, math (KaTeX), Mermaid diagrams, frontmatter, footnotes, callouts
+- **Keyboard-first** - command palette (`Ctrl+P`), customizable shortcuts, find/replace (`Ctrl+F` / `Ctrl+H`)
 
 ## Installation
 
@@ -38,12 +38,12 @@ WriteMd registers itself for `.md`, `.markdown`, `.mdown`, and `.mkd` so files o
 
 - **New note** `Ctrl+N` → created in your vault, no Save dialog
 - **Open** `Ctrl+O`, drag-drop a file onto the window, or double-click in Explorer
-- **Save** is automatic (debounced) — `Ctrl+S` forces it, `Ctrl+Shift+S` saves elsewhere
-- **Views** — Live / Source / Split via the floating pill or `Ctrl+E`; split pane hosts files, backlinks, AI, or another document
-- **Find/Replace** — `Ctrl+F` / `Ctrl+H`, with match count, case / whole-word / regex toggles
-- **Links** — right-click → Add link (pick any open, recent, or vault file, or browse anywhere) inserts `[[note]]`; Add external link inserts `[text](https://…)` using your clipboard URL when there is one; clicking a `[[link]]` opens or creates the note
-- **Images** — paste or drop; stored in a sibling `_assets/` folder and referenced relatively
-- **Export** — PDF and standalone HTML from the note menu
+- **Save** is automatic (debounced) - `Ctrl+S` forces it, `Ctrl+Shift+S` saves elsewhere
+- **Views** - Live / Source / Split via the floating pill or `Ctrl+E`; split pane hosts files, backlinks, AI, or another document
+- **Find/Replace** - `Ctrl+F` / `Ctrl+H`, with match count, case / whole-word / regex toggles
+- **Links** - right-click → Add link (pick any open, recent, or vault file, or browse anywhere) inserts `[[note]]`; Add external link inserts `[text](https://…)` using your clipboard URL when there is one; clicking a `[[link]]` opens or creates the note
+- **Images** - paste or drop; stored in a sibling `_assets/` folder and referenced relatively
+- **Export** - PDF and standalone HTML from the note menu
 
 ### Default shortcuts
 
@@ -64,7 +64,7 @@ Settings persist to `config.json` in the app data folder and cover editor (font,
 
 ## Development
 
-Built with **Electron + TypeScript + Lit Web Components** — no renderer framework. Editor: CodeMirror 6 (Lezer) with live-preview decorations; preview parsing via markdown-it; `contextIsolation: true`, all Node access through the typed `window.electronAPI` preload bridge.
+Built with **Electron + TypeScript + Lit Web Components** - no renderer framework. Editor: CodeMirror 6 (Lezer) with live-preview decorations; preview parsing via markdown-it; `contextIsolation: true`, all Node access through the typed `window.electronAPI` preload bridge.
 
 Prerequisites: Node.js 18+, pnpm.
 
@@ -90,8 +90,8 @@ Project layout: `src/main` (Electron main process), `src/renderer` (UI: `compone
 
 ## Privacy
 
-Local-first: notes never leave your device. The only network traffic is opt-in — your AI provider (when you configure one) and update checks against GitHub releases. Details in [PRIVACY.md](PRIVACY.md).
+Local-first: notes never leave your device. The only network traffic is opt-in - your AI provider (when you configure one) and update checks against GitHub releases. Details in [PRIVACY.md](PRIVACY.md).
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+MIT - see [LICENSE](LICENSE).

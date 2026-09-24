@@ -2,7 +2,7 @@
 
 Tracker for what shipped in v1.0.0 and what lands in v1.1.0. Each v1.1.0 item carries acceptance criteria; nothing counts as done until `pnpm typecheck` + `pnpm test` pass.
 
-## v1.0.0 — Shipped
+## v1.0.0 - Shipped
 
 ### Foundation
 - [x] Electron + Vite + TypeScript setup, Main/Renderer IPC + typed preload bridge
@@ -33,7 +33,7 @@ Tracker for what shipped in v1.0.0 and what lands in v1.1.0. Each v1.1.0 item ca
 - [x] Unit suite (vitest) + Playwright e2e specs
 - [x] README, MIT LICENSE, PRIVACY.md
 
-## v1.1.0 — Next (fix or add)
+## v1.1.0 - Next (fix or add)
 
 - [ ] Image resize handles
   - *Acceptance Criteria:* Drag handles on rendered images set width/height attributes persisted in markdown.
