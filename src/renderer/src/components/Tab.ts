@@ -9,7 +9,7 @@ export class WriteMdTab extends LitElement {
       align-items: center;
       min-width: 80px;
       max-width: 169px;
-      flex: 0 1 169px;
+      flex: 0 0 auto;
       height: 26px;
       position: relative;
       box-sizing: border-box;

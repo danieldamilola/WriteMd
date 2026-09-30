@@ -3,8 +3,33 @@ dist
 out
 .DS_Store
 .eslintcache
-*.log*
+
+# Playwright artifacts. test-results/ is created per-run and playwright-report/
+# is the HTML summary, which only appears on a failing run.
+test-results/
+playwright-report/
+blob-report/
+playwright/.cache/
+
+# Local env files. electron-builder.yml already excludes these from the
+# package, so the expectation exists; the ignore rule was missing.
+.env
+.env.*
+
+temp-test-vault/
+
+# Throwaway fixtures for the tab-strip e2e spec. Recreated on every run, never
+# part of the repo.
+.e2e-vault/
+.e2e-userdata/
+
+# Generated scratch output from ad-hoc scripts. Delete these rather than
+# committing them (see the test*.js cleanup).
 test-output.txt
 test-results.txt
-test-results/
-temp-test-vault/
+
+# Note: `*.log*` was removed. The pattern is broad enough to swallow real
+# source and docs (anything with a `.log` segment, e.g. docs/dialog.log.md or
+# src/**/blog.settings.ts). Use `*.log` and `*.log.*` instead.
+*.log
+*.log.*

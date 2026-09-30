@@ -50,6 +50,62 @@ export class WriteMdApp extends LitElement {
       flex-direction: column;
       min-width: 0;
     }
+    .tabs-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      min-width: 0;
+      width: 100%;
+    }
+    .tab-strip {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex: 0 1 auto;
+      min-width: 0;
+      /* offsetLeft on a tab is measured against this, so the scroll math in
+         revealActiveTab() is only correct while the strip is the offset parent. */
+      position: relative;
+      overflow-x: auto;
+      overflow-y: hidden;
+      scrollbar-width: none;
+      -webkit-app-region: drag;
+    }
+    .tab-strip::-webkit-scrollbar {
+      display: none;
+    }
+    /* Only opt out of the window-drag region when tabs are actually hidden.
+       A drag region swallows wheel events, so scrolling needs no-drag, but
+       dropping it unconditionally would make the strip undraggable. */
+    .tab-strip[data-more] {
+      -webkit-app-region: no-drag;
+    }
+    /* Fade only the edge that still has hidden tabs, so a clipped tab reads as
+       "scroll for more" rather than a rendering bug. */
+    .tab-strip[data-more='right'] {
+      -webkit-mask-image: linear-gradient(to right, black calc(100% - 24px), transparent 100%);
+      mask-image: linear-gradient(to right, black calc(100% - 24px), transparent 100%);
+    }
+    .tab-strip[data-more='left'] {
+      -webkit-mask-image: linear-gradient(to right, transparent 0, black 24px);
+      mask-image: linear-gradient(to right, transparent 0, black 24px);
+    }
+    .tab-strip[data-more='both'] {
+      -webkit-mask-image: linear-gradient(
+        to right,
+        transparent 0,
+        black 24px,
+        black calc(100% - 24px),
+        transparent 100%
+      );
+      mask-image: linear-gradient(
+        to right,
+        transparent 0,
+        black 24px,
+        black calc(100% - 24px),
+        transparent 100%
+      );
+    }
     .tab-add {
       display: flex;
       align-items: center;
@@ -83,14 +139,76 @@ export class WriteMdApp extends LitElement {
   private fileState = FileState.getInstance()
   private unsubscribeFileState: (() => void) | null = null
   private unsubscribeOrientation: (() => void) | null = null
+  private unsubscribeFileOpen: (() => void) | null = null
+  private stripObserver: ResizeObserver | null = null
 
-  async connectedCallback(): Promise<void> {
+  private get tabStrip(): HTMLElement | null {
+    return this.renderRoot.querySelector<HTMLElement>('.tab-strip')
+  }
+
+  /** Fade whichever edge still hides tabs. Cheap enough to run on every scroll. */
+  private syncStripEdges(): void {
+    const strip = this.tabStrip
+    if (!strip) return
+    const max = strip.scrollWidth - strip.clientWidth
+    if (max <= 1) {
+      strip.removeAttribute('data-more')
+      return
+    }
+    const atStart = strip.scrollLeft <= 1
+    const atEnd = strip.scrollLeft >= max - 1
+    strip.dataset.more = atStart ? 'right' : atEnd ? 'left' : 'both'
+  }
+
+  private revealActiveTab(): void {
+    const strip = this.tabStrip
+    if (!strip) return
+    this.syncStripEdges()
+    const active = strip.querySelector<HTMLElement>('writemd-tab[active]')
+    if (!active) return
+    const pad = 12
+    const left = active.offsetLeft
+    const right = left + active.offsetWidth
+    if (left < strip.scrollLeft + pad) {
+      strip.scrollLeft = Math.max(0, left - pad)
+    } else if (right > strip.scrollLeft + strip.clientWidth - pad) {
+      strip.scrollLeft = right - strip.clientWidth + pad
+    }
+  }
+
+  private handleStripScroll = (): void => {
+    this.syncStripEdges()
+  }
+
+  connectedCallback(): void {
     super.connectedCallback()
+    // Listener registration happens before the first await. An async
+    // connectedCallback that adds listeners after an await can be torn down
+    // while suspended, so disconnectedCallback runs first and removes nothing,
+    // then the continuation attaches to a dead element with no teardown left.
+    window.addEventListener('keydown', this.handleGlobalShortcuts)
+    window.addEventListener('dragover', this.handleWindowDragOver)
+    window.addEventListener('drop', this.handleWindowDrop)
+    this.unsubscribeFileOpen =
+      api()?.onFileOpenExternal?.((path: string) => {
+        void this.fileState.openFile(path)
+        this.showWelcome = false
+      }) ?? null
+
+    void this.initAsync()
+  }
+
+  private async initAsync(): Promise<void> {
     await this.settingsStore.init()
-    this.panelOrientation = this.settingsStore.get('appearance.panelOrientation', 'horizontal') as 'horizontal' | 'vertical'
-    this.unsubscribeOrientation = this.settingsStore.subscribe('appearance.panelOrientation', (v) => {
-      this.panelOrientation = (v as 'horizontal' | 'vertical') ?? 'horizontal'
-    })
+    if (!this.isConnected) return
+    this.panelOrientation = this.settingsStore.get('appearance.panelOrientation', 'horizontal') as
+      'horizontal' | 'vertical'
+    this.unsubscribeOrientation = this.settingsStore.subscribe(
+      'appearance.panelOrientation',
+      (v) => {
+        this.panelOrientation = (v as 'horizontal' | 'vertical') ?? 'horizontal'
+      }
+    )
     document.documentElement.setAttribute(
       'data-theme',
       this.settingsStore.get('appearance.theme', 'dark')
@@ -107,23 +225,32 @@ export class WriteMdApp extends LitElement {
     })
     this.showWelcome = true
     await this.fileState.restoreTabs().catch(() => false)
-
-    api()?.onFileOpenExternal?.((path: string) => {
-      void this.fileState.openFile(path)
-      this.showWelcome = false
-    })
-    window.addEventListener('keydown', this.handleGlobalShortcuts)
-    window.addEventListener('dragover', this.handleWindowDragOver)
-    window.addEventListener('drop', this.handleWindowDrop)
   }
 
   disconnectedCallback(): void {
     window.removeEventListener('keydown', this.handleGlobalShortcuts)
     window.removeEventListener('dragover', this.handleWindowDragOver)
     window.removeEventListener('drop', this.handleWindowDrop)
+    this.unsubscribeFileOpen?.()
     this.unsubscribeFileState?.()
     this.unsubscribeOrientation?.()
+    this.stripObserver?.disconnect()
+    this.stripObserver = null
     super.disconnectedCallback()
+  }
+
+  protected updated(): void {
+    const strip = this.tabStrip
+    if (!strip) return
+    strip.addEventListener('scroll', this.handleStripScroll, { passive: true })
+    if (!this.stripObserver && typeof ResizeObserver !== 'undefined') {
+      // updated() runs before the strip has been laid out, so the scroll math
+      // sees a zero-width element and does nothing. The observer re-runs it once
+      // real geometry exists, and again whenever the window is resized.
+      this.stripObserver = new ResizeObserver(() => this.revealActiveTab())
+      this.stripObserver.observe(strip)
+    }
+    this.revealActiveTab()
   }
 
   private handleWindowDragOver = (e: DragEvent): void => {
@@ -351,68 +478,77 @@ export class WriteMdApp extends LitElement {
         >
           <div
             slot="tabs"
-            style="display: flex; gap: 10px; align-items: center;${this.panelOrientation === 'vertical' ? ' flex: 1; min-width: 0;' : ''}"
+            class="tabs-row"
+            style="${this.panelOrientation === 'vertical' ? 'flex: 1;' : ''}"
           >
-            ${this.panelOrientation === 'vertical'
-              ? html`<writemd-doc-bar compact></writemd-doc-bar>`
-              : html`
-                  ${this.tabs.map(
-                    (t, i) => html`
-                      <writemd-tab
-                        label=${t.path?.split(/[/\\]/).pop() ?? 'Untitled.md'}
-                        ?active=${i === this.activeTab}
-                        .dirty=${t.dirty}
-                        @select=${() => this.fileState.switchTab(i)}
-                        @close=${() => void this.fileState.closeTab(i)}
-                      ></writemd-tab>
-                    `
-                  )}
-                  <div
-                    class="tab-add"
-                    title="Open file in new tab"
-                    @click=${() => void this.openFileDialog()}
-                  >
-                    <svg
-                      width="14"
-                      height="14"
-                      viewBox="0 0 14 14"
-                      fill="none"
-                      stroke="currentColor"
-                      stroke-width="1.5"
+            ${
+              this.panelOrientation === 'vertical'
+                ? html`<writemd-doc-bar compact></writemd-doc-bar>`
+                : html`
+                    <div class="tab-strip">
+                      ${this.tabs.map(
+                        (t, i) => html`
+                          <writemd-tab
+                            label=${t.path?.split(/[/\\]/).pop() ?? 'Untitled.md'}
+                            ?active=${i === this.activeTab}
+                            .dirty=${t.dirty}
+                            @select=${() => this.fileState.switchTab(i)}
+                            @close=${() => void this.fileState.closeTab(i)}
+                          ></writemd-tab>
+                        `
+                      )}
+                      ${
+                        secondaryName
+                          ? html`
+                              <writemd-tab
+                                label=${secondaryName}
+                                ?active=${false}
+                                .dirty=${this.secondaryDirty}
+                                @close=${this.handleCloseSecondary}
+                              ></writemd-tab>
+                            `
+                          : ''
+                      }
+                    </div>
+                    <div
+                      class="tab-add"
+                      title="Open file in new tab"
+                      @click=${() => void this.openFileDialog()}
                     >
-                      <line x1="7" y1="2" x2="7" y2="12" />
-                      <line x1="2" y1="7" x2="12" y2="7" />
-                    </svg>
-                  </div>
-                  ${secondaryName
-                    ? html`
-                        <writemd-tab
-                          label=${secondaryName}
-                          ?active=${false}
-                          .dirty=${this.secondaryDirty}
-                          @close=${this.handleCloseSecondary}
-                        ></writemd-tab>
-                      `
-                    : ''}
-                `}
+                      <svg
+                        width="14"
+                        height="14"
+                        viewBox="0 0 14 14"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="1.5"
+                      >
+                        <line x1="7" y1="2" x2="7" y2="12" />
+                        <line x1="2" y1="7" x2="12" y2="7" />
+                      </svg>
+                    </div>
+                  `
+            }
           </div>
         </writemd-top-bar>
 
         <div class="main-area">
-          ${this.panelOrientation === 'vertical' && !this.verticalPanelCollapsed
-            ? html`<writemd-vertical-tab-bar
-                .tabs=${this.tabs}
-                .activeTab=${this.activeTab}
-                .secondaryPath=${this.secondaryPath}
-                .secondaryDirty=${this.secondaryDirty}
-                @select-tab=${(e: CustomEvent<{ index: number }>) =>
-                  this.fileState.switchTab(e.detail.index)}
-                @close-tab=${(e: CustomEvent<{ index: number }>) =>
-                  void this.fileState.closeTab(e.detail.index)}
-                @add-tab=${() => void this.openFileDialog()}
-                @close-secondary=${this.handleCloseSecondary}
-              ></writemd-vertical-tab-bar>`
-            : ''}
+          ${
+            this.panelOrientation === 'vertical' && !this.verticalPanelCollapsed
+              ? html`<writemd-vertical-tab-bar
+                  .tabs=${this.tabs}
+                  .activeTab=${this.activeTab}
+                  .secondaryPath=${this.secondaryPath}
+                  .secondaryDirty=${this.secondaryDirty}
+                  @select-tab=${(e: CustomEvent<{ index: number }>) =>
+                    this.fileState.switchTab(e.detail.index)}
+                  @close-tab=${(e: CustomEvent<{ index: number }>) =>
+                    void this.fileState.closeTab(e.detail.index)}
+                  @add-tab=${() => void this.openFileDialog()}
+                  @close-secondary=${this.handleCloseSecondary}
+                ></writemd-vertical-tab-bar>`
+              : ''
+          }
           <div class="editor-wrapper">
             <writemd-editor></writemd-editor>
           </div>
