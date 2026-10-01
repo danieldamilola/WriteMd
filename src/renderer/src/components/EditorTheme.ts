@@ -167,8 +167,8 @@ export const writeMDTheme: Extension = EditorView.theme({
     display: 'flex',
     gap: '4px',
     padding: '4px',
-    backgroundColor: '#141414',
-    border: '1px solid #2e2e32',
+    backgroundColor: 'var(--cm-chrome-bg)',
+    border: '1px solid var(--cm-chrome-border)',
     borderRadius: '6px',
     boxShadow: '0 4px 12px rgba(0,0,0,0.5)',
     zIndex: '100'
@@ -176,7 +176,7 @@ export const writeMDTheme: Extension = EditorView.theme({
   '.cm-table-toolbar button': {
     background: 'transparent',
     border: 'none',
-    color: '#a3a3a3',
+    color: 'var(--cm-chrome-muted)',
     cursor: 'pointer',
     display: 'flex',
     alignItems: 'center',
@@ -187,16 +187,16 @@ export const writeMDTheme: Extension = EditorView.theme({
     fontSize: '12px'
   },
   '.cm-table-toolbar button:hover': {
-    background: '#2d2d2d',
-    color: '#fff'
+    background: 'var(--cm-chrome-hover)',
+    color: 'var(--cm-chrome-fg)'
   },
   '.cm-tooltip': {
     backgroundColor: 'transparent !important',
     border: 'none !important'
   },
   '.cm-tooltip-autocomplete': {
-    backgroundColor: '#141414 !important',
-    border: '1px solid #2e2e32 !important',
+    backgroundColor: 'var(--cm-chrome-bg) !important',
+    border: '1px solid var(--cm-chrome-border) !important',
     borderRadius: '6px',
     boxShadow: '0 4px 12px rgba(0,0,0,0.5)'
   },
@@ -204,8 +204,8 @@ export const writeMDTheme: Extension = EditorView.theme({
     padding: '4px 8px !important'
   },
   '.cm-tooltip-autocomplete > ul > li[aria-selected]': {
-    backgroundColor: '#2d2d2d !important',
-    color: '#fff !important'
+    backgroundColor: 'var(--cm-chrome-hover) !important',
+    color: 'var(--cm-chrome-fg) !important'
   },
   '.cm-live-highlight': {
     backgroundColor: 'rgba(255, 213, 0, 0.2) !important',
@@ -410,43 +410,43 @@ export const writeMDTheme: Extension = EditorView.theme({
   /* Deleted lines (red) */
   '.cm-deletedChunk': {
     backgroundColor: 'rgba(239, 68, 68, 0.12) !important',
-    borderLeft: '3px solid #ef4444 !important',
+    borderLeft: '3px solid var(--diff-removed) !important',
     paddingLeft: '6px !important',
     margin: '1px 0 !important',
     position: 'relative'
   },
   '.cm-deletedLine': {
-    color: '#fca5a5 !important',
+    color: 'var(--diff-removed-text) !important',
     fontFamily: 'inherit !important'
   },
   '.cm-deletedLine del': {
     textDecoration: 'none !important',
-    color: '#fca5a5 !important'
+    color: 'var(--diff-removed-text) !important'
   },
   '.cm-deletedChunk .cm-deletedText': {
     backgroundColor: 'rgba(239, 68, 68, 0.28) !important',
     borderRadius: '2px',
-    color: '#fee2e2 !important'
+    color: 'var(--diff-removed-text) !important'
   },
   '.cm-deletedLineGutter': {
     backgroundColor: 'transparent !important',
-    color: '#f87171 !important'
+    color: 'var(--diff-removed-strong) !important'
   },
   /* Inserted / Changed lines (green) */
   '.cm-changedLine, .cm-insertedLine, .cm-inlineChangedLine': {
     backgroundColor: 'rgba(34, 197, 94, 0.12) !important',
-    borderLeft: '3px solid #22c55e !important'
+    borderLeft: '3px solid var(--diff-added) !important'
   },
   '.cm-changedText': {
     backgroundColor: 'rgba(34, 197, 94, 0.28) !important',
     backgroundImage: 'none !important',
     borderRadius: '2px',
-    color: '#dcfce7 !important',
+    color: 'var(--diff-added-text) !important',
     textDecoration: 'none !important'
   },
   '.cm-changedLineGutter': {
     backgroundColor: 'transparent !important',
-    color: '#4ade80 !important'
+    color: 'var(--diff-added-strong) !important'
   },
   /* Accept & Reject Buttons */
   '.cm-chunkButtons': {
@@ -470,22 +470,22 @@ export const writeMDTheme: Extension = EditorView.theme({
   },
   '.cm-chunkButtons button[name="accept"]': {
     backgroundColor: 'rgba(34, 197, 94, 0.18) !important',
-    color: '#4ade80 !important',
+    color: 'var(--diff-added-strong) !important',
     border: '1px solid rgba(34, 197, 94, 0.45) !important'
   },
   '.cm-chunkButtons button[name="accept"]:hover': {
     backgroundColor: 'rgba(34, 197, 94, 0.35) !important',
-    borderColor: '#4ade80 !important',
-    color: '#ffffff !important'
+    borderColor: 'var(--diff-added-strong) !important',
+    color: 'var(--cm-chrome-fg) !important'
   },
   '.cm-chunkButtons button[name="reject"]': {
     backgroundColor: 'rgba(239, 68, 68, 0.18) !important',
-    color: '#f87171 !important',
+    color: 'var(--diff-removed-strong) !important',
     border: '1px solid rgba(239, 68, 68, 0.45) !important'
   },
   '.cm-chunkButtons button[name="reject"]:hover': {
     backgroundColor: 'rgba(239, 68, 68, 0.35) !important',
-    borderColor: '#f87171 !important',
-    color: '#ffffff !important'
+    borderColor: 'var(--diff-removed-strong) !important',
+    color: 'var(--cm-chrome-fg) !important'
   }
 })

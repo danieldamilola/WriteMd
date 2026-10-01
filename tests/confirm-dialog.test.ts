@@ -19,7 +19,8 @@ vi.mock('electron', () => ({
   safeStorage: { isEncryptionAvailable: () => false, encryptString: (s: string) => s }
 }))
 
-import { showConfirm, WriteMdConfirm } from '../src/renderer/src/components/ConfirmDialog'
+import { WriteMdConfirm } from '../src/renderer/src/components/ConfirmDialog'
+import { showConfirm } from '../src/renderer/src/services/confirm'
 
 /** The singleton dialog element showConfirm appends to document.body. */
 function dialog(): WriteMdConfirm {
@@ -28,8 +29,17 @@ function dialog(): WriteMdConfirm {
   return el as WriteMdConfirm
 }
 
-/** Wait for Lit to flush the property set and render the buttons. */
+/**
+ * Wait for the dialog element to exist and for Lit to flush the property set
+ * and render the buttons. `showConfirm` now awaits a dynamic import of the
+ * component before it creates the element, and the first call in a file pays
+ * for that module transform, so poll with a deadline rather than a fixed tick.
+ */
 async function settle(): Promise<void> {
+  const deadline = Date.now() + 2000
+  while (!document.querySelector('writemd-confirm') && Date.now() < deadline) {
+    await new Promise((r) => setTimeout(r, 5))
+  }
   await Promise.resolve()
   await new Promise((r) => setTimeout(r, 0))
 }

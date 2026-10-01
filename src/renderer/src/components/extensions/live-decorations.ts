@@ -14,6 +14,7 @@ import { TaskCheckboxWidget } from '../widgets/TaskCheckboxWidget'
 import { ImageWidget } from '../widgets/ImageWidget'
 import { CodeBlockWidget } from '../widgets/CodeBlockWidget'
 import { MermaidWidget } from '../widgets/MermaidWidget'
+import { mermaidEnabledFacet } from './mermaid-toggle'
 import { readOnlyFacet } from './read-only'
 import { previewFrozenField } from './freeze-mouse'
 import { treeGrowthEffect } from './tree-progress'
@@ -169,7 +170,8 @@ export function buildInlineDecorations(view: EditorView): DecorationSet {
           .replace(/^```[^\n]*\n/, '')
           .replace(/\n```\s*$/, '')
 
-        if (language === 'mermaid' && (!anyActive || readOnly)) {
+        const mermaidEnabled = state.facet(mermaidEnabledFacet)
+        if (language === 'mermaid' && mermaidEnabled && (!anyActive || readOnly)) {
           ranges.push(
             Decoration.widget({
               widget: new MermaidWidget(codeContent)
@@ -413,13 +415,17 @@ export const inlinePreviewPlugin = ViewPlugin.fromClass(
       const readOnlyChanged =
         update.startState.facet(readOnlyFacet) !== update.state.facet(readOnlyFacet)
 
+      const mermaidChanged =
+        update.startState.facet(mermaidEnabledFacet) !== update.state.facet(mermaidEnabledFacet)
+
       if (
         justUnfroze ||
         update.docChanged ||
         update.selectionSet ||
         update.focusChanged ||
         treeGrew ||
-        readOnlyChanged
+        readOnlyChanged ||
+        mermaidChanged
       ) {
         this.decorations = buildInlineDecorations(update.view)
       }

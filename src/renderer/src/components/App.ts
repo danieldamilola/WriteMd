@@ -9,14 +9,12 @@ import './SettingsModal'
 import './WelcomeScreen'
 import './ConflictDialog'
 import './CommandPalette'
-import type { ElectronAPI } from '../../../shared/electron-api'
+import { api } from '../api'
+import { emit } from '../events/bus'
+import { showConfirm } from '../services/confirm'
 import { SettingsStore } from '../state/settings'
 import { FileState, type ConflictInfo } from '../state/file-state'
 import { COMMANDS, bindingFromEvent, bindingsEqual, effectiveBindings } from '../state/shortcuts'
-
-function api(): ElectronAPI | undefined {
-  return typeof window !== 'undefined' ? window.electronAPI : undefined
-}
 
 @customElement('writemd-app')
 export class WriteMdApp extends LitElement {
@@ -380,10 +378,10 @@ export class WriteMdApp extends LitElement {
         this.showSettings = true
         break
       case 'find':
-        window.dispatchEvent(new CustomEvent('writemd-find', { detail: { mode: 'find' } }))
+        emit('find:open', { mode: 'find' })
         break
       case 'replace':
-        window.dispatchEvent(new CustomEvent('writemd-find', { detail: { mode: 'replace' } }))
+        emit('find:open', { mode: 'replace' })
         break
       case 'command-palette':
         this.showPalette = true
@@ -447,10 +445,10 @@ export class WriteMdApp extends LitElement {
     }
   }
 
-  private handleCloseSecondary = (): void => {
+  private handleCloseSecondary = async (): Promise<void> => {
     if (
       this.secondaryDirty &&
-      !confirm('You have unsaved changes in the split document. Close anyway?')
+      !(await showConfirm('You have unsaved changes in the split document. Close anyway?'))
     ) {
       return
     }

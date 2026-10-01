@@ -1,13 +1,13 @@
 import { html, css, LitElement } from 'lit'
 import { customElement, property } from 'lit/decorators.js'
 import { unsafeHTML } from 'lit/directives/unsafe-html.js'
-import MarkdownIt from 'markdown-it'
+import { createChatMarkdownIt } from '../utils/markdown'
 import { createLinkInterceptor } from './extensions/safe-links'
 
 // `html: false` is what makes the unsafeHTML below safe: raw markup in a model
 // response is escaped rather than parsed. linkify only ever emits http/https/
 // ftp/mailto, and clicks are intercepted, so none of it can navigate.
-const md = new MarkdownIt({ breaks: true, linkify: true, html: false })
+const md = createChatMarkdownIt()
 
 export interface AiMessage {
   role: 'user' | 'assistant'

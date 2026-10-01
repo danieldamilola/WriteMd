@@ -15,30 +15,45 @@ const SOURCE = '/home/me/vault/notes/todo.md'
 
 type Mock = ReturnType<typeof vi.fn>
 
-interface Harness extends NavigateDeps {
+/** The parts of `NavigateDeps` a test is allowed to supply directly. */
+type DepOverrides = Partial<
+  Pick<NavigateDeps, 'sourcePath' | 'scrollToAnchor' | 'onMissing' | 'createMissing'>
+>
+
+interface Harness {
+  deps: NavigateDeps
   openFile: Mock
   openExternal: Mock
   exists: Mock
 }
 
-function harness(overrides: Partial<Harness> = {}): Harness {
-  const openFile = (overrides.openFile ?? vi.fn(async () => {})) as Mock
-  const openExternal = (overrides.openExternal ?? vi.fn(async () => {})) as Mock
-  const exists = (overrides.exists ?? vi.fn(async () => true)) as Mock
-  return {
-    sourcePath: SOURCE,
-    openFile,
-    openExternal,
-    exists,
-    scrollToAnchor: vi.fn(),
-    onMissing: vi.fn(),
-    ...overrides,
+function harness(
+  overrides: { openFile?: Mock; openExternal?: Mock; exists?: Mock; deps?: DepOverrides } = {}
+): Harness {
+  const openFile = overrides.openFile ?? vi.fn(async () => {})
+  const openExternal = overrides.openExternal ?? vi.fn(async () => {})
+  const exists = overrides.exists ?? vi.fn(async () => true)
+  const call = (m: Mock, arg: string): Promise<void> =>
+    (m as unknown as (a: string) => Promise<void>)(arg)
+
+  // `??` would turn an explicit `sourcePath: null` back into the default, so
+  // presence of the key decides, not its value.
+  const sourcePath =
+    overrides.deps && 'sourcePath' in overrides.deps ? overrides.deps.sourcePath : SOURCE
+
+  const deps: NavigateDeps = {
+    sourcePath: sourcePath ?? null,
+    openFile: (path) => call(openFile, path),
+    scrollToAnchor: overrides.deps?.scrollToAnchor ?? vi.fn(),
+    onMissing: overrides.deps?.onMissing ?? vi.fn(),
+    createMissing: overrides.deps?.createMissing,
     getApi: () =>
       ({
         shell: { openExternal },
         file: { exists }
       }) as unknown as ReturnType<NavigateDeps['getApi']>
   }
+  return { deps, openFile, openExternal, exists }
 }
 
 describe('isExternalUrl', () => {
@@ -90,81 +105,77 @@ describe('normalizePathExact', () => {
 
 describe('navigateLink', () => {
   it('opens an internal .md link as a document, not through the OS shell', async () => {
-    const d = deps()
-    const outcome = await navigateLink('other.md', d)
+    const d = harness()
+    const outcome = await navigateLink('other.md', d.deps)
     expect(outcome).toBe('opened-document')
     expect(d.openFile).toHaveBeenCalledWith('/home/me/vault/notes/other.md')
     expect(d.openExternal).not.toHaveBeenCalled()
   })
 
   it('resolves a parent-relative link', async () => {
-    const d = deps()
-    await navigateLink('../index.md', d)
+    const d = harness()
+    await navigateLink('../index.md', d.deps)
     expect(d.openFile).toHaveBeenCalledWith('/home/me/vault/index.md')
   })
 
   it('opens https and mailto through the shell', async () => {
-    const d = deps()
-    expect(await navigateLink('https://example.com', d)).toBe('opened-external')
+    const d = harness()
+    expect(await navigateLink('https://example.com', d.deps)).toBe('opened-external')
     expect(d.openExternal).toHaveBeenCalledWith('https://example.com')
     expect(d.openFile).not.toHaveBeenCalled()
 
-    expect(await navigateLink('mailto:a@b.c', d)).toBe('opened-external')
+    expect(await navigateLink('mailto:a@b.c', d.deps)).toBe('opened-external')
   })
 
   it('refuses a file: link instead of handing it to the OS', async () => {
-    const d = deps()
-    expect(await navigateLink('file:///etc/passwd', d)).toBe('blocked')
+    const d = harness()
+    expect(await navigateLink('file:///etc/passwd', d.deps)).toBe('blocked')
     expect(d.openExternal).not.toHaveBeenCalled()
     expect(d.openFile).not.toHaveBeenCalled()
   })
 
   it('treats a bare anchor as staying in the current document', async () => {
-    const d = deps()
-    const outcome = await navigateLink('#my-heading', d)
+    const d = harness()
+    const outcome = await navigateLink('#my-heading', d.deps)
     expect(outcome).toBe('same-document')
     expect(d.openFile).not.toHaveBeenCalled()
   })
 
   it('opens the path and reports the anchor for `file.md#heading`', async () => {
     const scroll = vi.fn()
-    const d = deps({ scrollToAnchor: scroll })
-    const outcome = await navigateLink('other.md#My Heading', d)
+    const d = harness({ deps: { scrollToAnchor: scroll } })
+    const outcome = await navigateLink('other.md#My Heading', d.deps)
     expect(outcome).toBe('opened-document')
     expect(d.openFile).toHaveBeenCalledWith('/home/me/vault/notes/other.md')
     expect(scroll).toHaveBeenCalledWith('My Heading')
   })
 
   it('resolves against the path of the pane the click came from', async () => {
-    const d = deps({ sourcePath: '/home/me/vault/deep/nested/a.md' })
-    await navigateLink('b.md', d)
+    const d = harness({ deps: { sourcePath: '/home/me/vault/deep/nested/a.md' } })
+    await navigateLink('b.md', d.deps)
     expect(d.openFile).toHaveBeenCalledWith('/home/me/vault/deep/nested/b.md')
   })
 
   it('reports failure instead of throwing when the read is denied', async () => {
-    const d = deps({
+    const d = harness({
       openFile: vi.fn(async () => {
         throw new Error('Access denied')
       })
     })
-    expect(await navigateLink('secret.md', d)).toBe('failed')
+    expect(await navigateLink('secret.md', d.deps)).toBe('failed')
   })
 
   it('swallows a rejected openExternal rather than leaking an unhandled rejection', async () => {
     const openExternal = vi.fn(async () => {
       throw new Error('Protocol not allowed')
     })
-    const d = deps()
-    d.getApi = () =>
-      ({ shell: { openExternal }, file: { exists: vi.fn() } }) as unknown as ReturnType<
-        NavigateDeps['getApi']
-      >
-    expect(await navigateLink('https://example.com', d)).toBe('failed')
+    const d = harness({ openExternal })
+    expect(await navigateLink('https://example.com', d.deps)).toBe('failed')
   })
 
   it('does not treat a bare filename with no source as an external url', async () => {
-    const d = deps({ sourcePath: null })
-    const outcome = await navigateLink('note.md', d)
+    const d = harness({ deps: { sourcePath: null } })
+    const outcome = await navigateLink('note.md', d.deps)
     expect(outcome).toBe('opened-document')
     expect(d.openFile).toHaveBeenCalledWith('note.md')
   })
@@ -172,32 +183,38 @@ describe('navigateLink', () => {
 
 describe('resolveOrCreateLink', () => {
   it('returns the path when the document already exists', async () => {
-    const d = deps()
-    const path = await resolveOrCreateLink('new.md', d)
+    const d = harness()
+    const path = await resolveOrCreateLink('new.md', d.deps)
     expect(path).toBe('/home/me/vault/notes/new.md')
   })
 
   it('appends .md before creating', async () => {
     const exists = vi.fn(async () => false)
     const createMissing = vi.fn(async () => {})
-    const d = deps({ exists, createMissing })
-    const path = await resolveOrCreateLink('fresh-note', d)
+    const d = harness({
+      exists,
+      deps: { createMissing }
+    })
+    const path = await resolveOrCreateLink('fresh-note', d.deps)
     expect(path).toBe('/home/me/vault/notes/fresh-note.md')
     expect(createMissing).toHaveBeenCalledWith('/home/me/vault/notes/fresh-note.md')
   })
 
   it('reports a missing document when creation is not enabled', async () => {
     const onMissing = vi.fn()
-    const d = deps({ exists: vi.fn(async () => false), onMissing })
-    const path = await resolveOrCreateLink('gone.md', d)
+    const d = harness({
+      exists: vi.fn(async () => false),
+      deps: { onMissing }
+    })
+    const path = await resolveOrCreateLink('gone.md', d.deps)
     expect(path).toBeNull()
     expect(onMissing).toHaveBeenCalledWith('/home/me/vault/notes/gone.md')
   })
 
   it('never creates anything for an external target', async () => {
     const createMissing = vi.fn(async () => {})
-    const d = deps({ createMissing })
-    expect(await resolveOrCreateLink('https://example.com', d)).toBeNull()
+    const d = harness({ deps: { createMissing } })
+    expect(await resolveOrCreateLink('https://example.com', d.deps)).toBeNull()
     expect(createMissing).not.toHaveBeenCalled()
   })
 })

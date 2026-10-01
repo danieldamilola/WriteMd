@@ -1,9 +1,5 @@
-import type { ElectronAPI } from '../../../shared/electron-api'
+import { api } from '../api'
 import { DEFAULT_SETTINGS, type WriteMdSettings } from '../../../shared/settings-schema'
-
-function api(): ElectronAPI | undefined {
-  return typeof window !== 'undefined' ? window.electronAPI : undefined
-}
 
 export function applySettingsToDOM(store: SettingsStore): void {
   if (typeof document === 'undefined') return

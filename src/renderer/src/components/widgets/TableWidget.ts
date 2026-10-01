@@ -1,12 +1,12 @@
 import { WidgetType } from '@codemirror/view'
-import MarkdownIt from 'markdown-it'
+import { createDocumentMarkdownIt } from '../../utils/markdown'
 
 /**
  * Table cells are rendered with markdown-it rather than a hand-rolled regex
  * pass. `html: false` is the security-relevant part: cell text comes straight
  * off disk, and any inline-HTML allowance would hand it to innerHTML below.
  */
-const md = new MarkdownIt({ html: false, linkify: true, breaks: false })
+const md = createDocumentMarkdownIt()
 
 /** Render one cell's inline markdown to safe HTML. */
 export function renderInlineMarkdown(text: string): string {

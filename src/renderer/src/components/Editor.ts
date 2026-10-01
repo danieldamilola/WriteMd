@@ -1,5 +1,5 @@
 import { html, css, LitElement, unsafeCSS } from 'lit'
-import { customElement, state } from 'lit/decorators.js'
+import { customElement, query, state } from 'lit/decorators.js'
 import katexCss from 'katex/dist/katex.min.css?inline'
 import { findNext, findPrevious, getSearchQuery } from '@codemirror/search'
 import { scrollbarStyles } from './scrollbars'
@@ -34,6 +34,8 @@ import {
   tableLinePlugin
 } from './LivePreview'
 import { makeLinkClickHandler } from './extensions/link-click'
+import { mermaidEnabledFacet } from './extensions/mermaid-toggle'
+import { on } from '../events/bus'
 import { mathPlugin } from './extensions/math-plugin'
 import { frontmatterPlugin } from './extensions/frontmatter-plugin'
 import { wikiLinkPlugin } from './extensions/wiki-link-plugin'
@@ -53,15 +55,17 @@ import './DocBar'
 import './SurfaceLauncher'
 import './TextMenu'
 import './VaultExplorer'
-import type { ElectronAPI } from '../../../shared/electron-api'
+import { api } from '../api'
 import { DEFAULT_AI_SYSTEM_PROMPT } from '../../../shared/settings-schema'
 import type { VaultTreeNode } from '../../../shared/electron-api'
-import { basenameNoExt, cleanWikiTarget, shortPath } from '../utils/links'
+import {
+  basenameNoExt,
+  cleanWikiTarget,
+  displayPath,
+  displayTitle,
+  shortPath
+} from '../utils/links'
 import { navigateLink, resolveOrCreateLink, type NavigateDeps } from '../utils/navigate'
-
-function api(): ElectronAPI | undefined {
-  return typeof window !== 'undefined' ? window.electronAPI : undefined
-}
 
 /**
  * Does a line's text declare the given anchor? GitHub slugifies headings by
@@ -340,6 +344,33 @@ export class Editor extends LitElement {
   private secondaryModeCompartment = new Compartment()
   private primaryPathCompartment = new Compartment()
   private secondaryPathCompartment = new Compartment()
+  private primaryChromeCompartment = new Compartment()
+  private secondaryChromeCompartment = new Compartment()
+
+  /** Settings keys that require reconfiguring an editor view when they change. */
+  private static readonly CHROME_SETTINGS = [
+    'editor.showLineNumbers',
+    'editor.highlightActiveLine',
+    'editor.wordWrap',
+    'editor.tabSize',
+    'advanced.enableMermaid'
+  ] as const
+
+  /** Push the current chrome settings into both live editor views, if any. */
+  private syncChrome(): void {
+    const chrome = this.getChromeExtensions()
+    for (const [view, comp] of [
+      [this.editorView, this.primaryChromeCompartment],
+      [this.secondaryEditorView, this.secondaryChromeCompartment]
+    ] as const) {
+      if (!view) continue
+      try {
+        view.dispatch({ effects: comp.reconfigure(chrome) })
+      } catch {
+        // view torn down between the settings notification and this dispatch
+      }
+    }
+  }
 
   @state() private content = ''
   @state() private filePath: string | null = null
@@ -366,17 +397,18 @@ export class Editor extends LitElement {
 
   private settingsStore: SettingsStore | null = null
   private settingsUnsubs: Array<() => void> = []
+  private busUnsubs: Array<() => void> = []
 
   connectedCallback(): void {
     super.connectedCallback()
-    window.addEventListener('writemd-find', this.handleGlobalFind)
-    window.addEventListener('writemd-open-wikilink', this.handleOpenWikiLink)
+    this.busUnsubs.push(on('find:open', this.handleGlobalFind))
+    this.busUnsubs.push(on('wiki:open', this.handleOpenWikiLink))
     this.settingsStore = SettingsStore.getInstance()
     this.panelOrientation = this.settingsStore.get('appearance.panelOrientation', 'horizontal') as
       'horizontal' | 'vertical'
     this.checkAiConfigured()
     this.settingsUnsubs.push(
-      this.settingsStore.subscribe('ai.apiKey', () => this.checkAiConfigured())
+      this.settingsStore.subscribe('ai.apiKeySet', () => this.checkAiConfigured())
     )
     this.settingsUnsubs.push(
       this.settingsStore.subscribe('ai.provider', () => this.checkAiConfigured())
@@ -386,6 +418,9 @@ export class Editor extends LitElement {
         this.panelOrientation = (v as 'horizontal' | 'vertical') ?? 'horizontal'
       })
     )
+    for (const key of Editor.CHROME_SETTINGS) {
+      this.settingsUnsubs.push(this.settingsStore.subscribe(key, () => this.syncChrome()))
+    }
     const current = this.fileState.getState()
     this.content = current.content
     this.filePath = current.path
@@ -410,7 +445,20 @@ export class Editor extends LitElement {
       this.splitSurface = s.splitSurface
       this.secondaryDoc = s.secondaryDoc
 
-      if (this.editorView && docChanged && s.content !== this.editorView.state.doc.toString()) {
+      // While a conflict merge is open the secondary view owns the document
+      // text. `setSecondaryContent` writes the merged result into top-level
+      // `content`, and pushing that into the primary view on every keystroke
+      // would reset the primary cursor and undo history, then loop back through
+      // the primary `updateListener`. Comparing against the live view doc means
+      // the primary catches up by itself once the merge closes.
+      const mergeActive = Boolean(s.secondaryDoc?.isDiff)
+
+      if (
+        this.editorView &&
+        docChanged &&
+        !mergeActive &&
+        s.content !== this.editorView.state.doc.toString()
+      ) {
         this.editorView.dispatch({
           changes: { from: 0, to: this.editorView.state.doc.length, insert: s.content }
         })
@@ -474,8 +522,10 @@ export class Editor extends LitElement {
   private checkAiConfigured(): void {
     if (!this.settingsStore) return
     const provider = this.settingsStore.get<string>('ai.provider', 'OpenAI')
-    const key = this.settingsStore.get('ai.apiKey', '')
-    this.isAiConfigured = provider === 'Ollama' || key.length > 0
+    // The plaintext key never reaches the renderer; the main process reports
+    // whether one is stored.
+    const keySet = this.settingsStore.get<boolean>('ai.apiKeySet', false)
+    this.isAiConfigured = provider === 'Ollama' || keySet
   }
 
   private async handleAiSubmit(input: string): Promise<void> {
@@ -494,7 +544,6 @@ export class Editor extends LitElement {
     try {
       const provider = this.settingsStore.get('ai.provider', 'OpenAI')
       const model = this.settingsStore.get('ai.model', '')
-      const key = this.settingsStore.get('ai.apiKey', '')
 
       // Custom instructions from Settings → AI Assistant, with live file context appended
       const customPrompt =
@@ -531,7 +580,8 @@ If the user asks questions about their file, use the above content to answer.`
       ]
 
       // Send chat request
-      const response = await electron.net.chat(provider, model, key, payloadMessages, '')
+      // An empty key tells the main process to use the stored one.
+      const response = await electron.net.chat(provider, model, '', payloadMessages, '')
 
       const replaceRegex = /```writemd-replace\s*\n([\s\S]*?)```/
       const match = response.match(replaceRegex)
@@ -588,9 +638,22 @@ If the user asks questions about their file, use the above content to answer.`
     void this.handleAiSubmit(text)
   }
 
+  /**
+   * Whether the split pane shows a document editor. The lifecycle code and the
+   * template must agree on this exactly, so both read this one getter rather
+   * than each spelling out the condition.
+   */
+  private get mountsSecondaryView(): boolean {
+    return shouldMountSecondaryView({
+      splitActive: this.splitActive,
+      secondaryDoc: this.secondaryDoc,
+      splitSurface: this.splitSurface
+    })
+  }
+
   disconnectedCallback(): void {
-    window.removeEventListener('writemd-find', this.handleGlobalFind)
-    window.removeEventListener('writemd-open-wikilink', this.handleOpenWikiLink)
+    for (const unsub of this.busUnsubs) unsub()
+    this.busUnsubs = []
     if (this.noticeTimer !== null) window.clearTimeout(this.noticeTimer)
     this.unsubscribe?.()
     // Before destroying the views: stopResize re-measures them, and it must not
@@ -626,13 +689,7 @@ If the user asks questions about their file, use the above content to answer.`
       this.initEditor()
     }
 
-    if (
-      shouldMountSecondaryView({
-        splitActive: this.splitActive,
-        secondaryDoc: this.secondaryDoc,
-        splitSurface: this.splitSurface
-      })
-    ) {
+    if (this.mountsSecondaryView) {
       if (!this.secondaryEditorView) this.initSecondaryEditor()
     } else if (this.secondaryEditorView) {
       this.secondaryEditorView.destroy()
@@ -648,15 +705,12 @@ If the user asks questions about their file, use the above content to answer.`
    * extensions belong in this function unless they are mode-independent.
    */
   private getModeExtensions(mode: ViewMode): Extension[] {
-    const normalized = mode === 'wysiwyg' || mode === 'split' ? 'live' : mode
+    const normalized = mode === 'wysiwyg' ? 'live' : mode
     if (normalized === 'reading') {
       return [readOnlyExtension(true), livePreviewPlugin({ onLinkClick: this.handleLinkClick })]
     }
     if (normalized === 'source') {
       return [
-        lineNumbers(),
-        highlightActiveLineGutter(),
-        highlightActiveLine(),
         readOnlyExtension(false),
         // Source mode renders no link decorations, so matching a click has to
         // come from the syntax tree. Without this, `[a](b.md)` is inert here
@@ -667,14 +721,40 @@ If the user asks questions about their file, use the above content to answer.`
     }
     // Default: 'live' (Obsidian Live Preview)
     return [
-      lineNumbers(),
-      highlightActiveLineGutter(),
-      highlightActiveLine(),
       readOnlyExtension(false),
       tableKeymapPlugin,
       tableToolbarField,
       tableLinePlugin,
       livePreviewPlugin({ onLinkClick: this.handleLinkClick })
+    ]
+  }
+
+  /**
+   * Settings-driven chrome, kept in its own compartment so toggling line
+   * numbers or word wrap reconfigures without rebuilding the view. These used to
+   * be hardcoded, which made the matching settings toggles write a key that
+   * nothing read.
+   */
+  private getChromeExtensions(): Extension[] {
+    const store = this.settingsStore
+    const showLineNumbers = store?.get<boolean>('editor.showLineNumbers', false) ?? false
+    const highlightActive = store?.get<boolean>('editor.highlightActiveLine', true) ?? true
+    const wordWrap = store?.get<boolean>('editor.wordWrap', true) ?? true
+    const tabSize = store?.get<number>('editor.tabSize', 2) ?? 2
+    const mermaid = store?.get<boolean>('advanced.enableMermaid', true) ?? true
+
+    return [
+      showLineNumbers ? lineNumbers() : [],
+      highlightActive ? highlightActiveLineGutter() : [],
+      highlightActive ? highlightActiveLine() : [],
+      mermaidEnabledFacet.of(mermaid),
+      // `EditorView.lineWrapping` is a plain extension with no off switch, so
+      // wrapping is driven through `white-space` on `.cm-content`, which is
+      // what the library reads back to decide its own behavior.
+      EditorView.theme({
+        '.cm-content': wordWrap ? { whiteSpace: 'pre-wrap' } : { whiteSpace: 'pre' }
+      }),
+      EditorState.tabSize.of(tabSize)
     ]
   }
 
@@ -685,11 +765,11 @@ If the user asks questions about their file, use the above content to answer.`
   ): Extension[] {
     const comp = isSecondary ? this.secondaryModeCompartment : this.primaryModeCompartment
     const pathComp = isSecondary ? this.secondaryPathCompartment : this.primaryPathCompartment
+    const chromeComp = isSecondary ? this.secondaryChromeCompartment : this.primaryChromeCompartment
 
     const exts = [
       writeMDTheme,
       vscodeHighlight,
-      EditorView.lineWrapping,
       history(),
       search(),
       Prec.high(
@@ -746,6 +826,7 @@ If the user asks questions about their file, use the above content to answer.`
       keymap.of([...defaultKeymap, ...historyKeymap]),
       markdown({ extensions: [GFM], codeLanguages: languages }),
       comp.of(this.getModeExtensions(mode)),
+      chromeComp.of(this.getChromeExtensions()),
       pathComp.of(documentPathFacet.of(currentPath)),
       EditorView.updateListener.of((update) => {
         if (update.docChanged) {
@@ -758,7 +839,7 @@ If the user asks questions about their file, use the above content to answer.`
           }
         }
         if (this.findOpen && (update.docChanged || update.selectionSet)) {
-          this.shadowRoot?.querySelector<FindPanel>('writemd-find-panel')?.refreshCounts()
+          this.findPanelEl?.refreshCounts()
         }
       })
     ]
@@ -896,13 +977,16 @@ If the user asks questions about their file, use the above content to answer.`
     return this.editorView
   }
 
-  private findPanel(): FindPanel | null {
-    return this.shadowRoot?.querySelector<FindPanel>('writemd-find-panel') ?? null
-  }
+  /**
+   * Typed reference to the find panel. A @query decorator keeps this in
+   * sync with the template, so renaming the element is a compile error rather
+   * than a silent no-op from a string selector.
+   */
+  @query('writemd-find-panel')
+  private findPanelEl!: FindPanel
 
-  private handleGlobalFind = (e: Event): void => {
-    const mode = (e as CustomEvent<{ mode?: 'find' | 'replace' }>).detail?.mode ?? 'find'
-    this.openFind(mode)
+  private handleGlobalFind = (detail: { mode: 'find' | 'replace' }): void => {
+    this.openFind(detail.mode)
   }
 
   /**
@@ -929,9 +1013,8 @@ If the user asks questions about their file, use the above content to answer.`
   }
 
   /** Follow a clicked `[[wiki-link]]`: open the matching file, creating it if needed. */
-  private handleOpenWikiLink = (e: Event): void => {
-    const raw = (e as CustomEvent<{ name?: string }>).detail?.name ?? ''
-    const target = cleanWikiTarget(raw)
+  private handleOpenWikiLink = (detail: { name: string }): void => {
+    const target = cleanWikiTarget(detail.name)
     if (!target) return
     void this.openWikiTarget(target)
   }
@@ -1074,9 +1157,9 @@ If the user asks questions about their file, use the above content to answer.`
       this.findMode = mode
       if (seed) {
         this.findQuery = seed
-        this.findPanel()?.setQuery(seed)
+        this.findPanelEl?.setQuery(seed)
       }
-      this.findPanel()?.focusPanel()
+      this.findPanelEl?.focusPanel()
       return
     }
     this.findQuery = seed
@@ -1101,19 +1184,19 @@ If the user asks questions about their file, use the above content to answer.`
   }
 
   private handleFindNextEvent = (): void => {
-    this.findPanel()?.doFindNext()
+    this.findPanelEl?.doFindNext()
   }
 
   private handleFindPreviousEvent = (): void => {
-    this.findPanel()?.doFindPrevious()
+    this.findPanelEl?.doFindPrevious()
   }
 
   private handleReplaceNextEvent = (): void => {
-    this.findPanel()?.doReplace()
+    this.findPanelEl?.doReplace()
   }
 
   private handleReplaceAllEvent = (): void => {
-    this.findPanel()?.doReplaceAll()
+    this.findPanelEl?.doReplaceAll()
   }
 
   private handleSurfaceSelection = async (
@@ -1136,29 +1219,12 @@ If the user asks questions about their file, use the above content to answer.`
     }
   }
 
-  private getDisplayPath(fullPath: string | null): string {
-    if (!fullPath) return 'Untitled.md'
-    const parts = fullPath.replace(/\\/g, '/').split('/')
-    if (parts.length >= 2) {
-      return `${parts[parts.length - 2]}/${parts[parts.length - 1]}`
-    }
-    return parts[parts.length - 1] || 'Untitled.md'
-  }
-
-  private getDisplayTitle(fullPath: string | null): string {
-    if (!fullPath) return 'Untitled'
-    const fileName = fullPath.replace(/\\/g, '/').split('/').pop() || 'Untitled'
-    return fileName.replace(/\.[^/.]+$/, '')
-  }
-
   private async handleRename(e: Event, isSecondary: boolean): Promise<void> {
     const input = e.target as HTMLInputElement
     const newName = input.value.trim()
     if (!newName) {
       // Revert to original title if empty
-      input.value = this.getDisplayTitle(
-        isSecondary ? this.secondaryDoc?.path || null : this.filePath
-      )
+      input.value = displayTitle(isSecondary ? this.secondaryDoc?.path || null : this.filePath)
       return
     }
 
@@ -1172,9 +1238,7 @@ If the user asks questions about their file, use the above content to answer.`
     } else if (e.key === 'Escape') {
       e.preventDefault()
       const input = e.target as HTMLInputElement
-      input.value = this.getDisplayTitle(
-        isSecondary ? this.secondaryDoc?.path || null : this.filePath
-      )
+      input.value = displayTitle(isSecondary ? this.secondaryDoc?.path || null : this.filePath)
       input.blur()
     }
   }
@@ -1247,6 +1311,8 @@ If the user asks questions about their file, use the above content to answer.`
     }
 
     const isVerticalTabs = this.panelOrientation === 'vertical'
+    // Bound once so the template can use it without re-asserting the condition.
+    const secondaryDoc = this.secondaryDoc
 
     return html`
       <div class="workspace">
@@ -1325,16 +1391,14 @@ If the user asks questions about their file, use the above content to answer.`
                   ></div>
                   <writemd-panel class="pane">
                     ${
-                      this.secondaryDoc && this.splitSurface === 'file'
+                      this.mountsSecondaryView && secondaryDoc
                         ? html`
                             <!-- Secondary Document Editor -->
                             <div class="sub-header">
-                              <div class="sub-header-left">
-                                ${this.getDisplayPath(this.secondaryDoc.path)}
-                              </div>
+                              <div class="sub-header-left">${displayPath(secondaryDoc.path)}</div>
                               <div class="sub-header-center">
                                 ${
-                                  this.secondaryDoc.isDiff
+                                  secondaryDoc.isDiff
                                     ? html`<span style="color: var(--warning); font-weight: 600;"
                                         >External Changes Diff</span
                                       >`
@@ -1342,7 +1406,7 @@ If the user asks questions about their file, use the above content to answer.`
                                         type="text"
                                         class="title-input"
                                         aria-label="Split pane document title"
-                                        .value=${this.getDisplayTitle(this.secondaryDoc.path)}
+                                        .value=${displayTitle(secondaryDoc.path)}
                                         @blur=${(e: Event) => this.handleRename(e, true)}
                                         @keydown=${(e: KeyboardEvent) => this.handleRenameKeyDown(e, true)}
                                       />`
@@ -1379,8 +1443,8 @@ If the user asks questions about their file, use the above content to answer.`
                             >
                               <div id="secondary-cm-wrapper" class="cm-wrapper"></div>
                               <writemd-info-pill
-                                .content=${this.secondaryDoc.content}
-                                .mode=${this.secondaryDoc.viewMode}
+                                .content=${secondaryDoc.content}
+                                .mode=${secondaryDoc.viewMode}
                                 @mode-change=${(e: CustomEvent<{ mode: ViewMode }>) => {
                                   // Go through FileState, not local state: a local
                                   // mutation is overwritten by the next notify()

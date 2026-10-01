@@ -1,14 +1,11 @@
 import { html, css, LitElement } from 'lit'
 import { customElement, property, state } from 'lit/decorators.js'
 import { scrollbarStyles } from './scrollbars'
-import type { ElectronAPI, VaultTreeNode } from '../../../shared/electron-api'
+import { api } from '../api'
+import type { VaultTreeNode } from '../../../shared/electron-api'
 import { FileState } from '../state/file-state'
 import { SettingsStore } from '../state/settings'
 import { backlinkSnippet, basenameNoExt, linksToFile, shortPath } from '../utils/links'
-
-function api(): ElectronAPI | undefined {
-  return typeof window !== 'undefined' ? window.electronAPI : undefined
-}
 
 interface BacklinkHit {
   path: string

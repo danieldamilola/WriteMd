@@ -20,7 +20,7 @@ vi.mock('electron', () => ({
 // faking enough document to render a Lit component is where this test would go
 // wrong. `confirmAnswer` is what the user would click.
 let confirmAnswer = false
-vi.mock('../src/renderer/src/components/ConfirmDialog', () => ({
+vi.mock('../src/renderer/src/services/confirm', () => ({
   showConfirm: (): Promise<boolean> => Promise.resolve(confirmAnswer)
 }))
 

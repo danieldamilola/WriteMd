@@ -1,12 +1,9 @@
 import { html, css, LitElement } from 'lit'
 import { customElement, state } from 'lit/decorators.js'
 import { scrollbarStyles } from './scrollbars'
-import type { ElectronAPI, VaultTreeNode } from '../../../shared/electron-api'
+import { api } from '../api'
+import type { VaultTreeNode } from '../../../shared/electron-api'
 import { FileState } from '../state/file-state'
-
-function api(): ElectronAPI | undefined {
-  return typeof window !== 'undefined' ? window.electronAPI : undefined
-}
 
 @customElement('writemd-vault-explorer')
 export class VaultExplorer extends LitElement {

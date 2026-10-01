@@ -1,5 +1,4 @@
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron'
-import { electronAPI } from '@electron-toolkit/preload'
 import type { ChatMessage, UpdateInfo, UpdateProgress } from '../shared/electron-api'
 
 function onChannel(channel: string, callback: (...args: unknown[]) => void): () => void {
@@ -100,7 +99,7 @@ const writemdAPI = {
       onChannel('updater:update-not-available', callback as (...args: unknown[]) => void),
     onUpdateDownloaded: (callback: (info: UpdateInfo) => void) =>
       onChannel('updater:update-downloaded', callback as (...args: unknown[]) => void),
-    onDownloadProgress: (callback: (info: UpdateProgress) => void) =>
+    onDownloadProgress: (callback: (progress: UpdateProgress) => void) =>
       onChannel('updater:download-progress', callback as (...args: unknown[]) => void),
     onError: (callback: (err: string) => void) =>
       onChannel('updater:error', callback as (...args: unknown[]) => void)
@@ -109,18 +108,11 @@ const writemdAPI = {
     onChannel('file:open-external', callback as (...args: unknown[]) => void)
 }
 
-// Use `contextBridge` APIs to expose Electron APIs to
-// renderer only if context isolation is enabled, otherwise
-// just add to the DOM global.
-if (process.contextIsolated) {
-  try {
-    contextBridge.exposeInMainWorld('electron', electronAPI)
-    contextBridge.exposeInMainWorld('electronAPI', writemdAPI)
-  } catch (error) {
-    console.error(error)
-  }
-} else {
-  // Test / non-isolated environment: DOM globals instead of the bridge.
-  ;(window as unknown as { electron: unknown }).electron = electronAPI
-  ;(window as unknown as { electronAPI: unknown }).electronAPI = writemdAPI
-}
+/**
+ * The renderer runs sandboxed, where a preload may only `require` a short list of
+ * Electron and Node built-ins. The toolkit's `electronAPI` was exposed as
+ * `window.electron` but never read by anything in this app, and importing it
+ * cost the preload its ability to load at all under sandbox. Everything the app
+ * needs is in `writemdAPI`, described by `shared/electron-api.ts`.
+ */
+contextBridge.exposeInMainWorld('electronAPI', writemdAPI)

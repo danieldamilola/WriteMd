@@ -1,12 +1,9 @@
 import { html, css, LitElement } from 'lit'
 import { customElement, state } from 'lit/decorators.js'
-import type { ElectronAPI, VaultFile } from '../../../shared/electron-api'
+import { api } from '../api'
+import type { VaultFile } from '../../../shared/electron-api'
 import watermarkPng from '../../../../icons/Group 12.png'
 import { SettingsStore } from '../state/settings'
-
-function api(): ElectronAPI | undefined {
-  return typeof window !== 'undefined' ? window.electronAPI : undefined
-}
 
 interface RecentFile {
   name: string

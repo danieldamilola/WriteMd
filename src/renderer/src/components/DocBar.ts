@@ -2,11 +2,10 @@ import { html, css, LitElement } from 'lit'
 import { customElement, property, state } from 'lit/decorators.js'
 import { menuStyles, menuIcon, menuCheck } from './menu-styles'
 import { FileState, type ViewMode } from '../state/file-state'
-import type { ElectronAPI } from '../../../shared/electron-api'
-
-function api(): ElectronAPI | undefined {
-  return typeof window !== 'undefined' ? window.electronAPI : undefined
-}
+import { api } from '../api'
+import { displayPath, displayTitle } from '../utils/links'
+import { showConfirm } from '../services/confirm'
+import { emit } from '../events/bus'
 
 /**
  * Document strip: parent/file path left, renameable title center,
@@ -171,21 +170,6 @@ export class DocBar extends LitElement {
     super.disconnectedCallback()
   }
 
-  private getDisplayPath(fullPath: string | null): string {
-    if (!fullPath) return 'Untitled.md'
-    const parts = fullPath.replace(/\\/g, '/').split('/')
-    if (parts.length >= 2) {
-      return `${parts[parts.length - 2]}/${parts[parts.length - 1]}`
-    }
-    return parts[parts.length - 1] || 'Untitled.md'
-  }
-
-  private getDisplayTitle(fullPath: string | null): string {
-    if (!fullPath) return 'Untitled'
-    const fileName = fullPath.replace(/\\/g, '/').split('/').pop() || 'Untitled'
-    return fileName.replace(/\.[^/.]+$/, '')
-  }
-
   private renderToggleIcon(mode: ViewMode): unknown {
     if (mode === 'reading') {
       return html`
@@ -296,7 +280,7 @@ export class DocBar extends LitElement {
         break
       case 'find':
       case 'replace':
-        window.dispatchEvent(new CustomEvent('writemd-find', { detail: { mode: id } }))
+        emit('find:open', { mode: id })
         break
       case 'copy-path': {
         const path = this.fileState.getState().path
@@ -325,7 +309,7 @@ export class DocBar extends LitElement {
         const path = this.fileState.getState().path
         if (!path) break
         const base = path.split(/[/\\]/).pop() ?? path
-        if (!confirm(`Move ${base} to trash?`)) break
+        if (!(await showConfirm(`Move ${base} to trash?`, 'Delete file'))) break
         const ok = await api()?.file?.delete?.(path)
         if (!ok) {
           alert('Could not delete file')
@@ -360,7 +344,7 @@ export class DocBar extends LitElement {
     const input = e.target as HTMLInputElement
     const newName = input.value.trim()
     if (!newName) {
-      input.value = this.getDisplayTitle(this.filePath)
+      input.value = displayTitle(this.filePath)
       input.blur()
       return
     }
@@ -374,7 +358,7 @@ export class DocBar extends LitElement {
     } else if (e.key === 'Escape') {
       e.preventDefault()
       const input = e.target as HTMLInputElement
-      input.value = this.getDisplayTitle(this.filePath)
+      input.value = displayTitle(this.filePath)
       input.blur()
     }
   }
@@ -383,14 +367,14 @@ export class DocBar extends LitElement {
     return html`
       <div class="sub-header">
         <div class="sub-header-left" title=${this.filePath ?? ''}>
-          ${this.getDisplayPath(this.filePath)}
+          ${displayPath(this.filePath)}
         </div>
         <div class="sub-header-center">
           <input
             type="text"
             class="title-input"
             aria-label="Document title"
-            .value=${this.getDisplayTitle(this.filePath)}
+            .value=${displayTitle(this.filePath)}
             @blur=${(e: Event) => void this.handleRename(e)}
             @keydown=${this.handleRenameKeyDown}
           />

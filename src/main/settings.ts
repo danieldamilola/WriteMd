@@ -5,6 +5,7 @@ import { writeFile, rename, unlink } from 'fs/promises'
 import { randomUUID } from 'crypto'
 import {
   DEFAULT_SETTINGS,
+  validatePatch,
   type WriteMdSettingsPatch,
   type WriteMdSettings
 } from '../shared/settings-schema'
@@ -64,9 +65,10 @@ export function decryptApiKey(value: string): string {
 }
 
 /**
- * True when the last load found an `enc:v1:` key that would not decrypt. The
- * renderer surfaces this so the user can re-enter the key instead of silently
- * losing it to the next settings write.
+ * True when the last load found an `enc:v1:` key that would not decrypt. A
+ * locked keyring, a restart mid-read, or a config copied between machines all
+ * produce this, and the next settings write would otherwise be the moment the
+ * key is lost, so the renderer asks the user to re-enter it.
  */
 let apiKeyUndecryptable = false
 
@@ -122,28 +124,62 @@ export function getSettings(): WriteMdSettings {
   }
   // API keys are stored encrypted at rest; decrypt into the in-memory cache.
   next.ai.apiKey = decryptApiKey(next.ai.apiKey)
+  next.ai.apiKeySet = next.ai.apiKey.length > 0
   settingsCache = next
   return next
 }
 
-export async function setSettings(partial: WriteMdSettingsPatch): Promise<void> {
+/**
+ * Settings for the renderer, with the API key stripped.
+ *
+ * The plaintext key never crosses the bridge. The renderer only needs to know
+ * whether one is stored, which `ai.apiKeySet` reports, and it hands an empty key
+ * back to `net:chat` / `net:fetchModels`, where the main process substitutes the
+ * stored value. A renderer that asked for the settings used to receive a
+ * decrypted secret on every call.
+ */
+export function getSettingsForRenderer(): WriteMdSettings {
+  const settings = getSettings()
+  return {
+    ...settings,
+    ai: {
+      ...settings.ai,
+      apiKey: '',
+      // Distinguishes "no key stored" from "a key is stored but this install
+      // cannot read it", which is the difference between an empty field and a
+      // field the user must retype.
+      apiKeySet: settings.ai.apiKeySet && !apiKeyUndecryptable,
+      apiKeyUndecryptable
+    }
+  }
+}
+
+/** The stored API key, decrypted. Main-process callers only. */
+export function getStoredApiKey(): string {
+  return getSettings().ai.apiKey
+}
+
+export function setSettings(partial: WriteMdSettingsPatch): Promise<void> {
+  const { clean, problems } = validatePatch(partial)
+  for (const p of problems) console.warn('Rejected settings patch:', p)
+
   const current = getSettings()
   const merged = deepMerge(
     current as unknown as Record<string, unknown>,
-    partial as unknown as Record<string, unknown>
+    clean as unknown as Record<string, unknown>
   ) as unknown as WriteMdSettings
+  // Derived, never client-supplied.
+  merged.ai.apiKeySet = current.ai.apiKey.length > 0
+  merged.ai.apiKeyUndecryptable = apiKeyUndecryptable
   settingsCache = merged
   // Serialize writes. The renderer fires this on every settings change and twice
   // per tab switch, and each call is an independent ipcMain.handle. Two
   // concurrent truncating writes to the same path can interleave, and the
   // corruption handler in getSettings() then wipes the API key along with
   // everything else.
-  writeQueue = writeQueue
-    .then(() => writeSettingsFile(merged))
-    .catch((e) => {
-      console.error('Failed to write settings:', e)
-    })
-  await writeQueue
+  writeQueue = writeQueue.then(() => writeSettingsFile(merged))
+  // Errors propagate: the renderer is told a save succeeded when it did not.
+  return writeQueue
 }
 
 /** The raw `enc:v1:` blob from disk, untouched by decryption. */
@@ -167,10 +203,13 @@ async function writeSettingsFile(merged: WriteMdSettings): Promise<void> {
     const dir = dirname(SETTINGS_FILE)
     if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
     // Store the API key encrypted; the in-memory cache keeps it decrypted.
+    // `apiKeySet` is derived state and has no business in the config file.
+    const { apiKeySet: _derived, ...persistedAi } = merged.ai
+    void _derived
     const toPersist = {
       ...merged,
       ai: {
-        ...merged.ai,
+        ...persistedAi,
         // Never overwrite a stored blob we merely failed to read. encryptApiKey
         // short-circuits on '', so persisting an undecryptable key would
         // replace the real one with an empty string and lose it permanently.
@@ -195,6 +234,8 @@ async function writeSettingsFile(merged: WriteMdSettings): Promise<void> {
       throw e
     }
   } catch (e) {
+    // Rethrown so setSettings rejects and the renderer learns the save failed.
     console.error('Failed to write settings:', e)
+    throw e
   }
 }

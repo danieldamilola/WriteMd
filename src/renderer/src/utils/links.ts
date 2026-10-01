@@ -111,13 +111,15 @@ function dirnameOf(p: string): string {
  */
 export function resolveLinkPath(sourcePath: string | null, rawTarget: string): string | null {
   let t = rawTarget.trim()
+  // Angle-bracket destinations wrap the whole target, anchor included.
   if (t.startsWith('<') && t.endsWith('>')) t = t.slice(1, -1).trim()
-  if (t.includes(' ')) return null
-  t = t.split('#')[0].trim()
-  t = t.split('?')[0].trim()
-  if (!t || isExternalUrl(rawTarget.trim())) return null
+  if (isExternalUrl(t)) return null
+  // Strip the anchor and query before rejecting spaces: `note.md#My Heading`
+  // is a valid link whose path half has no space in it.
+  t = t.split('#')[0].split('?')[0].trim()
+  if (!t || t.includes(' ')) return null
   const forward = t.replace(/\\/g, '/')
-  if (/^[a-zA-Z]:\//.test(forward) || forward.startsWith('/')) {
+  if (DRIVE_RE.test(forward) || forward.startsWith('/')) {
     return normalizePathExact(forward)
   }
   const dir = sourcePath ? dirnameOf(sourcePath) : ''
@@ -196,4 +198,28 @@ export function shortPath(fullPath: string): string {
   const parts = fullPath.replace(/\\/g, '/').split('/').filter(Boolean)
   if (parts.length >= 2) return `${parts[parts.length - 2]}/${parts[parts.length - 1]}`
   return parts[parts.length - 1] ?? fullPath
+}
+
+/** Title for a tab or pane header: file name without its extension. */
+export function displayTitle(fullPath: string | null, fallback = 'Untitled'): string {
+  if (!fullPath) return fallback
+  return basenameNoExt(fullPath) || fallback
+}
+
+/** Full document path, or a placeholder for an unsaved buffer. */
+export function displayPath(fullPath: string | null, fallback = 'Untitled.md'): string {
+  if (!fullPath) return fallback
+  return shortPath(fullPath) || fallback
+}
+
+/**
+ * The focused element, descending through open shadow roots.
+ *
+ * `document.activeElement` only ever reports the outermost host, so a naive
+ * version returns the panel instead of the button inside it.
+ */
+export function deepActiveElement(): Element | null {
+  let active: Element | null = document.activeElement
+  while (active?.shadowRoot?.activeElement) active = active.shadowRoot.activeElement
+  return active
 }

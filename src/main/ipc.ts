@@ -3,14 +3,22 @@ import { readFile, writeFile, stat, rename, unlink, open } from 'fs/promises'
 import { watch, existsSync, mkdirSync, type FSWatcher } from 'fs'
 import { dirname, join, resolve } from 'path'
 import { randomUUID } from 'crypto'
+import log from 'electron-log'
 import {
   getVaultPath,
   setVaultPath,
   ensureVaultExists,
   listMarkdownFiles,
-  getVaultTree
+  getVaultTree,
+  invalidateVaultPathCache
 } from './vault'
-import { getSettings, setSettings, type WriteMdSettingsPatch } from './settings'
+import {
+  getSettings,
+  getSettingsForRenderer,
+  getStoredApiKey,
+  setSettings,
+  type WriteMdSettingsPatch
+} from './settings'
 import { exportDocx, exportHtml, exportPdf } from './export'
 import { getAiProvider } from '../shared/ai-providers'
 import type { ChatMessage } from '../shared/electron-api'
@@ -163,33 +171,39 @@ export function setupIpc(getWindow: () => BrowserWindow | null): void {
   })
 
   ipcMain.handle('file:watch', (_, filePath: string) => {
-    if (!canAccessPath(filePath)) return
+    // Both failure modes throw instead of returning quietly. A silent return
+    // left the renderer believing a file was watched when it was not, so an
+    // external edit never raised a conflict.
+    if (!canAccessPath(filePath)) {
+      throw new Error(`Access denied for path: ${filePath}`)
+    }
     // Keyed by normalized path so `C:\A.md` and `c:\a.md` share one watcher
     // instead of racing two 'change' events for the same file.
     const key = normalizePath(filePath)
     if (watchedPaths.has(key)) return
-    try {
-      const watcher = watch(filePath, { persistent: false })
-      // 'rename' matters as much as 'change' here. macOS fs.watch is
-      // FSEvents-backed and reports an atomic replace as 'rename', and this app
-      // (plus Obsidian, git, and every sync client) writes via rename-over. On
-      // a 'change'-only subscription the conflict dialog never sees those.
-      const emit = (): void => getWindow()?.webContents.send('file:changed', filePath)
-      watcher.on('change', emit)
-      watcher.on('rename', emit)
-      // Close before dropping the entry: a watcher removed from the map without
-      // close() keeps its file descriptor open until app quit.
-      watcher.on('error', () => {
-        watchedPaths.delete(key)
-        watcher.close()
-      })
-      watchedPaths.set(key, watcher)
-    } catch {
-      // ignore
-    }
+    const watcher = watch(filePath, { persistent: false })
+    // 'rename' matters as much as 'change' here. macOS fs.watch is
+    // FSEvents-backed and reports an atomic replace as 'rename', and this app
+    // (plus Obsidian, git, and every sync client) writes via rename-over. On
+    // a 'change'-only subscription the conflict dialog never sees those.
+    const emit = (): void => getWindow()?.webContents.send('file:changed', filePath)
+    watcher.on('change', emit)
+    watcher.on('rename', emit)
+    // Close before dropping the entry: a watcher removed from the map without
+    // close() keeps its file descriptor open until app quit.
+    watcher.on('error', (err) => {
+      log.warn('Watcher error, releasing', filePath, err)
+      watchedPaths.delete(key)
+      watcher.close()
+    })
+    watchedPaths.set(key, watcher)
   })
 
   ipcMain.handle('file:unwatch', (_, filePath: string) => {
+    // Symmetric with `file:watch`: unwatch does not need read access to the
+    // content, but it should not be usable to tear down a watcher for a path
+    // the renderer cannot otherwise touch.
+    if (!canAccessPath(filePath)) return
     const key = normalizePath(filePath)
     const watcher = watchedPaths.get(key)
     if (watcher) {
@@ -212,7 +226,17 @@ export function setupIpc(getWindow: () => BrowserWindow | null): void {
     const filename = `${randomUUID()}.${ext.replace(/^\./, '')}`
     const fullPath = join(assetsDir, filename)
     const buffer = Buffer.from(base64Data, 'base64')
-    await writeFile(fullPath, buffer)
+    // Same temp-file + rename discipline as `file:write`. A direct writeFile
+    // truncates the target, so a crash mid-write leaves a half image that the
+    // markdown already references.
+    const tempPath = `${fullPath}.${randomUUID()}.tmp`
+    try {
+      await writeFile(tempPath, buffer, { mode: 0o600 })
+      await rename(tempPath, fullPath)
+    } catch (e) {
+      await unlink(tempPath).catch(() => {})
+      throw e
+    }
     return {
       relativePath: `./_assets/${filename}`,
       fullPath
@@ -261,8 +285,14 @@ export function setupIpc(getWindow: () => BrowserWindow | null): void {
   ipcMain.handle('vault:list-files', () => listMarkdownFiles(getVaultPath()))
   ipcMain.handle('vault:get-tree', () => getVaultTree())
 
-  ipcMain.handle('settings:get', () => getSettings())
+  ipcMain.handle('settings:get', () => getSettingsForRenderer())
   ipcMain.handle('settings:set', async (_, settings: WriteMdSettingsPatch) => {
+    // Every path guard measures against `getVaultPath()`. A vault change that
+    // arrives through settings rather than `vault:set-path` still has to move
+    // that boundary, so the cache cannot survive it.
+    if (settings && typeof settings === 'object' && 'vaultPath' in (settings.files ?? {})) {
+      invalidateVaultPathCache()
+    }
     await setSettings(settings)
   })
 
@@ -314,17 +344,30 @@ export function setupIpc(getWindow: () => BrowserWindow | null): void {
     }
   })
 
-  ipcMain.handle('export:pdf', async (_, markdown: string, docPath: string | null) =>
-    exportPdf(getWindow, markdown, docPath)
-  )
+  ipcMain.handle('export:pdf', async (_, markdown: string, docPath: string | null) => {
+    assertExportSource(docPath)
+    return exportPdf(getWindow, markdown, docPath)
+  })
 
-  ipcMain.handle('export:html', async (_, markdown: string, docPath: string | null) =>
-    exportHtml(getWindow, markdown, docPath)
-  )
+  ipcMain.handle('export:html', async (_, markdown: string, docPath: string | null) => {
+    assertExportSource(docPath)
+    return exportHtml(getWindow, markdown, docPath)
+  })
 
-  ipcMain.handle('export:docx', async (_, markdown: string, docPath: string | null) =>
-    exportDocx(getWindow, markdown, docPath)
-  )
+  ipcMain.handle('export:docx', async (_, markdown: string, docPath: string | null) => {
+    assertExportSource(docPath)
+    return exportDocx(getWindow, markdown, docPath)
+  })
+
+  /**
+   * `docPath` decides where relative assets are read from during export. It
+   * arrives from the renderer, so it goes through the same guard as every other
+   * renderer-supplied path: without this, exporting a buffer could pull in any
+   * file the process can read by naming it as the document.
+   */
+  function assertExportSource(docPath: string | null): void {
+    if (docPath) assertCanAccess(docPath)
+  }
 
   async function assertOk(res: Response): Promise<void> {
     if (res.ok) return
@@ -332,11 +375,16 @@ export function setupIpc(getWindow: () => BrowserWindow | null): void {
     throw new Error(`HTTP ${res.status}: ${await res.text()}`)
   }
 
+  // The renderer sends an empty key and the stored one is substituted here, so
+  // the plaintext secret never has to live in renderer memory.
+  const resolveApiKey = (provided: string | undefined): string =>
+    provided && provided.length > 0 ? provided : getStoredApiKey()
+
   ipcMain.handle('net:fetch-models', async (_, provider: string, apiKey: string) => {
     const adapter = getAiProvider(provider)
     if (!adapter) throw new Error(`Unknown AI provider: ${provider}`)
     if (adapter.staticModels) return [...adapter.staticModels]
-    const req = adapter.buildModelsRequest(apiKey)
+    const req = adapter.buildModelsRequest(resolveApiKey(apiKey))
     if (!req) return []
     try {
       const res = await net.fetch(req.url, { headers: req.headers })
@@ -361,7 +409,12 @@ export function setupIpc(getWindow: () => BrowserWindow | null): void {
       const adapter = getAiProvider(provider)
       if (!adapter) throw new Error(`Unknown AI provider: ${provider}`)
       try {
-        const req = adapter.buildChatRequest({ model, apiKey, messages, systemPrompt })
+        const req = adapter.buildChatRequest({
+          model,
+          apiKey: resolveApiKey(apiKey),
+          messages,
+          systemPrompt
+        })
         const res = await net.fetch(req.url, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', ...req.headers },

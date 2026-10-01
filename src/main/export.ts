@@ -3,8 +3,9 @@ import { writeFile, rename, stat, readFile, unlink } from 'fs/promises'
 import { dirname, resolve, relative, extname } from 'path'
 import { mkdirSync } from 'fs'
 import { randomUUID } from 'crypto'
-import MarkdownIt from 'markdown-it'
+import { createDocumentMarkdownIt } from '../renderer/src/utils/markdown'
 import { getSettings } from './settings'
+import { EXPORT_CSP, hardenIsolatedWindow } from './harden'
 
 export type ExportTheme = 'light' | 'dark'
 
@@ -19,7 +20,11 @@ export interface ExportResult {
   reason?: string
 }
 
-const md = new MarkdownIt({ html: false, linkify: true, typographer: true })
+// One shared configuration, so an export matches what the editor renders.
+// `createDocumentMarkdownIt` lives in `src/renderer` because it is renderer-safe
+// pure code with no DOM dependency; importing across the process boundary is
+// deliberate to avoid a fourth copy drifting.
+const md = createDocumentMarkdownIt({ typographer: true })
 
 function escapeHtml(text: string): string {
   return text
@@ -62,6 +67,7 @@ export function renderExportHtml(markdown: string, opts: ExportHtmlOptions): str
   const title = escapeHtml(opts.title)
   return [
     '<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">',
+    `<meta http-equiv="Content-Security-Policy" content="${EXPORT_CSP}">`,
     `<meta name="viewport" content="width=device-width, initial-scale=1">`,
     `<title>${title}</title>`,
     `<style>${exportCss(opts.theme)}</style>`,
@@ -159,9 +165,14 @@ const PAGE_SIZE_MM: Record<PdfPageSize, { width: number; height: number }> = {
 async function renderInHiddenWindow(html: string): Promise<Buffer> {
   const win = new BrowserWindow({
     show: false,
-    webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: false }
+    webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true }
   })
   try {
+    // The document is built from the user's markdown, so a link or image in it
+    // must not be able to navigate this window anywhere. No preload is attached,
+    // so there is no bridge to expose, but an unconstrained window is still a way
+    // to reach the network with the user's session.
+    hardenIsolatedWindow(win.webContents)
     await win.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`)
     const settings = getSettings()
     const pageSize = resolvePageSize(settings.export.pdfPageSize)

@@ -1,13 +1,17 @@
 import { SettingsStore } from './settings'
 import { applyConflictReview, applyConflictReload, applyConflictDismiss } from './conflict'
-import type { ElectronAPI } from '../../../shared/electron-api'
-import { showConfirm } from '../components/ConfirmDialog'
+import { api } from '../api'
+import { showConfirm } from '../services/confirm'
 
-function api(): ElectronAPI | undefined {
-  return typeof window !== 'undefined' ? window.electronAPI : undefined
-}
-
-export type ViewMode = 'live' | 'reading' | 'source' | 'wysiwyg' | 'split'
+/**
+ * Modes the primary pane can render.
+ *
+ * `'wysiwyg'` is a legacy alias the editor normalizes to `'live'`. There is
+ * deliberately no `'split'` here: the split pane is `splitActive` plus
+ * `splitSurface`, and a `'split'` view mode was stored and then normalized away,
+ * so it could never render as anything distinct.
+ */
+export type ViewMode = 'live' | 'reading' | 'source' | 'wysiwyg'
 
 export type SplitSurface = 'launcher' | 'file' | 'files' | 'backlinks' | 'ai'
 
@@ -326,15 +330,11 @@ export class FileState {
 
       if (tab.dirty) {
         if (tabIndex === this.state.activeTab) {
-          this.state = {
-            ...this.state,
-            conflict: {
-              path: changedPath,
-              diskContent: result.content,
-              diskMtime: result.mtime
-            }
-          }
-          this.notify()
+          this.raiseConflict({
+            path: changedPath,
+            diskContent: result.content,
+            diskMtime: result.mtime
+          })
         } else {
           // Background tab with unsaved work: rebase without touching the buffer
           const tabs = this.state.tabs.map((t, i) =>
@@ -600,19 +600,8 @@ export class FileState {
   }
 
   setViewMode(mode: ViewMode): void {
-    if (mode === 'split') {
-      this.state = { ...this.state, viewMode: mode, splitActive: true }
-    } else {
-      this.state = { ...this.state, viewMode: mode }
-    }
+    this.state = { ...this.state, viewMode: mode }
     this.notify()
-  }
-
-  toggleViewMode(): void {
-    const modes: ViewMode[] = ['wysiwyg', 'source', 'split']
-    const idx = modes.indexOf(this.state.viewMode)
-    const next = idx === -1 ? 'source' : modes[(idx + 1) % modes.length]
-    this.setViewMode(next)
   }
 
   quickToggle(): void {
@@ -702,21 +691,38 @@ export class FileState {
   }
 
   setSecondaryContent(content: string): void {
-    if (!this.state.secondaryDoc) return
-    const isDiff = Boolean(this.state.secondaryDoc.isDiff)
+    const secondary = this.state.secondaryDoc
+    if (!secondary) return
+
+    // A conflict merge resolves into the document itself, so the merged text
+    // has to land on the active tab and not just the top-level mirror.
+    // `applyConflictReview` builds the diff from the active tab against the same
+    // path on disk, so writing only the mirror would restore the pre-merge text
+    // when the split closes, and the next save would write the losing version.
+    if (secondary.isDiff) {
+      this.setContent(content)
+      return
+    }
+
     this.state = {
       ...this.state,
-      ...(isDiff ? { content, dirty: true } : {}),
       secondaryDoc: {
-        ...this.state.secondaryDoc,
+        ...secondary,
         content,
-        dirty: content !== this.state.secondaryDoc.originalContent
+        dirty: content !== secondary.originalContent
       }
     }
     this.notify()
-    if (isDiff) {
-      this.scheduleAutoSave()
-    }
+  }
+
+  /**
+   * Flag the active document as conflicting with what is now on disk. Only the
+   * file-changed watcher used to be able to do this, which left the whole
+   * conflict flow untestable without a real filesystem event.
+   */
+  raiseConflict(info: ConflictInfo): void {
+    this.state = { ...this.state, conflict: info }
+    this.notify()
   }
 
   resolveConflictReview(): void {

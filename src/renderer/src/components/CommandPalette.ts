@@ -7,13 +7,9 @@ import { SettingsStore } from '../state/settings'
  * `document.activeElement` only reports the outermost host, and calling focus()
  * on that host does nothing, so focus would land back on body.
  */
-function deepActiveElement(): HTMLElement | null {
-  let el: Element | null = document.activeElement
-  while (el?.shadowRoot?.activeElement) el = el.shadowRoot.activeElement
-  return el as HTMLElement | null
-}
 import { scrollbarStyles } from './scrollbars'
 import { COMMANDS, effectiveBinding, formatBinding, fuzzyMatch } from '../state/shortcuts'
+import { deepActiveElement } from '../utils/links'
 
 @customElement('writemd-command-palette')
 export class CommandPalette extends LitElement {
@@ -94,7 +90,7 @@ export class CommandPalette extends LitElement {
     super.connectedCallback()
     this.addEventListener('click', this.handleBackdropClick)
     // Capture whatever opened the palette so focus can go back to it on close.
-    this.previouslyFocused = deepActiveElement()
+    this.previouslyFocused = deepActiveElement() as HTMLElement | null
   }
 
   disconnectedCallback(): void {

@@ -1,11 +1,7 @@
 import { html, css, LitElement } from 'lit'
 import { customElement, property } from 'lit/decorators.js'
 import './IconButton'
-import type { ElectronAPI } from '../../../shared/electron-api'
-
-function api(): ElectronAPI | undefined {
-  return typeof window !== 'undefined' ? window.electronAPI : undefined
-}
+import { api } from '../api'
 
 @customElement('writemd-top-bar')
 export class WriteMdTopBar extends LitElement {

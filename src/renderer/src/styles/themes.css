@@ -365,3 +365,27 @@
   --code-variable: #9cdcfe;
   --code-punctuation: var(--text-secondary);
 }
+
+/*
+ * Diff and editor-chrome tokens, derived rather than declared per theme.
+ *
+ * The CodeMirror merge view and the table toolbar used to hardcode hex values,
+ * which pinned them to the dark palette: in the light and paper themes the diff
+ * gutter and the autocomplete popup stayed dark while everything else followed
+ * `data-theme`. Deriving from the per-theme `--danger` / `--success` means every
+ * theme gets a matching pair with no per-theme block to keep in sync.
+ */
+:root {
+  --diff-removed: var(--danger);
+  --diff-removed-strong: color-mix(in oklab, var(--danger) 82%, var(--text-primary));
+  --diff-removed-text: color-mix(in oklab, var(--danger) 55%, var(--text-primary));
+  --diff-added: var(--success);
+  --diff-added-strong: color-mix(in oklab, var(--success) 82%, var(--text-primary));
+  --diff-added-text: color-mix(in oklab, var(--success) 45%, var(--text-primary));
+
+  --cm-chrome-bg: var(--bg-elevated);
+  --cm-chrome-border: var(--border);
+  --cm-chrome-fg: var(--text-primary);
+  --cm-chrome-muted: var(--text-muted);
+  --cm-chrome-hover: var(--bg-hover);
+}

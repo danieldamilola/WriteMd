@@ -1,36 +1,13 @@
 import { html, css, LitElement } from 'lit'
 import { customElement, property } from 'lit/decorators.js'
+import { settleConfirm } from '../services/confirm'
+import { deepActiveElement } from '../utils/links'
 
-// One module-level slot cannot serve two overlapping prompts: the second call
-// overwrites the first resolver and the first promise never settles, hanging
-// whoever awaited it. A FIFO queue keeps every caller paired with its own
-// answer, and a new prompt supersedes anything still queued behind it.
-const pending: Array<(value: boolean) => void> = []
-
-export function showConfirm(message: string, title = 'Confirm'): Promise<boolean> {
-  const dialog = ensureDialog()
-
-  return new Promise<boolean>((resolve) => {
-    if (dialog.open) {
-      // A prompt is already up. Settle the previous one as cancelled so its
-      // caller resumes, then answer this one from the dialog that is showing.
-      while (pending.length > 0) pending.shift()?.(false)
-    } else {
-      dialog.titleText = title
-      dialog.message = message
-      dialog.open = true
-    }
-    pending.push(resolve)
-  })
-}
-
-function ensureDialog(): WriteMdConfirm {
-  const existing = document.querySelector('writemd-confirm')
-  if (existing) return existing as WriteMdConfirm
-  const dialog = document.createElement('writemd-confirm') as WriteMdConfirm
-  document.body.appendChild(dialog)
-  return dialog
-}
+// The queue and `showConfirm` live in `services/confirm.ts`. They used to live
+// here, which meant `state/file-state.ts` had to import this component just to
+// ask a question, pulling Lit and a custom-element registration into the state
+// singleton.
+export { showConfirm } from '../services/confirm'
 
 @customElement('writemd-confirm')
 export class WriteMdConfirm extends LitElement {
@@ -107,8 +84,7 @@ export class WriteMdConfirm extends LitElement {
     this.open = false
     // Answer whoever is actually waiting. A queue entry only lands here if the
     // dialog is open, so this cannot fire on a stale prompt.
-    const resolve = pending.shift()
-    if (resolve) resolve(result)
+    settleConfirm(result)
   }
 
   private handleKeydown = (e: KeyboardEvent): void => {
@@ -146,9 +122,7 @@ export class WriteMdConfirm extends LitElement {
     if (this.open) {
       // Descend through shadow roots: document.activeElement only reports the
       // outermost host, and focusing that host restores nothing.
-      let active: Element | null = document.activeElement
-      while (active?.shadowRoot?.activeElement) active = active.shadowRoot.activeElement
-      this.previouslyFocused = (active as HTMLElement) ?? null
+      this.previouslyFocused = deepActiveElement() as HTMLElement | null
       // Focus the safe default so a stray Enter or Space does not confirm.
       this.focusableButtons()[0]?.focus()
     } else {

@@ -8,6 +8,7 @@ import {
 } from '@codemirror/view'
 import { RangeSetBuilder } from '@codemirror/state'
 import { readOnlyFacet } from './read-only'
+import { emit } from '../../events/bus'
 
 /**
  * A named class rather than an anonymous one defined inside the decoration
@@ -40,9 +41,7 @@ class WikiLinkWidget extends WidgetType {
 
     span.onclick = (e) => {
       e.preventDefault()
-      window.dispatchEvent(
-        new CustomEvent('writemd-open-wikilink', { detail: { name: this.label } })
-      )
+      emit('wiki:open', { name: this.label })
     }
     return span
   }

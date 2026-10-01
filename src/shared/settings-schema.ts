@@ -10,19 +10,10 @@ export interface WriteMdSettings {
     lineHeight: number
     wordWrap: boolean
     tabSize: number
-    vimMode: boolean
-    typewriterMode: boolean
     autoSave: boolean
     autoSaveDelay: number
     showLineNumbers: boolean
     highlightActiveLine: boolean
-  }
-  preview: {
-    fontSize: number
-    fontFamily: string
-    lineHeight: number
-    maxWidth: number
-    showMargin: boolean
   }
   appearance: {
     theme: string
@@ -35,8 +26,6 @@ export interface WriteMdSettings {
     recentFiles: string[]
     openTabs: string[]
     activeTabPath: string | null
-    imageFolderName: string
-    cleanupUnusedImages: string
     defaultNewFileContent: string
     defaultNewFileName: string
   }
@@ -44,13 +33,9 @@ export interface WriteMdSettings {
     pdfMargin: number
     pdfPageSize: string
     pdfTheme: string
-    htmlStandalone: boolean
   }
   advanced: {
     enableMermaid: boolean
-    enableWikiLinks: boolean
-    spellCheck: boolean
-    portableMode: boolean
   }
   shortcuts: {
     bindings: Record<string, string>
@@ -59,6 +44,14 @@ export interface WriteMdSettings {
     provider: string
     model: string
     apiKey: string
+    /**
+     * Whether a key is stored, without revealing it. Derived in the main
+     * process and stripped before the config is written, so the renderer can
+     * show "configured" state without the plaintext ever crossing the bridge.
+     */
+    apiKeySet: boolean
+    /** A key is stored but this install cannot decrypt it; the user must retype. */
+    apiKeyUndecryptable: boolean
     systemPrompt: string
   }
 }
@@ -86,19 +79,10 @@ export const DEFAULT_SETTINGS: WriteMdSettings = {
     lineHeight: 1.7,
     wordWrap: true,
     tabSize: 2,
-    vimMode: false,
-    typewriterMode: false,
     autoSave: true,
     autoSaveDelay: 500,
     showLineNumbers: false,
     highlightActiveLine: true
-  },
-  preview: {
-    fontSize: 16,
-    fontFamily: 'Source Serif Pro',
-    lineHeight: 1.8,
-    maxWidth: 800,
-    showMargin: true
   },
   appearance: {
     theme: 'dark',
@@ -111,22 +95,16 @@ export const DEFAULT_SETTINGS: WriteMdSettings = {
     recentFiles: [],
     openTabs: [],
     activeTabPath: null,
-    imageFolderName: '_assets',
-    cleanupUnusedImages: 'prompt',
     defaultNewFileContent: '',
     defaultNewFileName: 'Untitled.md'
   },
   export: {
     pdfMargin: 24,
     pdfPageSize: 'A4',
-    pdfTheme: 'light',
-    htmlStandalone: true
+    pdfTheme: 'light'
   },
   advanced: {
-    enableMermaid: true,
-    enableWikiLinks: false,
-    spellCheck: false,
-    portableMode: false
+    enableMermaid: true
   },
   shortcuts: {
     bindings: {}
@@ -135,6 +113,101 @@ export const DEFAULT_SETTINGS: WriteMdSettings = {
     provider: 'OpenAI',
     model: 'gpt-4o',
     apiKey: '',
+    apiKeySet: false,
+    apiKeyUndecryptable: false,
     systemPrompt: DEFAULT_AI_SYSTEM_PROMPT
   }
+}
+
+/**
+ * Flattened dotted keys, e.g. `editor.showLineNumbers`.
+ *
+ * `Object.keys` walks own enumerable properties, which `DEFAULT_SETTINGS` has
+ * for every key the app supports. Used to validate an incoming patch and to
+ * assert in tests that each key has a reader, so a control can never silently
+ * become a no-op again.
+ */
+export function settingKeys(): string[] {
+  const out: string[] = []
+  for (const [section, values] of Object.entries(DEFAULT_SETTINGS)) {
+    for (const key of Object.keys(values as Record<string, unknown>)) {
+      out.push(`${section}.${key}`)
+    }
+  }
+  return out
+}
+
+/**
+ * Element types for array-valued settings. The default for each is an empty
+ * array, so there is no runtime instance to infer the element type from.
+ */
+const ARRAY_ELEMENT_TYPES: Record<string, 'string' | 'number' | 'boolean'> = {
+  'files.recentFiles': 'string',
+  'files.openTabs': 'string',
+  'shortcuts.bindings': 'string'
+}
+
+/**
+ * Drop anything the schema does not declare, and reject a value whose type
+ * disagrees with its default.
+ *
+ * `settings:set` runs this before merging. Without it `deepMerge` accepts any
+ * key and any type, so a renderer bug (or a compromised renderer) can poison
+ * config.json with values nothing can read back. Returns the problems found so
+ * the caller can log them.
+ */
+export function validatePatch(patch: unknown): {
+  clean: WriteMdSettingsPatch
+  problems: string[]
+} {
+  const problems: string[] = []
+  const clean: Record<string, Record<string, unknown>> = {}
+  if (typeof patch !== 'object' || patch === null || Array.isArray(patch)) {
+    return { clean: {}, problems: ['patch is not an object'] }
+  }
+
+  for (const [section, values] of Object.entries(patch as Record<string, unknown>)) {
+    const defaults = (DEFAULT_SETTINGS as unknown as Record<string, unknown>)[section]
+    if (!defaults) {
+      problems.push(`unknown section: ${section}`)
+      continue
+    }
+    if (typeof values !== 'object' || values === null || Array.isArray(values)) {
+      problems.push(`${section} is not an object`)
+      continue
+    }
+    for (const [key, value] of Object.entries(values as Record<string, unknown>)) {
+      const dotted = `${section}.${key}`
+      if (!(key in (defaults as Record<string, unknown>))) {
+        problems.push(`unknown key: ${dotted}`)
+        continue
+      }
+      // apiKeySet and apiKeyUndecryptable are derived in the main process and
+      // must not be client-set.
+      if (dotted === 'ai.apiKeySet' || dotted === 'ai.apiKeyUndecryptable') {
+        problems.push(`${dotted} is derived and cannot be set`)
+        continue
+      }
+      if (value === null || value === undefined) continue
+      const fallback = (defaults as Record<string, unknown>)[key]
+      if (Array.isArray(fallback)) {
+        const element = ARRAY_ELEMENT_TYPES[dotted]
+        if (!element) {
+          problems.push(`${dotted} has no declared element type`)
+          continue
+        }
+        if (!Array.isArray(value) || value.some((v) => typeof v !== element)) {
+          problems.push(`${dotted} must be an array of ${element}`)
+          continue
+        }
+      } else if (typeof value !== typeof fallback) {
+        problems.push(`${dotted} must be a ${typeof fallback}, got ${typeof value}`)
+        continue
+      }
+      clean[section] ??= {}
+      clean[section][key] = value
+    }
+  }
+
+  return { clean: clean as WriteMdSettingsPatch, problems }
 }

@@ -42,8 +42,17 @@ export function getVaultPath(): string {
   return vaultPathCache
 }
 
+/**
+ * Drop the cached root. Every path guard in the app measures against
+ * `getVaultPath()`, so a stale cache means a vault change in the settings UI
+ * would not move the guard boundary.
+ */
+export function invalidateVaultPathCache(): void {
+  vaultPathCache = null
+}
+
 export async function setVaultPath(vaultPath: string): Promise<void> {
-  await setSettings({ files: { ...getSettings().files, vaultPath } })
+  await setSettings({ files: { vaultPath } })
   vaultPathCache = vaultPath
 }
 
@@ -73,9 +82,16 @@ export interface VaultTreeNode {
   children?: VaultTreeNode[]
 }
 
-export function getVaultTree(dir: string = getVaultPath()): VaultTreeNode {
+/**
+ * Depth cap for the sidebar tree. Without it a symlink loop inside the vault
+ * (`ln -s . notes/`) recurses until the stack gives out, and there is no
+ * filesystem-level guard short of refusing to follow links at all.
+ */
+const MAX_TREE_DEPTH = 12
+
+export function getVaultTree(dir: string = getVaultPath(), depth = 0): VaultTreeNode {
   const name = dir.split(/[/\\]/).pop() || 'Vault'
-  if (!existsSync(dir)) {
+  if (!existsSync(dir) || depth > MAX_TREE_DEPTH) {
     return { name, path: dir, isDirectory: true, children: [] }
   }
   try {
@@ -90,7 +106,7 @@ export function getVaultTree(dir: string = getVaultPath()): VaultTreeNode {
         continue
       const fullPath = join(dir, entry.name)
       if (entry.isDirectory()) {
-        children.push(getVaultTree(fullPath))
+        children.push(getVaultTree(fullPath, depth + 1))
       } else if (entry.isFile() && MARKDOWN_EXTS.includes(extname(entry.name).toLowerCase())) {
         children.push({
           name: entry.name,

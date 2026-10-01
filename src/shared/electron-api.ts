@@ -1,3 +1,4 @@
+/// <reference types="electron" />
 import type { WriteMdSettings, WriteMdSettingsPatch } from './settings-schema'
 
 export interface FileReadResult {

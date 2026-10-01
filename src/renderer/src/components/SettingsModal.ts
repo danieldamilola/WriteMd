@@ -1,6 +1,7 @@
 import { html, css, LitElement } from 'lit'
 import { customElement, state } from 'lit/decorators.js'
-import type { ElectronAPI } from '../../../shared/electron-api'
+import { api } from '../api'
+import { deepActiveElement } from '../utils/links'
 import { DEFAULT_AI_SYSTEM_PROMPT } from '../../../shared/settings-schema'
 import { SettingsStore } from '../state/settings'
 import { showConfirm } from './ConfirmDialog'
@@ -16,10 +17,6 @@ import {
   parseBinding
 } from '../state/shortcuts'
 
-function api(): ElectronAPI | undefined {
-  return typeof window !== 'undefined' ? window.electronAPI : undefined
-}
-
 type SettingsTab =
   'general' | 'appearance' | 'editor' | 'files' | 'shortcuts' | 'advanced' | 'ai' | 'about'
 
@@ -31,11 +28,6 @@ type SettingsTab =
  * and focus falls back to body. The settings button that opens this modal lives
  * inside `writemd-top-bar`'s shadow root, so the real target is two levels down.
  */
-function deepActiveElement(): HTMLElement | null {
-  let el: Element | null = document.activeElement
-  while (el?.shadowRoot?.activeElement) el = el.shadowRoot.activeElement
-  return el as HTMLElement | null
-}
 
 /** Human labels used both by the nav buttons and by search filtering. */ const TAB_LABELS: Record<
   SettingsTab,
@@ -567,8 +559,6 @@ export class SettingsModal extends LitElement {
   @state() private autoSave = true
   @state() private lineNumbers = false
   @state() private enableMermaid = true
-  @state() private spellCheck = false
-  @state() private cleanupImages = 'prompt'
   @state() private defaultNewFileName = 'Untitled.md'
   @state() private pdfPageSize = 'A4'
   @state() private pdfTheme = 'light'
@@ -590,6 +580,8 @@ export class SettingsModal extends LitElement {
   @state() private aiProvider = 'OpenAI'
   @state() private aiModel = 'gpt-4o'
   @state() private aiApiKey = ''
+  @state() private aiKeyStored = false
+  @state() private aiKeyUndecryptable = false
   @state() private aiSystemPrompt = DEFAULT_AI_SYSTEM_PROMPT
   @state() private availableModels: string[] = []
   @state() private isFetchingModels = false
@@ -600,7 +592,7 @@ export class SettingsModal extends LitElement {
   connectedCallback(): void {
     super.connectedCallback()
     this.loadCurrentSettings()
-    this.previouslyFocused = deepActiveElement()
+    this.previouslyFocused = deepActiveElement() as HTMLElement | null
     window.addEventListener('keydown', this.handleKeyDown, true)
     this.addEventListener('click', this.handleBackdropClick)
     void api()
@@ -660,12 +652,10 @@ export class SettingsModal extends LitElement {
     this.fontFamily = s.get('editor.fontFamily', 'Inter')
     this.fontSize = s.get('editor.fontSize', 15)
     this.wordWrap = s.get('editor.wordWrap', true)
-    this.autoSave = s.get('files.autoSave', true)
-    this.lineNumbers = s.get('editor.lineNumbers', false)
+    this.autoSave = s.get('editor.autoSave', true)
+    this.lineNumbers = s.get('editor.showLineNumbers', false)
     this.vaultPath = s.get('files.vaultPath', '')
     this.enableMermaid = s.get('advanced.enableMermaid', true)
-    this.spellCheck = s.get('advanced.spellCheck', false)
-    this.cleanupImages = s.get('files.cleanupUnusedImages', 'prompt')
     this.defaultNewFileName = s.get('files.defaultNewFileName', 'Untitled.md')
     this.pdfPageSize = s.get('export.pdfPageSize', 'A4')
     this.pdfTheme = s.get('export.pdfTheme', 'light')
@@ -675,6 +665,8 @@ export class SettingsModal extends LitElement {
     this.aiProvider = s.get('ai.provider', 'OpenAI')
     this.aiModel = s.get('ai.model', 'gpt-4o')
     this.aiApiKey = s.get('ai.apiKey', '')
+    this.aiKeyStored = s.get<boolean>('ai.apiKeySet', false)
+    this.aiKeyUndecryptable = s.get<boolean>('ai.apiKeyUndecryptable', false)
     this.aiSystemPrompt = s.get('ai.systemPrompt', DEFAULT_AI_SYSTEM_PROMPT)
 
     if (this.availableModels.length === 0) {
@@ -843,7 +835,19 @@ export class SettingsModal extends LitElement {
       defaultPath: this.vaultPath
     })
     if (result && !result.canceled && result.filePaths.length > 0) {
-      this.updateSetting('files.vaultPath', result.filePaths[0])
+      const chosen = result.filePaths[0]
+      // `vault:set-path` validates the root with `isSaneVaultRoot` and clears
+      // the main process's cache. Writing `files.vaultPath` directly skipped
+      // both, which left every path guard measuring against the old root.
+      try {
+        await electron.vault.setPath(chosen)
+        this.vaultPath = chosen
+        // The main process already persisted it; this mirrors it into the
+        // renderer's local copy so the field shows the new value immediately.
+        this.settingsStore.set('files.vaultPath', chosen)
+      } catch (err) {
+        this.conflictMsg = err instanceof Error ? err.message : 'Could not use that folder'
+      }
     }
   }
 
@@ -858,9 +862,25 @@ export class SettingsModal extends LitElement {
     }
   }
 
+  /**
+   * The stored key is never readable, so the field is write-only: an empty
+   * input leaves the existing key alone, and typing one replaces it. Clearing
+   * the field does not delete the key, because there is no way to confirm the
+   * intent without being able to see the value.
+   */
+  private handleApiKeyInput = (e: Event): void => {
+    const value = (e.target as HTMLInputElement).value.trim()
+    if (!value) {
+      ;(e.target as HTMLInputElement).value = ''
+      return
+    }
+    this.aiApiKey = ''
+    this.updateSetting('ai.apiKey', value)
+  }
+
   private async fetchModels(): Promise<void> {
     this.fetchError = ''
-    if (!this.aiApiKey && this.aiProvider !== 'Ollama') {
+    if (!this.aiApiKey && !this.aiKeyStored && this.aiProvider !== 'Ollama') {
       this.fetchError = 'API Key required'
       return
     }
@@ -1079,35 +1099,6 @@ export class SettingsModal extends LitElement {
               this.updateSetting('files.defaultNewFileName', (e.target as HTMLInputElement).value)}
           />
         </div>
-
-        <div class="setting-row">
-          <div>
-            <div class="setting-label">Spell check</div>
-            <div class="setting-desc">Underline misspelled words while writing</div>
-          </div>
-          <button
-            class="toggle-switch"
-            role="switch"
-            aria-checked="${this.spellCheck}"
-            @click=${() => this.updateSetting('advanced.spellCheck', !this.spellCheck)}
-          ></button>
-        </div>
-
-        <div class="setting-row">
-          <div>
-            <div class="setting-label">Unused images</div>
-            <div class="setting-desc">What to do with images no longer referenced</div>
-          </div>
-          <select
-            class="select-input"
-            .value=${this.cleanupImages}
-            @change=${(e: Event) => this.updateSetting('files.cleanupUnusedImages', (e.target as HTMLSelectElement).value)}
-          >
-            <option value="prompt">Ask me</option>
-            <option value="keep">Keep</option>
-            <option value="delete">Delete</option>
-          </select>
-        </div>
       </div>
     `
   }
@@ -1275,7 +1266,7 @@ export class SettingsModal extends LitElement {
             class="toggle-switch"
             role="switch"
             aria-checked="${this.lineNumbers}"
-            @click=${() => this.updateSetting('editor.lineNumbers', !this.lineNumbers)}
+            @click=${() => this.updateSetting('editor.showLineNumbers', !this.lineNumbers)}
           ></button>
         </div>
       </div>
@@ -1305,7 +1296,7 @@ export class SettingsModal extends LitElement {
             class="toggle-switch"
             role="switch"
             aria-checked="${this.autoSave}"
-            @click=${() => this.updateSetting('files.autoSave', !this.autoSave)}
+            @click=${() => this.updateSetting('editor.autoSave', !this.autoSave)}
           ></button>
         </div>
       </div>
@@ -1507,14 +1498,26 @@ export class SettingsModal extends LitElement {
         <div class="setting-row">
           <div>
             <div class="setting-label">API Key</div>
-            <div class="setting-desc">Your secret API key (saved locally)</div>
+            <div class="setting-desc">
+              ${
+                this.aiKeyUndecryptable
+                  ? html`<span style="color: var(--warning)"
+                      >A key is stored but this install cannot decrypt it. Type a new one to replace
+                      it.</span
+                    >`
+                  : this.aiKeyStored
+                    ? 'A key is stored on this machine. Type a new one to replace it.'
+                    : 'Your secret API key (saved locally)'
+              }
+            </div>
           </div>
           <input
             type="password"
             class="text-input"
-            placeholder="sk-..."
+            placeholder=${this.aiKeyStored ? 'stored - type to replace' : 'sk-...'}
+            autocomplete="off"
             .value=${this.aiApiKey}
-            @change=${(e: Event) => this.updateSetting('ai.apiKey', (e.target as HTMLInputElement).value)}
+            @change=${this.handleApiKeyInput}
           />
         </div>
       </div>

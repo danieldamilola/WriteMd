@@ -51,15 +51,16 @@ describe('phase 1 foundation', () => {
     expect(existsSync(`${TEST_ROOT}/userData/config.json`)).toBe(true)
   })
 
-  it('file-state toggles view modes', async () => {
+  it('file-state cycles view modes through the quick toggle', async () => {
     const { FileState } = await import('../src/renderer/src/state/file-state')
     const fs = FileState.getInstance()
     expect(fs.getState().viewMode).toBe('wysiwyg')
-    fs.toggleViewMode()
+    // 'wysiwyg' is a legacy alias for 'live', so the first toggle compares equal
+    // and moves to the pair's other mode.
+    fs.quickToggle()
+    expect(fs.getState().viewMode).toBe('reading')
+    fs.setViewMode('source')
     expect(fs.getState().viewMode).toBe('source')
-    fs.toggleViewMode()
-    expect(fs.getState().viewMode).toBe('split')
-    fs.setViewMode('wysiwyg')
   })
 
   it('lists only markdown files', async () => {
