@@ -1,26 +1,28 @@
-import { test, expect, _electron as electron, type ElectronApplication } from '@playwright/test'
+import { test, expect, type ElectronApplication } from '@playwright/test'
+import { makeFixture, launch, firstWindow } from './fixtures'
+
+const fixture = makeFixture('find')
 
 test.describe('Find/Replace panel', () => {
   let app: ElectronApplication | undefined
 
   test.beforeAll(async () => {
-    app = await electron.launch({ args: ['.'] })
+    app = await launch(fixture)
   })
 
   test.afterAll(async () => {
     await app?.close()
+    fixture.cleanup()
   })
 
   test('custom panel opens, default CM panel never appears', async () => {
-    const window = await app?.firstWindow()
-    if (!window) throw new Error('No app window opened')
+    const window = await firstWindow(app!)
     await expect(window.locator('writemd-top-bar')).toBeVisible()
 
-    // New file from welcome screen if present
-    const welcome = window.locator('writemd-welcome-screen')
-    if (await welcome.isVisible()) {
-      await window.keyboard.press('Control+n')
-    }
+    // Unconditional now. The old version only pressed Ctrl+N when the welcome
+    // screen happened to be up, which depended on whatever tabs the previous
+    // run had left persisted in the real profile.
+    await window.keyboard.press('Control+n')
     const editor = window.locator('writemd-editor')
     await expect(editor).toBeVisible()
 
@@ -50,5 +52,20 @@ test.describe('Find/Replace panel', () => {
     // Escape closes
     await window.keyboard.press('Escape')
     await expect(panel).toHaveCount(0)
+  })
+
+  test('the new file never lands in the real vault', async () => {
+    // Regression guard for the isolation itself. autoSave defaults on at 500ms,
+    // so this spec used to write Untitled.md into ~/Documents/WriteMd Vault on
+    // every green run.
+    const window = await firstWindow(app!)
+    const vaultPath = await window.evaluate(async () => {
+      const api = (
+        window as unknown as { electronAPI?: { vault?: { getPath?: () => Promise<string> } } }
+      ).electronAPI
+      return api?.vault?.getPath?.() ?? ''
+    })
+    expect(vaultPath).not.toBe('')
+    expect(vaultPath).toContain('writemd-e2e-find-')
   })
 })

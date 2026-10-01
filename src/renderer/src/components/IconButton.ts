@@ -23,7 +23,7 @@ export class WriteMdIconButton extends LitElement {
       background: none;
       border-radius: 5px;
       cursor: pointer;
-      color: #737373;
+      color: var(--text-muted);
       transition:
         background 120ms ease,
         color 120ms ease;
@@ -47,23 +47,23 @@ export class WriteMdIconButton extends LitElement {
     }
 
     button:hover {
-      background: rgba(255, 255, 255, 0.05);
-      color: #d4d4d4;
+      background: var(--bg-hover);
+      color: var(--text);
     }
 
     :host([variant='close']) button:hover {
-      background: #c42b1c;
-      color: #ffffff;
+      background: var(--danger);
+      color: var(--text);
     }
 
     :host([size='caption']) button:hover {
-      background: rgba(255, 255, 255, 0.06);
-      color: #d4d4d4;
+      background: var(--bg-hover);
+      color: var(--text);
     }
 
     :host([size='caption'][variant='close']) button:hover {
-      background: #c42b1c;
-      color: #ffffff;
+      background: var(--danger);
+      color: var(--text);
     }
 
     ::slotted(svg) {

@@ -11,6 +11,24 @@ export type ViewMode = 'live' | 'reading' | 'source' | 'wysiwyg' | 'split'
 
 export type SplitSurface = 'launcher' | 'file' | 'files' | 'backlinks' | 'ai'
 
+/**
+ * Whether the secondary pane's CodeMirror view should exist.
+ *
+ * This has to match the template condition exactly. The editor renders
+ * `#secondary-cm-wrapper` only when the surface is 'file', so if this predicate
+ * disagreed, Lit would rip the wrapper out from under a live view: the view
+ * keeps its window listeners alive against a detached DOM node, and coming back
+ * to the 'file' surface finds the old view still set, so the pane mounts empty
+ * until the secondary document is closed.
+ */
+export function shouldMountSecondaryView(state: {
+  splitActive: boolean
+  secondaryDoc: unknown
+  splitSurface: SplitSurface
+}): boolean {
+  return state.splitActive && state.secondaryDoc !== null && state.splitSurface === 'file'
+}
+
 export interface SecondaryDocState {
   path: string | null
   content: string
@@ -222,6 +240,10 @@ export class FileState {
 
   switchTab(index: number): void {
     if (index < 0 || index >= this.state.tabs.length || index === this.state.activeTab) return
+    // The autosave debounce is armed for a specific tab. Tab A's timer firing
+    // after a switch would call save(), which re-reads the now-active tab and
+    // writes B's content to B's path while A's edits are dropped.
+    this.clearAutoSaveTimer()
     this.state = { ...this.state, activeTab: index }
     this.syncMirror()
     this.persistTabs()
@@ -231,6 +253,7 @@ export class FileState {
   async closeTab(index: number): Promise<void> {
     const tab = this.state.tabs[index]
     if (!tab) return
+    if (index === this.state.activeTab) this.clearAutoSaveTimer()
     if (tab.dirty) {
       const ok = await showConfirm('You have unsaved changes. Close this tab anyway?')
       if (!ok) return
@@ -281,11 +304,15 @@ export class FileState {
 
   private setupWatcherListener(): void {
     api()?.file?.onChanged?.(async (changedPath: string) => {
+      if (!this.state.tabs.some((t) => t.path === changedPath)) return
+      const result = await api()?.file?.read?.(changedPath)
+      if (!result) return
+      // Re-resolve after the read. The tab could have been closed, reordered, or
+      // renamed while it was in flight, and a stale index would write this
+      // file's disk content onto an unrelated tab.
       const tabIndex = this.state.tabs.findIndex((t) => t.path === changedPath)
       if (tabIndex < 0) return
       const tab = this.state.tabs[tabIndex]
-      const result = await api()?.file?.read?.(changedPath)
-      if (!result) return
 
       if (isOwnEcho(tab, result.content)) {
         // Echo of our own save
@@ -372,28 +399,39 @@ export class FileState {
     }
   }
 
-  async save(): Promise<boolean> {
-    const tab = this.activeTabDoc()
+  /**
+   * @param targetIndex Tab to write. Defaults to the active tab. Callers that
+   *   already resolved a tab across an await pass it explicitly rather than
+   *   mutating activeTab, so the visible selection never flickers.
+   */
+  async save(targetIndex?: number): Promise<boolean> {
+    const index = targetIndex ?? this.state.activeTab
+    const tab = this.state.tabs[index] ?? null
     if (!tab) return false
-    if (!tab.path) return this.saveAs()
+    if (!tab.path) return targetIndex === undefined ? this.saveAs() : false
     try {
       // Mark as pending to prevent watcher race conditions
       const contentToSave = tab.content
       this.state = {
         ...this.state,
         tabs: this.state.tabs.map((t, i) =>
-          i === this.state.activeTab ? { ...t, pendingWrite: contentToSave } : t
+          i === index ? { ...t, pendingWrite: contentToSave } : t
         )
       }
       const result = await api()?.file?.write?.(tab.path, contentToSave)
-      if (result) {
+      // Re-resolve by path, not by this.state.activeTab. Switching tabs during
+      // the write used to mark the wrong tab clean and clobber its
+      // originalContent while leaving pendingWrite set on the tab that was
+      // actually written, which permanently disarmed the own-echo guard.
+      const writeIdx = this.state.tabs.findIndex((t) => t.path === tab.path)
+      if (result && writeIdx >= 0) {
         const tabs = this.state.tabs.map((t, i) =>
-          i === this.state.activeTab
+          i === writeIdx
             ? {
                 ...t,
                 originalContent: contentToSave,
                 mtime: result.mtime,
-                dirty: false,
+                dirty: t.content === contentToSave ? false : t.dirty,
                 lastWritten: contentToSave,
                 pendingWrite: null
               }
@@ -411,11 +449,12 @@ export class FileState {
       console.error('Failed to save file:', e)
       alert(`Failed to save file: ${e}`)
       // Clear pending on error
-      this.state = {
-        ...this.state,
-        tabs: this.state.tabs.map((t, i) =>
-          i === this.state.activeTab ? { ...t, pendingWrite: null } : t
-        )
+      const idx = this.state.tabs.findIndex((t) => t.path === tab.path)
+      if (idx >= 0) {
+        this.state = {
+          ...this.state,
+          tabs: this.state.tabs.map((t, i) => (i === idx ? { ...t, pendingWrite: null } : t))
+        }
       }
     }
     return false
@@ -429,13 +468,17 @@ export class FileState {
       filters: [{ name: 'Markdown', extensions: ['md', 'markdown', 'mdown', 'mkd'] }]
     })
     if (result && !result.canceled && result.filePath) {
-      const tabs = this.state.tabs.map((t, i) =>
-        i === this.state.activeTab ? { ...t, path: result.filePath } : t
-      )
+      // The dialog is modal, but the tab can still be closed or reordered while
+      // it is open, so the index captured at entry may no longer be right.
+      const idx = this.state.tabs.findIndex((t) => t.path === tab.path)
+      if (idx < 0) return false
+      const tabs = this.state.tabs.map((t, i) => (i === idx ? { ...t, path: result.filePath } : t))
       this.state = { ...this.state, tabs }
       this.syncMirror()
       this.persistTabs()
-      return this.save()
+      // save() resolves its own target, so it no longer depends on this tab
+      // still being active when the write lands.
+      return this.save(idx)
     }
     return false
   }
@@ -470,9 +513,11 @@ export class FileState {
       if (!success) return false
     }
 
-    const tabs = this.state.tabs.map((t, i) =>
-      i === this.state.activeTab ? { ...t, path: newPath } : t
-    )
+    // Resolve by the original path: two awaits have passed, so
+    // this.state.activeTab may no longer point at the tab being renamed.
+    const idx = this.state.tabs.findIndex((t) => t.path === tab.path)
+    if (idx < 0) return false
+    const tabs = this.state.tabs.map((t, i) => (i === idx ? { ...t, path: newPath } : t))
     this.state = { ...this.state, tabs }
     this.syncMirror()
     this.persistTabs()
@@ -510,9 +555,9 @@ export class FileState {
     await api()
       ?.file?.watch?.(newPath)
       .catch(() => undefined)
-    const tabs = this.state.tabs.map((t, i) =>
-      i === this.state.activeTab ? { ...t, path: newPath } : t
-    )
+    const idx = this.state.tabs.findIndex((t) => t.path === tab.path)
+    if (idx < 0) return false
+    const tabs = this.state.tabs.map((t, i) => (i === idx ? { ...t, path: newPath } : t))
     this.state = { ...this.state, tabs }
     this.syncMirror()
     this.persistTabs()
@@ -599,6 +644,7 @@ export class FileState {
     const splitActive = open !== undefined ? open : !this.state.splitActive
     if (!splitActive) {
       // When closing split view, reset everything so it opens fresh next time
+      this.clearAutoSaveTimer()
       this.state = {
         ...this.state,
         splitActive: false,
@@ -633,7 +679,19 @@ export class FileState {
     this.notify()
   }
 
+  /** Sole owner of the secondary pane's view mode, so the store stays the
+   * single source of truth and the editor's subscription stays authoritative. */
+  setSecondaryViewMode(mode: ViewMode): void {
+    const secondaryDoc = this.state.secondaryDoc
+    if (!secondaryDoc || secondaryDoc.viewMode === mode) return
+    this.state = { ...this.state, secondaryDoc: { ...secondaryDoc, viewMode: mode } }
+    this.notify()
+  }
+
   closeSecondaryFile(): void {
+    // A pending debounce belongs to whichever tab scheduled it, not to
+    // whatever is active when it fires.
+    this.clearAutoSaveTimer()
     this.state = {
       ...this.state,
       splitActive: false,
@@ -679,14 +737,28 @@ export class FileState {
     this.notify()
   }
 
+  private clearAutoSaveTimer(): void {
+    if (this.autoSaveTimer !== null) {
+      clearTimeout(this.autoSaveTimer)
+      this.autoSaveTimer = null
+    }
+  }
+
   private scheduleAutoSave(): void {
-    if (this.autoSaveTimer) clearTimeout(this.autoSaveTimer)
+    this.clearAutoSaveTimer()
     const autoSave = this.settingsStore.get('editor.autoSave', true)
     const delay = this.settingsStore.get('editor.autoSaveDelay', 500)
-    if (autoSave && this.state.dirty && this.state.path) {
-      this.autoSaveTimer = setTimeout(() => {
-        void this.save()
-      }, delay)
-    }
+    if (!autoSave || !this.state.dirty || !this.state.path) return
+    // The timer is bound to the tab index it was armed for, so a tab switch
+    // between arming and firing can never redirect the write to another tab.
+    const tabIndex = this.state.activeTab
+    const tabPath = this.state.path
+    this.autoSaveTimer = setTimeout(() => {
+      this.autoSaveTimer = null
+      const tab = this.state.tabs[tabIndex]
+      if (!tab || tab.path !== tabPath || !tab.dirty) return
+      if (this.state.activeTab !== tabIndex) return
+      void this.save()
+    }, delay)
   }
 }

@@ -1,4 +1,6 @@
 import { describe, it, expect, vi } from 'vitest'
+import { join } from 'path'
+import { tmpdir } from 'os'
 import { EditorState, Compartment } from '@codemirror/state'
 import { markdown } from '@codemirror/lang-markdown'
 import {
@@ -9,7 +11,7 @@ import {
 
 vi.mock('electron', () => ({
   app: {
-    getPath: () => 'C:/Temp/writemd-phase2-test'
+    getPath: () => join(tmpdir(), 'writemd-phase2-test')
   }
 }))
 

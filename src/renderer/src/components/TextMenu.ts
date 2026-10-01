@@ -99,10 +99,10 @@ export class TextMenu extends LitElement {
         max-width: 280px;
         max-height: 280px;
         overflow-y: auto;
-        background: #141414;
-        border: 1px solid #2e2e32;
+        background: var(--menu-bg);
+        border: 1px solid var(--border-subtle);
         border-radius: 8px;
-        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+        box-shadow: var(--shadow-3);
         padding: 4px;
       }
       .submenu.left {
@@ -111,8 +111,17 @@ export class TextMenu extends LitElement {
         margin-left: 0;
         margin-right: 4px;
       }
-      .has-sub:hover > .submenu {
+      .has-sub:hover > .submenu,
+      .has-sub:focus-within > .submenu,
+      .has-sub[aria-expanded='true'] > .submenu {
         display: block;
+      }
+      .m-item[role='menuitem'] {
+        cursor: pointer;
+      }
+      .m-item[role='menuitem']:focus-visible {
+        outline: 2px solid var(--border-focus);
+        outline-offset: -2px;
       }
     `
   ]
@@ -123,6 +132,7 @@ export class TextMenu extends LitElement {
   @property({ attribute: false }) view: EditorView | null = null
 
   @state() private linkFiles: Array<{ path: string; label: string }> = []
+  @state() private openSub: string | null = null
 
   private fileState = FileState.getInstance()
   private settingsStore = SettingsStore.getInstance()
@@ -154,9 +164,22 @@ export class TextMenu extends LitElement {
     const tree = await api()
       ?.vault?.getTree?.()
       .catch(() => undefined)
+    // The menu is created and destroyed per right-click. Writing linkFiles after
+    // it was closed mutated a detached element, and rapid re-opens overlapped
+    // two in-flight tree fetches with no ordering.
+    if (!this.isConnected) return
     if (tree) collect(tree)
     for (const p of this.settingsStore.get<string[]>('files.recentFiles', [])) push(p)
     this.linkFiles = out.slice(0, 15)
+  }
+
+  /** Enter/Space on a menu row, so the menu is usable without a mouse. */
+  private handleItemKey = (e: KeyboardEvent): void => {
+    if (e.key !== 'Enter' && e.key !== ' ') return
+    e.preventDefault()
+    const el = e.currentTarget as HTMLElement
+    const id = el.dataset['id']
+    if (id) void this.run(id)
   }
 
   disconnectedCallback(): void {
@@ -444,23 +467,39 @@ export class TextMenu extends LitElement {
     return html`
       <div
         class="m-panel"
+        role="menu"
+        aria-label="Text formatting"
         style="left: ${this.x}px; top: ${this.y}px"
         @click=${(e: MouseEvent) => e.stopPropagation()}
       >
         ${items.map(
           (item) => html`
-            ${item.dividerBefore ? html`<div class="m-divider"></div>` : ''}
+            ${item.dividerBefore ? html`<div class="m-divider" role="separator"></div>` : ''}
             ${
               item.children
                 ? html`
-                    <div class="m-item has-sub">
+                    <div
+                      class="m-item has-sub"
+                      role="menuitem"
+                      tabindex="0"
+                      aria-haspopup="menu"
+                      aria-expanded=${this.openSub === item.id ? 'true' : 'false'}
+                    >
                       ${menuIcon(item.icon)}
                       <span>${item.label}</span>
                       <span class="m-chevron">›</span>
-                      <div class="submenu ${this.flip ? 'left' : ''}">
+                      <div class="submenu ${this.flip ? 'left' : ''}" role="menu">
                         ${item.children.map(
                           (sub) => html`
-                            <div class="m-item" @click=${() => void this.run(sub.id)}>
+                            <div
+                              class="m-item"
+                              role="menuitem"
+                              tabindex="0"
+                              data-id=${sub.id}
+                              @click=${() => void this.run(sub.id)}
+                              @keydown=${this.handleItemKey}
+                              @focus=${() => (this.openSub = item.id)}
+                            >
                               ${menuIcon(sub.icon)}
                               <span>${sub.label}</span>
                             </div>
@@ -470,7 +509,14 @@ export class TextMenu extends LitElement {
                     </div>
                   `
                 : html`
-                    <div class="m-item" @click=${() => void this.run(item.id)}>
+                    <div
+                      class="m-item"
+                      role="menuitem"
+                      tabindex="0"
+                      data-id=${item.id}
+                      @click=${() => void this.run(item.id)}
+                      @keydown=${this.handleItemKey}
+                    >
                       ${menuIcon(item.icon)}
                       <span>${item.label}</span>
                     </div>

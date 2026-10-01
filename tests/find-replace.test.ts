@@ -22,7 +22,7 @@ describe('find/replace wiring', () => {
     const replace = COMMANDS.find((c) => c.id === 'replace')
     expect(find?.defaultBinding).toBe('Ctrl+F')
     expect(replace?.defaultBinding).toBe('Ctrl+H')
-    expect(effectiveBinding('find', {}).key).toBe('f')
+    expect(effectiveBinding('find', {})?.key).toBe('f')
     expect(parseBinding('Ctrl+H')?.key).toBe('h')
   })
 

@@ -9,6 +9,45 @@ import {
 import { RangeSetBuilder } from '@codemirror/state'
 import { readOnlyFacet } from './read-only'
 
+/**
+ * A named class rather than an anonymous one defined inside the decoration
+ * loop. The old `eq()` returned false unconditionally, so every `[[link]]` in
+ * the document had its DOM torn down and rebuilt on each keystroke (the plugin
+ * updates on docChanged, selectionSet and focusChanged), along with a fresh
+ * onclick closure each time. Comparing the label lets CodeMirror keep the node.
+ */
+class WikiLinkWidget extends WidgetType {
+  constructor(readonly label: string) {
+    super()
+  }
+
+  eq(other: WikiLinkWidget): boolean {
+    return other.label === this.label
+  }
+
+  ignoreEvent(): boolean {
+    return false
+  }
+
+  toDOM(): HTMLElement {
+    const span = document.createElement('span')
+    span.className = 'cm-wiki-link'
+    span.style.color = 'var(--accent)'
+    span.style.textDecoration = 'none'
+    span.style.cursor = 'pointer'
+    span.style.fontWeight = '500'
+    span.innerText = this.label
+
+    span.onclick = (e) => {
+      e.preventDefault()
+      window.dispatchEvent(
+        new CustomEvent('writemd-open-wikilink', { detail: { name: this.label } })
+      )
+    }
+    return span
+  }
+}
+
 function getWikiLinkDecorations(view: EditorView): DecorationSet {
   const builder = new RangeSetBuilder<Decoration>()
   const readOnly = view.state.facet(readOnlyFacet)
@@ -34,37 +73,7 @@ function getWikiLinkDecorations(view: EditorView): DecorationSet {
     const line = view.state.doc.lineAt(from).number
 
     if (!activeLines.has(line) || readOnly) {
-      builder.add(
-        from,
-        to,
-        Decoration.replace({
-          widget: new (class extends WidgetType {
-            eq(): boolean {
-              return false
-            }
-            ignoreEvent(): boolean {
-              return false
-            }
-            toDOM(): HTMLElement {
-              const span = document.createElement('span')
-              span.className = 'cm-wiki-link'
-              span.style.color = 'var(--accent)'
-              span.style.textDecoration = 'none'
-              span.style.cursor = 'pointer'
-              span.style.fontWeight = '500'
-              span.innerText = content
-
-              span.onclick = (e) => {
-                e.preventDefault()
-                window.dispatchEvent(
-                  new CustomEvent('writemd-open-wikilink', { detail: { name: content } })
-                )
-              }
-              return span
-            }
-          })()
-        })
-      )
+      builder.add(from, to, Decoration.replace({ widget: new WikiLinkWidget(content) }))
     }
   }
 

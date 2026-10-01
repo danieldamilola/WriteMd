@@ -1,0 +1,54 @@
+version: 2
+
+updates:
+  # electron, electron-builder, electron-updater and @electron-toolkit/* move
+  # together; splitting them produces a combination nobody tested.
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    groups:
+      electron-stack:
+        patterns:
+          - electron
+          - electron-builder
+          - electron-updater
+          - '@electron-toolkit/*'
+          - '@electron-toolkit/utils'
+      lit-and-codemirror:
+        patterns:
+          - lit
+          - '@lit/*'
+          - '@codemirror/*'
+          - codemirror
+      diagrams:
+        patterns:
+          - mermaid
+          - katex
+      test-stack:
+        patterns:
+          - vitest
+          - '@vitest/*'
+          - '@playwright/*'
+          - playwright
+          - jsdom
+          - typescript
+          - '@types/*'
+          - eslint
+          - 'eslint-*'
+          - prettier
+    commit-message:
+      prefix: 'chore(deps)'
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    groups:
+      actions:
+        patterns:
+          - '*'
+    commit-message:
+      prefix: 'ci'

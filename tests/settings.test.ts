@@ -1,8 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { existsSync, readFileSync, rmSync, mkdirSync, writeFileSync } from 'fs'
 import { join } from 'path'
+import { makeTempRoot } from './helpers/temp-root'
 
-const TEST_ROOT = 'C:/Temp/writemd-settings-test'
+// Was a fixed 'C:/Temp/writemd-settings-test': Windows-only, so the suite could
+// not run on the release workflow's linux/macos legs.
+const TEST_ROOT = makeTempRoot('settings')
 const CONFIG = join(TEST_ROOT, 'userData', 'config.json')
 
 function mockElectron(encryptAvailable: boolean): void {

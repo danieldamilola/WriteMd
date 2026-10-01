@@ -22,13 +22,13 @@ export class InfoPill extends LitElement {
       gap: 10px;
       height: 23px;
       padding: 0 10px;
-      background: #1c1c1c;
-      border: 1px solid rgba(255, 255, 255, 0.08);
+      background: var(--bg-card);
+      border: 1px solid var(--border-subtle);
       border-radius: 6px;
       font-family: 'Geist Mono', monospace;
       font-size: 10px;
-      color: #6b6b6b;
-      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+      color: var(--text-muted);
+      box-shadow: var(--shadow-2);
       backdrop-filter: blur(8px);
     }
 
@@ -37,14 +37,14 @@ export class InfoPill extends LitElement {
       align-items: center;
       justify-content: center;
       cursor: pointer;
-      color: #8c8c8c;
+      color: var(--text-muted);
       transition: color 120ms ease;
       padding: 2px;
       margin-left: -2px;
     }
 
     .mode-btn:hover {
-      color: #ffffff;
+      color: var(--text);
     }
 
     .mode-btn svg {

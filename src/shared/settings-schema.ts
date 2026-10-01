@@ -27,10 +27,6 @@ export interface WriteMdSettings {
   appearance: {
     theme: string
     accentColor: string
-    customCSS: string
-    toolbarVisible: boolean
-    statusBarVisible: boolean
-    sidebarWidth: number
     panelOrientation: 'horizontal' | 'vertical'
   }
   files: {
@@ -107,10 +103,6 @@ export const DEFAULT_SETTINGS: WriteMdSettings = {
   appearance: {
     theme: 'dark',
     accentColor: '',
-    customCSS: '',
-    toolbarVisible: true,
-    statusBarVisible: true,
-    sidebarWidth: 280,
     panelOrientation: 'horizontal'
   },
   files: {

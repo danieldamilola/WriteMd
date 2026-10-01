@@ -1,9 +1,7 @@
-import { test, expect, _electron as electron, type ElectronApplication } from '@playwright/test'
-import { mkdirSync, writeFileSync } from 'fs'
+import { test, expect, type ElectronApplication } from '@playwright/test'
 import { join } from 'path'
-
-const VAULT = join(process.cwd(), '.e2e-vault')
-const USER_DATA = join(process.cwd(), '.e2e-userdata')
+import { writeFileSync } from 'fs'
+import { firstWindow, launch, makeFixture } from './fixtures'
 
 const FILES = [
   'PRD.md',
@@ -25,29 +23,23 @@ test.describe('Tab strip overflow', () => {
   let app: ElectronApplication | undefined
 
   test.beforeAll(async () => {
-    mkdirSync(VAULT, { recursive: true })
-    mkdirSync(USER_DATA, { recursive: true })
-    for (const name of FILES) {
-      writeFileSync(join(VAULT, name), `# ${name}\n\nTab overflow fixture.\n`, 'utf-8')
-    }
+    const fixture = makeFixture('tab-overflow', FILES)
+    // openTabs seeds the editor, because `writemd-top-bar` only exists once a
+    // document is open; the welcome screen renders its own top bar.
     writeFileSync(
-      join(USER_DATA, 'config.json'),
+      join(fixture.userData, 'config.json'),
       JSON.stringify({
         files: {
-          vaultPath: VAULT,
-          openTabs: FILES.map((n) => join(VAULT, n)),
-          activeTabPath: join(VAULT, FILES[FILES.length - 1]),
-          recentFiles: FILES.map((n) => join(VAULT, n))
+          vaultPath: fixture.vault,
+          openTabs: FILES.map((n) => join(fixture.vault, n)),
+          activeTabPath: join(fixture.vault, FILES[FILES.length - 1]),
+          recentFiles: FILES.map((n) => join(fixture.vault, n))
         },
         appearance: { theme: 'dark', panelOrientation: 'horizontal' }
       }),
       'utf-8'
     )
-
-    app = await electron.launch({
-      args: [`--user-data-dir=${USER_DATA}`, '.'],
-      env: { ...process.env, ELECTRON_DISABLE_SECURITY_WARNINGS: '1' }
-    })
+    app = await launch(fixture)
   })
 
   test.afterAll(async () => {
@@ -55,8 +47,7 @@ test.describe('Tab strip overflow', () => {
   })
 
   test('strip scrolls instead of clipping, and keeps the active tab visible', async () => {
-    const window = await app?.firstWindow()
-    if (!window) throw new Error('No app window opened')
+    const window = await firstWindow(app!)
     await expect(window.locator('writemd-top-bar')).toBeVisible()
 
     const strip = window.locator('.tab-strip')

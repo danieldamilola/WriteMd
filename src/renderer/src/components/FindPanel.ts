@@ -313,7 +313,11 @@ export class FindPanel extends LitElement {
   }
 
   private handleQueryKey(e: KeyboardEvent): void {
-    e.stopPropagation()
+    // Modifier combos are the app's shortcuts (Ctrl+H switches to replace,
+    // Ctrl+P opens the palette, Ctrl+, opens settings), and App listens on
+    // window. Swallowing them here made every global shortcut dead for as long
+    // as this input had focus.
+    if (!e.ctrlKey && !e.metaKey && !e.altKey) e.stopPropagation()
     if (this.handleFlagShortcut(e)) return
     if (e.key === 'Enter') {
       e.preventDefault()
@@ -329,7 +333,8 @@ export class FindPanel extends LitElement {
   }
 
   private handleReplaceKey(e: KeyboardEvent): void {
-    e.stopPropagation()
+    // Same reasoning as handleQueryKey: let modifier combos reach App.
+    if (!e.ctrlKey && !e.metaKey && !e.altKey) e.stopPropagation()
     if (this.handleFlagShortcut(e)) return
     if (e.key === 'Enter') {
       e.preventDefault()

@@ -19,17 +19,21 @@ WriteMd is a fast, private, local-first Markdown editor. Double-click any `.md` 
 - **Private by default** - everything stays on your machine; no telemetry, no sync, no lock-in (see [PRIVACY.md](PRIVACY.md))
 - **Links that work** - `[[wiki-links]]` with click-to-open, file picker, cross-folder backlinks panel, and smart website-link insertion
 - **AI assistant (optional)** - bring your own key (OpenAI, Gemini, Anthropic, Ollama) to draft and edit in place
-- **Rich Markdown** - tables, math (KaTeX), Mermaid diagrams, frontmatter, footnotes, callouts
+- **Rich Markdown** - tables, math (KaTeX), Mermaid diagrams, frontmatter, footnotes
 - **Keyboard-first** - command palette (`Ctrl+P`), customizable shortcuts, find/replace (`Ctrl+F` / `Ctrl+H`)
+
+> Note: the note menu has a "Callout" item that inserts `> [!note]`, but nothing
+> renders callout syntax yet. It is written as a plain blockquote. Tracked in
+> `phases.md`.
 
 ## Installation
 
 Download the installer from the [Releases page](https://github.com/danieldamilola/WriteMd Vaultreleases):
 
-| Platform | File |
-| -------- | ---- |
-| Windows  | `writemd-<version>-setup.exe` |
-| macOS    | `writemd-<version>.dmg` (build from source for now) |
+| Platform | File                                                     |
+| -------- | -------------------------------------------------------- |
+| Windows  | `writemd-<version>-setup.exe`                            |
+| macOS    | `writemd-<version>.dmg` (build from source for now)      |
 | Linux    | `writemd-<version>.AppImage` (build from source for now) |
 
 WriteMd registers itself for `.md`, `.markdown`, `.mdown`, and `.mkd` so files open in it on double-click.
@@ -47,20 +51,31 @@ WriteMd registers itself for `.md`, `.markdown`, `.mdown`, and `.mkd` so files o
 
 ### Default shortcuts
 
-| Action | Windows/Linux | macOS |
-| ------ | ------------- | ----- |
-| New / Open / Save | `Ctrl+N` / `Ctrl+O` / `Ctrl+S` | `Cmd+N` / `Cmd+O` / `Cmd+S` |
-| Find / Replace | `Ctrl+F` / `Ctrl+H` | `Cmd+F` / `Cmd+Opt+F` |
-| Command palette | `Ctrl+P` | `Cmd+P` |
-| Toggle reading view | `Ctrl+E` | `Cmd+E` |
-| Split view | `Ctrl+\` | `Cmd+\` |
-| Settings | `Ctrl+,` | `Cmd+,` |
+Bindings are defined in `src/renderer/src/state/shortcuts.ts` and rebindable in
+Settings → Shortcuts. `Ctrl` is the `mod` slot, so it renders as `Cmd` on macOS.
 
-All bindings are rebindable in Settings → Shortcuts.
+| Action              | Windows/Linux                  | macOS                       |
+| ------------------- | ------------------------------ | --------------------------- |
+| New / Open / Save   | `Ctrl+N` / `Ctrl+O` / `Ctrl+S` | `Cmd+N` / `Cmd+O` / `Cmd+S` |
+| Save As             | `Ctrl+Shift+S`                 | `Cmd+Shift+S`               |
+| Find / Replace      | `Ctrl+F` / `Ctrl+H`            | `Cmd+F` / `Cmd+H`           |
+| Command palette     | `Ctrl+P`                       | `Cmd+P`                     |
+| Settings            | `Ctrl+,`                       | `Cmd+,`                     |
+| Toggle reading view | `Ctrl+E`                       | `Cmd+E`                     |
+| Split view          | `Ctrl+Alt+S`                   | `Cmd+Opt+S`                 |
+| Show files panel    | `Ctrl+Shift+E`                 | `Cmd+Shift+E`               |
+| Show backlinks      | `Ctrl+Shift+B`                 | `Cmd+Shift+B`               |
+| Show AI panel       | `Ctrl+Alt+A`                   | `Cmd+Opt+A`                 |
+| Zoom in / out / 0   | `Ctrl+=` / `Ctrl+-` / `Ctrl+0` | `Cmd+=` / `Cmd+-` / `Cmd+0` |
+
+Export has no default binding. Run it from the note menu or the palette.
 
 ## Configuration
 
-Settings persist to `config.json` in the app data folder and cover editor (font, line height, Vim/typewriter modes), appearance (6 themes + accent), vault location, recent-files limit, export defaults, AI provider/model/key, and shortcut overrides. See `PRD.md` §9 for the full schema.
+Settings persist to `config.json` in the app data folder and cover editor (font, line height, Vim/typewriter modes), appearance (7 themes + accent, panel orientation), vault location, recent files, open tabs, export defaults, AI provider/model/key, and shortcut overrides. See `PRD.md` §9 for the full schema.
+
+Recent files live in `config.json` under `files.recentFiles`. There is no
+IndexedDB and no separate `recent-files.json`.
 
 ## Development
 

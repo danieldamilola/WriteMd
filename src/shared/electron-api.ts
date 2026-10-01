@@ -69,6 +69,7 @@ export interface ElectronAPI {
   file: {
     read: (path: string) => Promise<FileReadResult>
     write: (path: string, content: string) => Promise<FileWriteResult>
+    /** Same channel as `dialog.showOpenDialog`; both spellings are in use. */
     openDialog: (options: {
       properties?: string[]
       filters?: { name: string; extensions: string[] }[]
@@ -78,7 +79,6 @@ export interface ElectronAPI {
       filters?: { name: string; extensions: string[] }[]
     }) => Promise<Electron.SaveDialogReturnValue>
     exists: (path: string) => Promise<boolean>
-    listDir: (path: string) => Promise<VaultFile[]>
     saveImage: (docPath: string, base64Data: string, ext: string) => Promise<SavedImageResult>
     resolveAsset: (docPath: string, relativePath: string) => Promise<string | null>
     watch: (path: string) => Promise<void>

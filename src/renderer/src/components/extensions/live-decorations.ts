@@ -17,7 +17,7 @@ import { MermaidWidget } from '../widgets/MermaidWidget'
 import { readOnlyFacet } from './read-only'
 import { previewFrozenField } from './freeze-mouse'
 import { treeGrowthEffect } from './tree-progress'
-import { documentPathFacet } from './link-click'
+import { documentPathFacet } from './document-path'
 
 export function pushReplace(
   ranges: Range<Decoration>[],

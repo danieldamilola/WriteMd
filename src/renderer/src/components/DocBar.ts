@@ -45,7 +45,7 @@ export class DocBar extends LitElement {
       .sub-header-left {
         display: flex;
         align-items: center;
-        color: #595959;
+        color: var(--text-muted);
         font-size: 13px;
         overflow: hidden;
         white-space: nowrap;
@@ -54,7 +54,7 @@ export class DocBar extends LitElement {
         flex: 1;
       }
       .sub-header-center {
-        color: #d4d4d4;
+        color: var(--text);
         font-size: 14px;
         font-weight: 500;
         text-align: center;
@@ -78,8 +78,8 @@ export class DocBar extends LitElement {
       }
       input.title-input:hover,
       input.title-input:focus {
-        background: rgba(255, 255, 255, 0.05);
-        border-color: rgba(255, 255, 255, 0.1);
+        background: var(--bg-hover);
+        border-color: var(--border);
       }
       .sub-header-right {
         display: flex;
@@ -95,15 +95,15 @@ export class DocBar extends LitElement {
         width: 24px;
         height: 24px;
         border-radius: 4px;
-        color: #6b6b6b;
+        color: var(--text-muted);
         cursor: pointer;
         transition:
           color 120ms ease,
           background 120ms ease;
       }
       .icon-action:hover {
-        color: #ffffff;
-        background: rgba(255, 255, 255, 0.06);
+        color: var(--text);
+        background: var(--bg-hover);
       }
       .icon-action svg {
         width: 14px;
@@ -234,7 +234,7 @@ export class DocBar extends LitElement {
     ]
   }
 
-  private toggleMoreMenu(e: MouseEvent): void {
+  private toggleMoreMenu(e: Event): void {
     e.stopPropagation()
     if (this.showMoreMenu) {
       this.showMoreMenu = false
@@ -248,6 +248,21 @@ export class DocBar extends LitElement {
       y: rect.bottom + 4
     }
     this.showMoreMenu = true
+  }
+
+  /** Enter/Space on an icon-action div, so it is reachable by keyboard. */
+  private handleIconKey = (e: KeyboardEvent): void => {
+    if (e.key !== 'Enter' && e.key !== ' ') return
+    e.preventDefault()
+    ;(e.currentTarget as HTMLElement).click()
+  }
+
+  /** Enter/Space on a menu row. */
+  private handleMenuKey = (e: KeyboardEvent): void => {
+    if (e.key !== 'Enter' && e.key !== ' ') return
+    e.preventDefault()
+    const id = (e.currentTarget as HTMLElement).dataset['id']
+    if (id) void this.handleNoteAction(id)
   }
 
   private async handleNoteAction(id: string): Promise<void> {
@@ -374,6 +389,7 @@ export class DocBar extends LitElement {
           <input
             type="text"
             class="title-input"
+            aria-label="Document title"
             .value=${this.getDisplayTitle(this.filePath)}
             @blur=${(e: Event) => void this.handleRename(e)}
             @keydown=${this.handleRenameKeyDown}
@@ -382,16 +398,26 @@ export class DocBar extends LitElement {
         <div class="sub-header-right">
           <div
             class="icon-action"
+            role="button"
+            tabindex="0"
+            aria-label="Toggle Reading / Live Mode"
             title="Toggle Reading / Live Mode"
             @click=${() => this.fileState.quickToggle()}
+            @keydown=${this.handleIconKey}
           >
             ${this.renderToggleIcon(this.viewMode)}
           </div>
           <div class="menu-wrap">
             <div
               class="icon-action faint"
+              role="button"
+              tabindex="0"
+              aria-label="More Options"
+              aria-haspopup="menu"
+              aria-expanded=${this.showMoreMenu ? 'true' : 'false'}
               title="More Options"
               @click=${this.toggleMoreMenu}
+              @keydown=${this.handleIconKey}
             >
               <svg viewBox="0 0 24 24" fill="currentColor">
                 <circle cx="5" cy="12" r="2" />
@@ -399,35 +425,47 @@ export class DocBar extends LitElement {
                 <circle cx="19" cy="12" r="2" />
               </svg>
             </div>
-            ${this.showMoreMenu
-              ? html`
-                  <div
-                    class="menu-backdrop"
-                    @click=${() => {
-                      this.showMoreMenu = false
-                      this.menuPos = null
-                    }}
-                  ></div>
-                  <div
-                    class="m-panel note-menu"
-                    style="left: ${this.menuPos?.x ?? 0}px; top: ${this.menuPos?.y ?? 0}px;"
-                  >
-                    ${this.noteMenuItems().map(
-                      (item) => html`
-                        ${item.dividerBefore ? html`<div class="m-divider"></div>` : ''}
-                        <div
-                          class=${item.danger ? 'm-item danger' : 'm-item'}
-                          @click=${() => void this.handleNoteAction(item.id)}
-                        >
-                          ${menuIcon(item.icon)}
-                          <span>${item.label}</span>
-                          ${item.checked ? menuCheck() : ''}
-                        </div>
-                      `
-                    )}
-                  </div>
-                `
-              : ''}
+            ${
+              this.showMoreMenu
+                ? html`
+                    <div
+                      class="menu-backdrop"
+                      @click=${() => {
+                        this.showMoreMenu = false
+                        this.menuPos = null
+                      }}
+                    ></div>
+                    <div
+                      class="m-panel note-menu"
+                      role="menu"
+                      aria-label="Document options"
+                      style="left: ${this.menuPos?.x ?? 0}px; top: ${this.menuPos?.y ?? 0}px;"
+                    >
+                      ${this.noteMenuItems().map(
+                        (item) => html`
+                          ${
+                            item.dividerBefore
+                              ? html`<div class="m-divider" role="separator"></div>`
+                              : ''
+                          }
+                          <div
+                            class=${item.danger ? 'm-item danger' : 'm-item'}
+                            role="menuitem"
+                            tabindex="0"
+                            data-id=${item.id}
+                            @click=${() => void this.handleNoteAction(item.id)}
+                            @keydown=${this.handleMenuKey}
+                          >
+                            ${menuIcon(item.icon)}
+                            <span>${item.label}</span>
+                            ${item.checked ? menuCheck() : ''}
+                          </div>
+                        `
+                      )}
+                    </div>
+                  `
+                : ''
+            }
           </div>
         </div>
       </div>

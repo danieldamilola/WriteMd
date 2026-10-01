@@ -32,7 +32,7 @@ export class WriteMdTab extends LitElement {
       font-family: 'Geist Mono', monospace;
       font-size: 14px;
       line-height: 18px;
-      color: #737373;
+      color: var(--text-muted);
       font-weight: 400;
       transition:
         background 120ms ease,
@@ -40,17 +40,17 @@ export class WriteMdTab extends LitElement {
     }
 
     .tab-btn:hover {
-      color: #a3a3a3;
+      color: var(--text-secondary);
     }
 
     :host([active]) .tab-btn {
-      background: rgba(255, 255, 255, 0.05);
-      color: #d4d4d4;
+      background: var(--bg-hover);
+      color: var(--text);
       font-weight: 600;
     }
 
     .tab-btn:focus-visible {
-      outline: 1px solid var(--border-focus, rgba(255, 255, 255, 0.2));
+      outline: 1px solid var(--border-focus);
       outline-offset: -1px;
     }
 
@@ -61,7 +61,7 @@ export class WriteMdTab extends LitElement {
       transform: translateY(-50%);
       width: 2px;
       height: 8px;
-      background: #171717;
+      background: var(--bg-gutter);
       border-radius: 1px;
     }
 
@@ -97,7 +97,7 @@ export class WriteMdTab extends LitElement {
       width: 6px;
       height: 6px;
       border-radius: 50%;
-      background-color: #a3a3a3;
+      background-color: var(--text-secondary);
       flex-shrink: 0;
       margin-left: 2px;
     }
@@ -121,14 +121,36 @@ export class WriteMdTab extends LitElement {
     this.dispatchEvent(new CustomEvent('select', { bubbles: true, composed: true }))
   }
 
-  private handleSelectKey(e: KeyboardEvent): void {
+  /** Move DOM focus to this tab. */
+  focus(): void {
+    this.renderRoot?.querySelector<HTMLElement>('.tab-btn')?.focus()
+  }
+
+  /**
+   * One handler for both jobs: Lit rejects duplicate attribute bindings on the
+   * same element, so Enter/Space and the arrow keys cannot each own a
+   * `@keydown`.
+   */
+  private handleKeyDown(e: KeyboardEvent): void {
     // Ignore key events bubbled from child controls (e.g. the close button
     // keeps its native Enter/Space activation).
     if (e.target !== e.currentTarget) return
     if (e.key === 'Enter' || e.key === ' ') {
       e.preventDefault()
       this.handleSelect()
+      return
     }
+    if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return
+    e.preventDefault()
+    // Left/right move along the strip, matching the standard tablist pattern.
+    // Without it every tab has to be tabbed through individually.
+    const root = this.getRootNode() as ParentNode
+    const tabs = Array.from(root.querySelectorAll('writemd-tab')) as WriteMdTab[]
+    if (tabs.length === 0) return
+    const i = tabs.indexOf(this)
+    const next = tabs[(i + (e.key === 'ArrowRight' ? 1 : -1) + tabs.length) % tabs.length]
+    next?.focus()
+    next?.handleSelect()
   }
 
   render(): unknown {
@@ -136,21 +158,22 @@ export class WriteMdTab extends LitElement {
       <span class="separator"></span>
       <div
         class="tab-btn"
-        role="button"
+        role="tab"
+        aria-selected=${this.active ? 'true' : 'false'}
         tabindex="0"
         @click=${this.handleSelect}
-        @keydown=${this.handleSelectKey}
+        @keydown=${this.handleKeyDown}
       >
         <span class="label">${this.label}</span>
         ${this.dirty ? html`<span class="dirty-dot" title="Unsaved changes"></span>` : ''}
         ${
-          this.active && this.showClose
+          this.showClose
             ? html`
                 <button
                   class="close-btn"
                   type="button"
                   @click=${this.handleClose}
-                  aria-label="Close tab"
+                  aria-label=${`Close ${this.label}`}
                 >
                   <svg
                     width="8"

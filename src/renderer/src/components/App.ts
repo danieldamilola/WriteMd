@@ -26,17 +26,17 @@ export class WriteMdApp extends LitElement {
       flex-direction: column;
       height: 100vh;
       width: 100vw;
-      background: var(--bg);
+      background: var(--bg-frame);
       color: var(--text);
     }
+    /* Transparent so the frame shows through at the window edges and in the
+       editor's gutter. Dark theme sets --bg-frame one step darker than --bg,
+       which is what makes the shell read as a surface behind the panes. */
     .app-container {
       display: flex;
       flex-direction: column;
       height: 100%;
       width: 100%;
-    }
-    :host-context([data-theme='dark']) .app-container {
-      background: #0a0a0a;
     }
     .main-area {
       display: flex;
@@ -120,7 +120,7 @@ export class WriteMdApp extends LitElement {
     }
     .tab-add:hover {
       color: var(--text);
-      background: rgba(255, 255, 255, 0.06);
+      background: var(--bg-hover);
     }
   `
 
@@ -141,6 +141,7 @@ export class WriteMdApp extends LitElement {
   private unsubscribeOrientation: (() => void) | null = null
   private unsubscribeFileOpen: (() => void) | null = null
   private stripObserver: ResizeObserver | null = null
+  private observedStrip: HTMLElement | null = null
 
   private get tabStrip(): HTMLElement | null {
     return this.renderRoot.querySelector<HTMLElement>('.tab-strip')
@@ -180,6 +181,13 @@ export class WriteMdApp extends LitElement {
     this.syncStripEdges()
   }
 
+  /** Enter/Space on the add-tab button, which is a div. */
+  private handleTabAddKey = (e: KeyboardEvent): void => {
+    if (e.key !== 'Enter' && e.key !== ' ') return
+    e.preventDefault()
+    void this.openFileDialog()
+  }
+
   connectedCallback(): void {
     super.connectedCallback()
     // Listener registration happens before the first await. An async
@@ -191,8 +199,11 @@ export class WriteMdApp extends LitElement {
     window.addEventListener('drop', this.handleWindowDrop)
     this.unsubscribeFileOpen =
       api()?.onFileOpenExternal?.((path: string) => {
+        // openFile can abort on the unsaved-changes confirm. Setting
+        // showWelcome eagerly would leave the app with no welcome screen and
+        // no tabs once the cancel path skipped its notify(). The subscription
+        // above already sets it from tabs.length, so leave it to that.
         void this.fileState.openFile(path)
-        this.showWelcome = false
       }) ?? null
 
     void this.initAsync()
@@ -236,19 +247,32 @@ export class WriteMdApp extends LitElement {
     this.unsubscribeOrientation?.()
     this.stripObserver?.disconnect()
     this.stripObserver = null
+    this.observedStrip = null
     super.disconnectedCallback()
   }
 
   protected updated(): void {
     const strip = this.tabStrip
-    if (!strip) return
-    strip.addEventListener('scroll', this.handleStripScroll, { passive: true })
-    if (!this.stripObserver && typeof ResizeObserver !== 'undefined') {
-      // updated() runs before the strip has been laid out, so the scroll math
-      // sees a zero-width element and does nothing. The observer re-runs it once
-      // real geometry exists, and again whenever the window is resized.
-      this.stripObserver = new ResizeObserver(() => this.revealActiveTab())
-      this.stripObserver.observe(strip)
+    if (strip) {
+      strip.addEventListener('scroll', this.handleStripScroll, { passive: true })
+      if (typeof ResizeObserver !== 'undefined') {
+        if (!this.stripObserver) {
+          // updated() runs before the strip has been laid out, so the scroll
+          // math sees a zero-width element and does nothing. The observer re-runs
+          // it once real geometry exists, and again on window resize.
+          this.stripObserver = new ResizeObserver(() => this.revealActiveTab())
+        }
+        // Flipping to vertical orientation and back renders a brand new
+        // .tab-strip node. Observing only the first one left the replacement
+        // without scroll-into-view and kept the detached strip referenced.
+        if (this.observedStrip !== strip) {
+          if (this.observedStrip) this.stripObserver?.unobserve(this.observedStrip)
+          this.observedStrip = strip
+          this.stripObserver?.observe(strip)
+        }
+      }
+    } else {
+      this.observedStrip = null
     }
     this.revealActiveTab()
   }
@@ -442,6 +466,8 @@ export class WriteMdApp extends LitElement {
             @open-file=${() => void this.openFileDialog()}
             @open-vault=${() => void this.handleOpenVault()}
             @open-settings=${() => (this.showSettings = true)}
+            @open-menu=${() => (this.showPalette = true)}
+            @toggle-split=${() => this.fileState.toggleSplitView()}
             @open-recent=${(e: CustomEvent<{ path: string }>) => {
               void this.fileState.openFile(e.detail.path)
               this.showWelcome = false
@@ -512,8 +538,12 @@ export class WriteMdApp extends LitElement {
                     </div>
                     <div
                       class="tab-add"
+                      role="button"
+                      tabindex="0"
+                      aria-label="Open file in new tab"
                       title="Open file in new tab"
                       @click=${() => void this.openFileDialog()}
+                      @keydown=${this.handleTabAddKey}
                     >
                       <svg
                         width="14"

@@ -1,7 +1,37 @@
 import { WidgetType, EditorView } from '@codemirror/view'
 
-// Asset cache for resolved image data URIs
-export const assetDataCache = new Map<string, string>()
+/**
+ * Resolved image data URIs, keyed by document path and source. Values are full
+ * base64 payloads, so this is a plain LRU with a byte-ish budget rather than an
+ * unbounded Map: without eviction, every image ever viewed in every note stayed
+ * resident for the whole session and a renamed note left unreachable entries.
+ */
+const MAX_CACHE_ENTRIES = 64
+
+class LruCache<K, V> {
+  private readonly map = new Map<K, V>()
+
+  get(key: K): V | undefined {
+    const value = this.map.get(key)
+    if (value === undefined) return undefined
+    // Re-insert to mark as most recently used.
+    this.map.delete(key)
+    this.map.set(key, value)
+    return value
+  }
+
+  set(key: K, value: V): void {
+    this.map.delete(key)
+    this.map.set(key, value)
+    while (this.map.size > MAX_CACHE_ENTRIES) {
+      const oldest = this.map.keys().next()
+      if (oldest.done) break
+      this.map.delete(oldest.value)
+    }
+  }
+}
+
+export const assetDataCache = new LruCache<string, string>()
 
 export class ImageWidget extends WidgetType {
   constructor(

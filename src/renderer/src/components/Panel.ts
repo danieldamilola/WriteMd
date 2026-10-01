@@ -1,5 +1,5 @@
 import { html, css, LitElement } from 'lit'
-import { customElement, property } from 'lit/decorators.js'
+import { customElement } from 'lit/decorators.js'
 import { scrollbarStyles } from './scrollbars'
 
 @customElement('writemd-panel')
@@ -13,21 +13,10 @@ export class WriteMdPanel extends LitElement {
       min-height: 0;
       position: relative;
       border-radius: 10px;
-      background: #141414;
+      background: var(--bg-elevated);
       overflow: hidden;
       box-sizing: border-box;
       container-type: size;
-    }
-
-    .fade-bar {
-      position: absolute;
-      top: 0;
-      left: 0;
-      right: 0;
-      height: 49px;
-      background: linear-gradient(180deg, #141414 76.4%, transparent 100%);
-      z-index: 2;
-      pointer-events: none;
     }
 
     .content {
@@ -43,11 +32,8 @@ export class WriteMdPanel extends LitElement {
     ${scrollbarStyles}
   `
 
-  @property({ type: Boolean }) showFade = false
-
   render(): unknown {
     return html`
-      ${this.showFade ? html`<div class="fade-bar"></div>` : ''}
       <div class="content">
         <slot></slot>
       </div>

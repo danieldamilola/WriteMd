@@ -11,13 +11,15 @@ jobs:
     strategy:
       matrix:
         os: [windows-latest, macos-latest, ubuntu-latest]
-        
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
       - name: Install pnpm
-        uses: pnpm/action-setup@v3
+        # v3 here against v4 in ci.yml meant the release path resolved a
+        # different pnpm than the one CI validated against.
+        uses: pnpm/action-setup@v4
         with:
           version: 9
 
@@ -25,17 +27,27 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '20'
+          cache: pnpm
 
       - name: Install dependencies
-        run: pnpm install
+        # Bare `pnpm install` let the lockfile drift on the one path that
+        # publishes binaries.
+        run: pnpm install --frozen-lockfile
 
-      - name: Lint and Typecheck
+      - name: Lint, Typecheck and Format Check
         run: |
           pnpm lint
           pnpm typecheck
+          pnpm format:check
 
       - name: Run Tests
         run: pnpm test
+
+      - name: Cache Electron binary
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/electron
+          key: electron-${{ hashFiles('pnpm-lock.yaml') }}
 
       - name: Build and Publish Release
         env:

@@ -21,7 +21,7 @@ export class WriteMdModeToggle extends LitElement {
       padding: 5px 8px 5px 7px;
       border-radius: 5px;
       background: rgba(0, 0, 0, 0.4);
-      border: 1px solid rgba(40, 40, 40, 0.6);
+      border: 1px solid var(--border-subtle);
       box-sizing: border-box;
     }
 
@@ -31,7 +31,7 @@ export class WriteMdModeToggle extends LitElement {
       gap: 6px;
       border: none;
       background: none;
-      color: #737373;
+      color: var(--text-muted);
       font-family: 'Geist Mono', monospace;
       font-size: 12px;
       line-height: 16px;
@@ -44,20 +44,20 @@ export class WriteMdModeToggle extends LitElement {
     }
 
     .mode-btn:hover {
-      color: #d4d4d4;
-      background: rgba(255, 255, 255, 0.05);
+      color: var(--text);
+      background: var(--bg-hover);
     }
 
     .mode-btn.active {
-      color: #ffffff;
-      background: rgba(255, 255, 255, 0.1);
+      color: var(--text);
+      background: var(--bg-active);
       font-weight: 500;
     }
 
     .shortcut {
       font-family: 'Geist Mono', monospace;
       font-size: 10px;
-      color: #595959;
+      color: var(--text-muted);
       margin-left: 4px;
     }
   `

@@ -7,6 +7,34 @@ on:
 
 jobs:
   quality:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # windows-latest exercises the app's own platform; ubuntu proves the
+        # unit suite is no longer hardcoded to C:/Temp paths.
+        os: [windows-latest, ubuntu-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+      - run: pnpm lint
+      # Was a warning inside @electron-toolkit/eslint-config-prettier, so
+      # `pnpm lint` exited 0 on formatting drift and eslint skipped YAML/JSON
+      # entirely. Four files were already failing this.
+      - run: pnpm format:check
+      - run: pnpm test
+
+  e2e:
+    # Was never run in CI at all. These specs launch the real Electron app, so
+    # they need a desktop session; xvfb provides one on linux.
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -16,7 +44,22 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
+          cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: pnpm typecheck
-      - run: pnpm lint
-      - run: pnpm test
+      - name: Cache Electron binary
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/electron
+          key: electron-${{ hashFiles('pnpm-lock.yaml') }}
+      - run: pnpm build
+      - run: pnpm test:e2e
+        env:
+          # Makes every Electron launch fail with "bad option:
+          # --remote-debugging-port=0" when it leaks into the environment.
+          ELECTRON_RUN_AS_NODE: ''
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: e2e-screenshots
+          path: test-results/
+          if-no-files-found: ignore

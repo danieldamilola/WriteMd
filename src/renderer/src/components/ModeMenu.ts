@@ -12,11 +12,11 @@ export class ModeMenu extends LitElement {
       bottom: calc(100% + 8px);
       right: 0;
       width: 110px;
-      background: #181818;
-      border: 1px solid rgba(255, 255, 255, 0.1);
+      background: var(--menu-bg);
+      border: 1px solid var(--border);
       border-radius: 6px;
       padding: 4px;
-      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.6);
+      box-shadow: var(--shadow-3);
       z-index: 100;
       font-family: 'Geist Mono', monospace;
       box-sizing: border-box;
@@ -30,7 +30,7 @@ export class ModeMenu extends LitElement {
       padding: 5px 8px;
       border-radius: 4px;
       font-size: 11px;
-      color: #a3a3a3;
+      color: var(--text-secondary);
       cursor: pointer;
       transition:
         background 100ms ease,
@@ -38,13 +38,13 @@ export class ModeMenu extends LitElement {
     }
 
     .item:hover {
-      background: rgba(255, 255, 255, 0.08);
-      color: #ffffff;
+      background: var(--bg-hover);
+      color: var(--text);
     }
 
     .item.active {
-      color: #ffffff;
-      background: rgba(255, 255, 255, 0.05);
+      color: var(--text);
+      background: var(--bg-active);
     }
 
     .icon {

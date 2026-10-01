@@ -7,15 +7,16 @@ import { insertTightListItem } from './extensions/list-continuation'
 import {
   makeLinkClickHandler,
   defaultOnLinkClick,
-  documentPathFacet
+  type LinkClickHandler
 } from './extensions/link-click'
 import { tableLinePlugin } from './extensions/table-line'
 import { inlinePreviewPlugin } from './extensions/live-decorations'
 import { liveTableField } from './extensions/live-table'
 
-export { readOnlyFacet, readOnlyExtension, documentPathFacet, tableLinePlugin, liveTableField }
+export { readOnlyFacet, readOnlyExtension, tableLinePlugin, liveTableField }
+export { documentPathFacet, linkClickStyleFacet } from './extensions/document-path'
 
-export function livePreviewPlugin(config: { onLinkClick?: (url: string) => void } = {}): Extension {
+export function livePreviewPlugin(config: { onLinkClick?: LinkClickHandler } = {}): Extension {
   const { onLinkClick = defaultOnLinkClick } = config
   return [
     liveTableField,

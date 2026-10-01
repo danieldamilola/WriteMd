@@ -4,15 +4,19 @@ import { documentPathFacet } from '../src/renderer/src/components/LivePreview'
 import { getVaultTree } from '../src/main/vault'
 import { existsSync, mkdirSync, writeFileSync, rmSync } from 'fs'
 import { join } from 'path'
+import { makeTempRoot } from './helpers/temp-root'
 
+// vi.mock is hoisted above the imports, so the factory cannot close over module
+// bindings. `process` is a global rather than an import, so it is reachable from
+// the factory regardless of hoisting.
 vi.mock('electron', () => ({
   app: {
-    getPath: () => 'C:/Temp/writemd-phase3-test'
+    getPath: () => `${process.cwd()}/.e2e-vault/phase3-mock`
   }
 }))
 
 describe('phase 3 file & image handling', () => {
-  const testDir = join(process.cwd(), 'temp-test-vault')
+  const testDir = makeTempRoot('phase3')
 
   beforeEach(() => {
     if (existsSync(testDir)) rmSync(testDir, { recursive: true, force: true })

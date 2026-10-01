@@ -2,11 +2,19 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
   <dict>
+    <!--
+      Electron needs JIT (V8 compiles code at runtime) and writable executable
+      memory. Both are required for V8 to run at all, so they are not optional
+      escape hatches in practice.
+
+      Deliberately absent: com.apple.security.cs.allow-dyld-environment-variables.
+      That permits DYLD_INSERT_LIBRARIES-style library hijacking into any process
+      that can be coerced into loading it. runAsNode is false in src/main/index.ts
+      and the renderer runs with contextIsolation: true, so nothing here needs it.
+    -->
     <key>com.apple.security.cs.allow-jit</key>
     <true/>
     <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
-    <true/>
-    <key>com.apple.security.cs.allow-dyld-environment-variables</key>
     <true/>
   </dict>
 </plist>

@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { join } from 'path'
+import { makeTempRoot } from './helpers/temp-root'
 import {
   setVaultRootProvider,
   registerExternalPath,
@@ -7,13 +8,18 @@ import {
   canAccessPath,
   canProbePath,
   canRenamePath,
+  isSaneVaultRoot,
+  canWriteDocument,
   isSubpath,
   normalizePath,
   assertCanAccess
 } from '../src/main/path-guard'
 
-const VAULT = 'C:\\Temp\\writemd-guard-test\\vault'
-const EXTERNAL = 'C:\\Temp\\writemd-guard-test\\external\\notes.md'
+// mkdtemp per run, not a fixed C:/Temp name: the old constant was
+// Windows-only and two workers would have shared one directory.
+const ROOT = makeTempRoot('guard')
+const VAULT = join(ROOT, 'vault')
+const EXTERNAL = join(ROOT, 'external', 'notes.md')
 
 describe('path-guard', () => {
   beforeEach(() => {
@@ -28,7 +34,7 @@ describe('path-guard', () => {
 
   it('denies paths outside the vault before registration', () => {
     expect(canAccessPath(EXTERNAL)).toBe(false)
-    expect(canAccessPath('C:\\Windows\\system32\\config')).toBe(false)
+    expect(canAccessPath(join(ROOT, 'elsewhere', 'config'))).toBe(false)
   })
 
   it('allows external paths after dialog/open registration', () => {
@@ -57,14 +63,44 @@ describe('path-guard', () => {
   it('probing allows siblings of registered files', () => {
     registerExternalPath(EXTERNAL)
     expect(canProbePath(join(EXTERNAL, '..', 'other.md'))).toBe(true)
-    expect(canProbePath('C:\\Windows\\system32')).toBe(false)
+    expect(canProbePath(join(ROOT, 'elsewhere'))).toBe(false)
   })
 
   it('rename allowed within same directory only', () => {
     registerExternalPath(EXTERNAL)
     expect(canRenamePath(EXTERNAL, join(EXTERNAL, '..', 'renamed.md'))).toBe(true)
     expect(canRenamePath(EXTERNAL, join(VAULT, 'elsewhere.md'))).toBe(false)
-    expect(canRenamePath('C:\\Windows\\x.md', join('C:\\Windows\\y.md'))).toBe(false)
+    expect(canRenamePath(join(ROOT, 'a.md'), join(ROOT, 'b.md'))).toBe(false)
+  })
+
+  it('refuses to rename a note into an executable extension', () => {
+    // Same directory passes the containment check, so without the extension
+    // gate a .md could be renamed in place to .bat.
+    const note = join(VAULT, 'note.md')
+    expect(canRenamePath(note, join(VAULT, 'note.bat'))).toBe(false)
+    expect(canRenamePath(note, join(VAULT, 'note.ps1'))).toBe(false)
+    expect(canRenamePath(note, join(VAULT, 'renamed.md'))).toBe(true)
+  })
+
+  it('write targets are limited to document and image extensions', () => {
+    expect(canWriteDocument(join(VAULT, 'note.md'))).toBe(true)
+    expect(canWriteDocument(join(VAULT, 'note.markdown'))).toBe(true)
+    expect(canWriteDocument(join(VAULT, 'pic.png'))).toBe(true)
+    expect(canWriteDocument(join(VAULT, 'evil.bat'))).toBe(false)
+    expect(canWriteDocument(join(VAULT, 'evil.ps1'))).toBe(false)
+    expect(canWriteDocument(join(VAULT, 'evil.html'))).toBe(false)
+    expect(canWriteDocument(join(VAULT, 'evil.vbs'))).toBe(false)
+  })
+
+  it('rejects vault roots that would grant blanket filesystem access', () => {
+    // A vault at a drive or filesystem root makes isPathInVault true for
+    // essentially everything, which voids every other guard.
+    expect(isSaneVaultRoot('/')).toBe(false)
+    expect(isSaneVaultRoot('C:\\')).toBe(false)
+    expect(isSaneVaultRoot('relative/path')).toBe(false)
+    expect(isSaneVaultRoot('')).toBe(false)
+    expect(isSaneVaultRoot(VAULT)).toBe(true)
+    expect(isSaneVaultRoot(EXTERNAL)).toBe(true)
   })
 
   it('isSubpath handles exact match and prevents prefix traps', () => {
@@ -75,23 +111,26 @@ describe('path-guard', () => {
   })
 
   it('assertCanAccess throws for denied paths', () => {
-    expect(() => assertCanAccess('D:\\random.md')).toThrow(/Access denied/)
+    expect(() => assertCanAccess(join(ROOT, 'elsewhere', 'random.md'))).toThrow(/Access denied/)
   })
 
   it('normalizes and rejects empty/relative paths', () => {
-    expect(normalizePath('C:\\a\\b\\..\\c.md')).toBe('c:\\a\\c.md')
+    expect(normalizePath(join(ROOT, 'a', 'b', '..', 'c.md'))).toBe(
+      normalizePath(join(ROOT, 'a', 'c.md'))
+    )
     expect(canAccessPath('')).toBe(false)
     expect(canAccessPath('relative.md')).toBe(false)
   })
 
   it('restricts shell opens to documents and images', async () => {
     const { canOpenWithShell } = await import('../src/main/path-guard')
-    expect(canOpenWithShell('C:\\docs\\note.md')).toBe(true)
-    expect(canOpenWithShell('C:\\docs\\pic.PNG')).toBe(true)
-    expect(canOpenWithShell('C:\\docs\\report.pdf')).toBe(true)
-    expect(canOpenWithShell('C:\\docs\\setup.exe')).toBe(false)
-    expect(canOpenWithShell('C:\\docs\\script.bat')).toBe(false)
-    expect(canOpenWithShell('C:\\docs\\script.ps1')).toBe(false)
-    expect(canOpenWithShell('C:\\docs\\archive.zip')).toBe(false)
+    const docs = join(ROOT, 'docs')
+    expect(canOpenWithShell(join(docs, 'note.md'))).toBe(true)
+    expect(canOpenWithShell(join(docs, 'pic.PNG'))).toBe(true)
+    expect(canOpenWithShell(join(docs, 'report.pdf'))).toBe(true)
+    expect(canOpenWithShell(join(docs, 'setup.exe'))).toBe(false)
+    expect(canOpenWithShell(join(docs, 'script.bat'))).toBe(false)
+    expect(canOpenWithShell(join(docs, 'script.ps1'))).toBe(false)
+    expect(canOpenWithShell(join(docs, 'archive.zip'))).toBe(false)
   })
 })
