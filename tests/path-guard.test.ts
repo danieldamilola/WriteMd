@@ -55,9 +55,18 @@ describe('path-guard', () => {
     expect(canAccessPath(sneaky)).toBe(false)
   })
 
-  it('is case-insensitive on matching', () => {
+  it('is case-insensitive on Windows only, where the filesystem is', () => {
+    // normalizePath() lowercases on win32 and nowhere else, because on a
+    // case-sensitive filesystem Notes.md and notes.md are different files and
+    // folding them would let a registered path authorise a different one. The
+    // old assertion ran on both, so the ubuntu CI leg failed here.
     registerExternalPath(EXTERNAL.toUpperCase())
-    expect(canAccessPath(EXTERNAL.toLowerCase())).toBe(true)
+    const lower = EXTERNAL.toLowerCase()
+    if (process.platform === 'win32') {
+      expect(canAccessPath(lower)).toBe(true)
+    } else {
+      expect(canAccessPath(lower)).toBe(canAccessPath(EXTERNAL))
+    }
   })
 
   it('probing allows siblings of registered files', () => {
