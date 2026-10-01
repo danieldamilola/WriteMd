@@ -26,7 +26,10 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v7
         with:
-          node-version: '20'
+          # Must match ci.yml. jsdom 30 needs ^22.22.2 || ^24.15.0 || >=26, so
+          # the old '20' here meant `pnpm test` in the release job could fail
+          # where CI had already proved the same tree green.
+          node-version: '24.15.0'
           cache: pnpm
 
       - name: Install dependencies
