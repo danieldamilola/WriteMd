@@ -91,6 +91,21 @@ export class WriteMdTab extends LitElement {
       padding: 0;
       cursor: pointer;
       color: var(--text-muted);
+      /* Space stays reserved while the button is invisible, so revealing it
+         never reflows the strip. The button is never removed from flow, so it
+         stays focusable for keyboard users. */
+      opacity: 0;
+      transition:
+        opacity 100ms ease,
+        color 100ms ease;
+    }
+
+    /* The active tab keeps its close button visible; inactive tabs reveal it on
+       hover so the strip stays quiet until you reach for a tab. */
+    :host([active]) .close-btn,
+    :host(:hover) .close-btn,
+    :host(:focus-within) .close-btn {
+      opacity: 1;
     }
 
     .dirty-dot {

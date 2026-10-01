@@ -5,7 +5,7 @@ import { customElement, property } from 'lit/decorators.js'
 // what upgrades the elements the host renders. A type-only import would be
 // elided and every writemd-tab would stay an unupgraded HTMLElement.
 import '../src/renderer/src/components/Tab'
-import type { WriteMdTab } from '../src/renderer/src/components/Tab'
+import { WriteMdTab } from '../src/renderer/src/components/Tab'
 
 /**
  * Tab was one of only a handful of components importable at all, because the
@@ -95,6 +95,36 @@ describe('writemd-tab', () => {
       t.shadowRoot?.querySelector('.close-btn')?.getAttribute('aria-label')
     )
     expect(closes).toEqual(['Close a.md', 'Close b.md'])
+  })
+
+  it('hides the close button on inactive tabs and reveals it on hover', async () => {
+    // Every tab used to render a permanent X, which made a strip of seven tabs
+    // read as seven rows of buttons. Only the active tab keeps it pinned; the
+    // rest appear on hover.
+    const el = host()
+    el.labels = ['a.md', 'b.md']
+    el.active = 0
+    await flush(el)
+    const tabs = Array.from(el.shadowRoot?.querySelectorAll('writemd-tab') ?? []) as WriteMdTab[]
+
+    const closeOf = (t: WriteMdTab): HTMLElement =>
+      t.shadowRoot?.querySelector('.close-btn') as HTMLElement
+
+    // Both buttons exist in the DOM (they must stay focusable for keyboard
+    // users); what differs is whether they are painted.
+    expect(tabs.map((t) => Boolean(closeOf(t)))).toEqual([true, true])
+
+    // jsdom does not match :hover or transition opacity, so assert the rule
+    // that governs it rather than a computed value that is always the initial.
+    const css = WriteMdTab.styles.cssText
+    expect(css).toContain(':host([active]) .close-btn')
+    expect(css).toContain(':host(:hover) .close-btn')
+    expect(css).toContain(':host(:focus-within) .close-btn')
+
+    // Revealing must not reflow the strip: the button holds its space at zero
+    // opacity rather than being taken out of flow.
+    expect(css).not.toMatch(/\.close-btn\s*\{[^}]*display:\s*none/)
+    expect(closeOf(tabs[1]).style.display).not.toBe('none')
   })
 
   it('emits select on click and on Enter, but not from the close button', async () => {
