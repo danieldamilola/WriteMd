@@ -29,7 +29,8 @@ function destinationAt(view: EditorView, event: MouseEvent): string | null {
     ? linkElementFromEvent(event, view.contentDOM)
     : linkIconHitTarget(event, view.contentDOM)
 
-  let node: SyntaxNode | null = null
+  // No initialiser: both branches assign, so the previous `= null` was dead.
+  let node: SyntaxNode | null
   if (linkEl) {
     const pos = view.posAtDOM(linkEl)
     if (pos < 0) return null

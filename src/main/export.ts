@@ -189,8 +189,10 @@ async function renderInHiddenWindow(html: string): Promise<Buffer> {
     const marginIn = Math.min(maxMarginIn, toInches(marginMm))
     return await win.webContents.printToPDF({
       pageSize,
+      // Electron 44 removed PrintToPDFMargins.marginType; supplying any margin
+      // is now custom by definition. Passing it is a type error, and it used
+      // to be the only way to get custom margins at all.
       margins: {
-        marginType: 'custom',
         top: marginIn,
         bottom: marginIn,
         left: marginIn,

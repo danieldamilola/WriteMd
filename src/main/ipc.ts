@@ -424,7 +424,9 @@ export function setupIpc(getWindow: () => BrowserWindow | null): void {
         return adapter.extractChatText(await res.json())
       } catch (e) {
         console.error('Chat error:', e)
-        throw new Error(e instanceof Error ? e.message : 'Chat failed')
+        // { cause } keeps the provider's own error on the rethrow, which
+        // otherwise flattened a 401 from the API into a bare message.
+        throw new Error(e instanceof Error ? e.message : 'Chat failed', { cause: e })
       }
     }
   )
