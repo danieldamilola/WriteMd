@@ -168,8 +168,19 @@ export function setSettings(partial: WriteMdSettingsPatch): Promise<void> {
     current as unknown as Record<string, unknown>,
     clean as unknown as Record<string, unknown>
   ) as unknown as WriteMdSettings
-  // Derived, never client-supplied.
-  merged.ai.apiKeySet = current.ai.apiKey.length > 0
+
+  // The key field is write-only, so an empty value means "unchanged", not
+  // "delete". The renderer never receives the stored key, so its copy of
+  // ai.apiKey is always '' and every unrelated settings save sends that. Taken
+  // literally it encrypted to '' and destroyed a key the user had just entered.
+  const incomingKey = (clean as { ai?: { apiKey?: unknown } }).ai?.apiKey
+  const sentNothing = typeof incomingKey !== 'string' || incomingKey.length === 0
+  if (sentNothing && current.ai.apiKey.length > 0) merged.ai.apiKey = current.ai.apiKey
+
+  // Derived, never client-supplied, and read from the *merged* value. Deriving
+  // it from `current` meant a freshly entered key reported false until the next
+  // launch, and the AI panel said "not configured" the whole time.
+  merged.ai.apiKeySet = merged.ai.apiKey.length > 0
   merged.ai.apiKeyUndecryptable = apiKeyUndecryptable
   settingsCache = merged
   // Serialize writes. The renderer fires this on every settings change and twice

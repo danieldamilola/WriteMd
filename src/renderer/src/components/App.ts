@@ -10,7 +10,7 @@ import './WelcomeScreen'
 import './ConflictDialog'
 import './CommandPalette'
 import { api } from '../api'
-import { emit } from '../events/bus'
+import { emit, on } from '../events/bus'
 import { showConfirm } from '../services/confirm'
 import { SettingsStore } from '../state/settings'
 import { FileState, type ConflictInfo } from '../state/file-state'
@@ -124,6 +124,9 @@ export class WriteMdApp extends LitElement {
 
   @state() private showWelcome = true
   @state() private showSettings = false
+  // Which Settings tab to land on. Set by the AI panel's "not configured"
+  // action so it opens on the section that fixes it.
+  @state() private settingsTab = 'general'
   @state() private showPalette = false
   @state() private splitActive = false
   @state() private panelOrientation: 'horizontal' | 'vertical' = 'horizontal'
@@ -138,6 +141,7 @@ export class WriteMdApp extends LitElement {
   private unsubscribeFileState: (() => void) | null = null
   private unsubscribeOrientation: (() => void) | null = null
   private unsubscribeFileOpen: (() => void) | null = null
+  private unsubscribeSettingsOpen: (() => void) | null = null
   private stripObserver: ResizeObserver | null = null
   private observedStrip: HTMLElement | null = null
 
@@ -195,6 +199,10 @@ export class WriteMdApp extends LitElement {
     window.addEventListener('keydown', this.handleGlobalShortcuts)
     window.addEventListener('dragover', this.handleWindowDragOver)
     window.addEventListener('drop', this.handleWindowDrop)
+    this.unsubscribeSettingsOpen = on('settings:open', ({ tab }) => {
+      this.settingsTab = tab ?? 'general'
+      this.showSettings = true
+    })
     this.unsubscribeFileOpen =
       api()?.onFileOpenExternal?.((path: string) => {
         // openFile can abort on the unsaved-changes confirm. Setting
@@ -241,6 +249,7 @@ export class WriteMdApp extends LitElement {
     window.removeEventListener('dragover', this.handleWindowDragOver)
     window.removeEventListener('drop', this.handleWindowDrop)
     this.unsubscribeFileOpen?.()
+    this.unsubscribeSettingsOpen?.()
     this.unsubscribeFileState?.()
     this.unsubscribeOrientation?.()
     this.stripObserver?.disconnect()
@@ -474,7 +483,14 @@ export class WriteMdApp extends LitElement {
               this.showWelcome = false
             }}
           ></writemd-welcome-screen>
-          ${this.showSettings ? html`<writemd-settings-modal @close=${() => (this.showSettings = false)}></writemd-settings-modal>` : ''}
+          ${
+            this.showSettings
+              ? html`<writemd-settings-modal
+                  .initialTab=${this.settingsTab}
+                  @close=${() => (this.showSettings = false)}
+                ></writemd-settings-modal>`
+              : ''
+          }
           ${
             this.showPalette
               ? html`<writemd-command-palette
@@ -588,6 +604,7 @@ export class WriteMdApp extends LitElement {
         ${
           this.showSettings
             ? html`<writemd-settings-modal
+                .initialTab=${this.settingsTab}
                 @close=${() => (this.showSettings = false)}
               ></writemd-settings-modal>`
             : ''

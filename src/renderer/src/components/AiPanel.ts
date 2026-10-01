@@ -2,6 +2,8 @@ import { html, css, LitElement } from 'lit'
 import { customElement, property } from 'lit/decorators.js'
 import { unsafeHTML } from 'lit/directives/unsafe-html.js'
 import { createChatMarkdownIt } from '../utils/markdown'
+import { emit } from '../events/bus'
+import { icon } from './icons'
 import { createLinkInterceptor } from './extensions/safe-links'
 
 // `html: false` is what makes the unsafeHTML below safe: raw markup in a model
@@ -28,6 +30,87 @@ export class AiPanel extends LitElement {
       height: 100%;
       min-height: 0;
       min-width: 0;
+    }
+
+    /*
+     * The unconfigured state used to reuse .empty-state, which is declared in
+     * Editor's shadow root and therefore never matched anything in here. With
+     * no rule constraining the svg it filled the whole panel, which is what the
+     * giant star was. Styles have to live in the shadow root that owns them.
+     */
+    .ai-empty {
+      flex: 1;
+      min-height: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      padding: 24px 28px;
+      text-align: center;
+      box-sizing: border-box;
+    }
+
+    .ai-empty-mark {
+      width: 36px;
+      height: 36px;
+      color: var(--text-muted);
+      opacity: 0.5;
+      margin-bottom: 2px;
+    }
+
+    .ai-empty-title {
+      margin: 0;
+      font-family: var(--font-mono);
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--text-secondary);
+    }
+
+    .ai-empty-body {
+      margin: 0;
+      font-family: var(--font-mono);
+      font-size: 12px;
+      line-height: 1.6;
+      color: var(--text-muted);
+      max-width: 30ch;
+    }
+
+    .ai-empty-action {
+      margin-top: 4px;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      height: 28px;
+      padding: 0 12px;
+      border-radius: 6px;
+      border: 1px solid var(--border-subtle);
+      background: var(--bg-elevated);
+      color: var(--text-secondary);
+      font-family: var(--font-mono);
+      font-size: 12px;
+      cursor: pointer;
+      transition:
+        background 120ms ease,
+        color 120ms ease,
+        border-color 120ms ease;
+    }
+
+    .ai-empty-action:hover {
+      background: var(--bg-hover);
+      color: var(--text);
+      border-color: var(--border);
+    }
+
+    .ai-empty-action:focus-visible {
+      outline: 1px solid var(--border-focus);
+      outline-offset: 1px;
+    }
+
+    .ai-empty-action svg {
+      width: 13px;
+      height: 13px;
+      flex-shrink: 0;
     }
   `
 
@@ -70,12 +153,22 @@ export class AiPanel extends LitElement {
 
   render(): unknown {
     if (!this.configured) {
+      // No decoration without function: the mark is the panel's own glyph at a
+      // fixed size, and the single action is what actually resolves the state.
       return html`
-        <div class="empty-state">
-          <svg viewBox="0 0 24 24" fill="currentColor">
-            <path d="M12 2L9.5 8.5L3 11L9.5 13.5L12 20L14.5 13.5L21 11L14.5 8.5L12 2Z" />
-          </svg>
-          <p>AI Assistant is not configured yet.</p>
+        <div class="ai-empty" role="status">
+          <span class="ai-empty-mark">${icon('sparkle', 36)}</span>
+          <p class="ai-empty-title">No assistant selected</p>
+          <p class="ai-empty-body">
+            Add an API key and pick a model, or point WriteMd at a local Ollama instance.
+          </p>
+          <button
+            class="ai-empty-action"
+            type="button"
+            @click=${() => emit('settings:open', { tab: 'ai' })}
+          >
+            ${icon('sliders', 13)} Configure
+          </button>
         </div>
       `
     }
@@ -88,7 +181,7 @@ export class AiPanel extends LitElement {
           role="log"
           aria-live="polite"
           aria-label="Assistant conversation"
-          style="flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; font-family: var(--font-body); font-size: 14px; color: var(--text);"
+          style="flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; font-family: var(--font-mono); font-size: 14px; color: var(--text);"
         >
           <div style="display: flex; gap: 8px;">
             <div
@@ -140,7 +233,7 @@ export class AiPanel extends LitElement {
             aria-label="Ask the AI assistant"
             placeholder="Ask AI..."
             .disabled=${this.loading}
-            style="width: 100%; padding: 12px; background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 6px; color: var(--text); font-family: var(--font-body); box-sizing: border-box; opacity: ${
+            style="width: 100%; padding: 12px; background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 6px; color: var(--text); font-family: var(--font-mono); box-sizing: border-box; opacity: ${
               this.loading ? 0.5 : 1
             };"
             @keydown=${(e: KeyboardEvent) => this.submit(e)}

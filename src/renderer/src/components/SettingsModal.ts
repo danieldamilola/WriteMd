@@ -1,5 +1,5 @@
-import { html, css, LitElement } from 'lit'
-import { customElement, state } from 'lit/decorators.js'
+import { html, css, LitElement, type PropertyValues } from 'lit'
+import { customElement, property, state } from 'lit/decorators.js'
 import { api } from '../api'
 import { deepActiveElement } from '../utils/links'
 import { DEFAULT_AI_SYSTEM_PROMPT } from '../../../shared/settings-schema'
@@ -548,6 +548,18 @@ export class SettingsModal extends LitElement {
 
   @state() private tab: SettingsTab = 'general'
   @state() private searchQuery = ''
+
+  /** Jump to a tab from outside, e.g. the AI panel's "not configured" state. */
+  @property({ type: String }) initialTab: SettingsTab = 'general'
+
+  /**
+   * `willUpdate`, not `connectedCallback`: Lit commits `.prop` bindings when it
+   * renders the element, which is after `connectedCallback` has already run, so
+   * reading `initialTab` there always saw the default.
+   */
+  protected willUpdate(changed: PropertyValues<this>): void {
+    if (changed.has('initialTab')) this.tab = this.initialTab
+  }
 
   // Settings State
   @state() private vaultPath = ''
