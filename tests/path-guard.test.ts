@@ -60,13 +60,13 @@ describe('path-guard', () => {
     // case-sensitive filesystem Notes.md and notes.md are different files and
     // folding them would let a registered path authorise a different one. The
     // old assertion ran on both, so the ubuntu CI leg failed here.
-    registerExternalPath(EXTERNAL.toUpperCase())
-    const lower = EXTERNAL.toLowerCase()
-    if (process.platform === 'win32') {
-      expect(canAccessPath(lower)).toBe(true)
-    } else {
-      expect(canAccessPath(lower)).toBe(canAccessPath(EXTERNAL))
-    }
+    //
+    // Uses its own path: the registry is module-level, so EXTERNAL is already
+    // registered by the earlier cases in this file.
+    const mixed = join(ROOT, 'external', 'MixedCase.md')
+    registerExternalPath(mixed.toUpperCase())
+    const folded = process.platform === 'win32'
+    expect(canAccessPath(mixed.toLowerCase())).toBe(folded)
   })
 
   it('probing allows siblings of registered files', () => {
