@@ -266,12 +266,15 @@ export class WriteMdApp extends LitElement {
         // .tab-strip node. Observing only the first one left the replacement
         // without scroll-into-view and kept the detached strip referenced.
         if (this.observedStrip !== strip) {
-          if (this.observedStrip) this.stripObserver?.unobserve(this.observedStrip)
+          this.stripObserver.disconnect()
           this.observedStrip = strip
-          this.stripObserver?.observe(strip)
+          this.stripObserver.observe(strip)
         }
       }
     } else {
+      // The welcome screen has no strip. Stop observing rather than dropping the
+      // reference alone, which would leave the detached node observed.
+      this.stripObserver?.disconnect()
       this.observedStrip = null
     }
     this.revealActiveTab()
