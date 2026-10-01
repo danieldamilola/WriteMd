@@ -1,6 +1,6 @@
-# PRD: WriteMd - Frictionless Markdown Editor 
+# PRD: WriteMd - Frictionless Markdown Editor
 
-## 1. Product Vision By daniel and also 
+## 1. Product Vision By daniel and also
 
 **WriteMd** is a local-first markdown editor that opens **any `.md` file directly** - no vault, no import, no copy-paste. Double-click a file, edit in a beautiful WYSIWYG interface, save. Done.
 
@@ -9,6 +9,8 @@
 **Target user:** Writers, developers, students who just want to edit markdown files scattered across their filesystem without managing a "vault" or "workspace."
 
 ---
+
+hello world hello
 
 ## 2. Problem Statement car
 
@@ -50,14 +52,23 @@
 - [ ] **US-022** Typewriter mode (focus line centered)
 - [x] **US-023** Themes: Light, Dark, Paper, Dracula, Nord
 - [ ] **US-024** Custom CSS injection (user styles)
-- [ ] **US-025** Command palette (`Ctrl+P`)
-- [ ] **US-026** Find/Replace in file (`Ctrl+F` / `Ctrl+H`)
-- [ ] **US-027** Word count / reading time in status bar
-- [ ] **US-028** Frontmatter editor (YAML)
+- [x] **US-025** Command palette (`Ctrl+P`)
+- [x] **US-026** Find/Replace in file (`Ctrl+F` / `Ctrl+H`)
+- [~] **US-027** Word count in the document info pill. Words and characters
+  ship in `InfoPill.ts`. Reading time is not implemented.
+- [ ] **US-028** Frontmatter editor (YAML). A `frontmatter-plugin.ts` exists for
+      parsing; there is no editing UI.
 - [x] **US-029** Mermaid diagram rendering
 - [ ] **US-030** Wiki-links `[[...]]` autocomplete (sibling files)
 - [ ] **US-031** Portable mode (config in app folder)
 - [x] **US-032** File association handler (set as default `.md` opener)
+
+Theme count: seven ship (`dark`, `graphite`, `midnight`, `light`, `paper`,
+`dracula`, `nord`), not the five listed in US-023.
+
+> Note: callouts. The note menu has a Callout item that inserts `> [!note]`
+> (`TextMenu.ts:388`), but nothing parses or renders that syntax. It displays as
+> a plain blockquote.
 
 ---
 
@@ -77,20 +88,20 @@
 
 ### 4.2 Tech Stack
 
-| Layer                | Technology                                         | Rationale                                      |
-| -------------------- | -------------------------------------------------- | ---------------------------------------------- |
-| **Shell**            | Electron 30+ (latest LTS)                          | Native menus, file dialogs, associations       |
-| **Language**         | TypeScript 5+ (strict mode)                        | Type safety, Obsidian-compatible plugin types  |
-| **Editor**           | CodeMirror 6 + @codemirror/lang-markdown           | Live Preview, decorations, incremental parsing |
-| **Markdown Parse**   | markdown-it (preview) + Lezer (editor)             | Proven, extensible, spec-compliant             |
-| **Syntax Highlight** | @codemirror/language (Lezer, editor) + custom highlighter (preview) | One highlight pipeline per surface           |
-| **Math**             | KaTeX (fast, no MathJax bloat)                     | Client-side rendering                          |
-| **Diagrams**         | Mermaid.js (lazy-loaded)                           | Optional, on-demand                            |
-| **Styling**          | CSS Custom Properties + PostCSS                    | Themeable, no runtime CSS-in-JS                |
-| **UI Framework**     | **None** - Vanilla TS + Web Components             | Like Obsidian: lightweight, no framework tax   |
-| **State**            | Signals (Preact signals or custom)                 | Fine-grained reactivity, tiny                  |
-| **Build**            | Vite + electron-builder                            | Fast dev, optimized production                 |
-| **Testing**          | Vitest + Playwright (E2E)                          | Unit + integration                             |
+| Layer                | Technology                                                          | Rationale                                      |
+| -------------------- | ------------------------------------------------------------------- | ---------------------------------------------- |
+| **Shell**            | Electron 30+ (latest LTS)                                           | Native menus, file dialogs, associations       |
+| **Language**         | TypeScript 5+ (strict mode)                                         | Type safety, Obsidian-compatible plugin types  |
+| **Editor**           | CodeMirror 6 + @codemirror/lang-markdown                            | Live Preview, decorations, incremental parsing |
+| **Markdown Parse**   | markdown-it (preview) + Lezer (editor)                              | Proven, extensible, spec-compliant             |
+| **Syntax Highlight** | @codemirror/language (Lezer, editor) + custom highlighter (preview) | One highlight pipeline per surface             |
+| **Math**             | KaTeX (fast, no MathJax bloat)                                      | Client-side rendering                          |
+| **Diagrams**         | Mermaid.js (lazy-loaded)                                            | Optional, on-demand                            |
+| **Styling**          | CSS Custom Properties + PostCSS                                     | Themeable, no runtime CSS-in-JS                |
+| **UI Framework**     | **None** - Vanilla TS + Web Components                              | Like Obsidian: lightweight, no framework tax   |
+| **State**            | Signals (Preact signals or custom)                                  | Fine-grained reactivity, tiny                  |
+| **Build**            | Vite + electron-builder                                             | Fast dev, optimized production                 |
+| **Testing**          | Vitest + Playwright (E2E)                                           | Unit + integration                             |
 
 ### 4.3 Architecture Diagram
 
@@ -117,8 +128,8 @@
 │                          ▼                                 │
 │              ┌─────────────────────┐                       │
 │              │   Shared State      │                       │
-│              │  (Signals + IndexedDB│                       │
-│              │   for recent files) │                       │
+│              │  (singletons with   │                       │
+│              │   subscribe/notify) │                       │
 │              └─────────────────────┘                       │
 └─────────────────────────────────────────────────────────────┘
 ```
@@ -207,12 +218,12 @@ The following functional capabilities are fully specified in the PRD logic and s
 
 ### 6.1 Hybrid Vault Model (Core Differentiator)
 
-| Scenario                                                   | Behavior                                                                                                |
-| ---------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| Scenario                                                   | Behavior                                                                                                      |
+| ---------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
 | **New File** (`Ctrl+N`)                                    | Created in **default vault** (`~/Documents/WriteMd Vault/` or user-chosen on first run). No "Save As" prompt. |
-| **Open Existing File** (double-click, drag-drop, `Ctrl+O`) | Opens from **original location**. Saves back to **same location**.                                      |
-| **Save As**                                                | User chooses location (can be vault or anywhere).                                                       |
-| **Recent Files**                                           | Tracks both vault and external files.                                                                   |
+| **Open Existing File** (double-click, drag-drop, `Ctrl+O`) | Opens from **original location**. Saves back to **same location**.                                            |
+| **Save As**                                                | User chooses location (can be vault or anywhere).                                                             |
+| **Recent Files**                                           | Tracks both vault and external files.                                                                         |
 
 **Vault is opt-in convenience for new files only.** Not a constraint.
 
@@ -226,7 +237,8 @@ The following functional capabilities are fully specified in the PRD logic and s
 ### 6.3 Open Any File
 
 - **File association:** Register `.md`, `.markdown`, `.mdown`, `.mkd` on install
-- **Recent files:** Stored in IndexedDB + `recent-files.json` in userData
+- **Recent files:** Stored in `config.json` under `files.recentFiles`. There is
+  no IndexedDB and no separate `recent-files.json`.
 - **Drag-drop:** Accept files on window + toolbar drop zone
 - **Command line:** `writemd path/to/file.md` (for "Open With" integration)
 
@@ -324,15 +336,28 @@ The following functional capabilities are fully specified in the PRD logic and s
 | Math Block     | `Ctrl+Shift+M`       | `Cmd+Shift+M`           |
 | **View**       |                      |                         |
 | Toggle Preview | `Ctrl+E`             | `Cmd+E`                 |
-| Toggle Split   | `Ctrl+\`             | `Cmd+\`                 |
-| Toggle Sidebar | `Ctrl+B`             | `Cmd+B`                 |
-| Toggle Source  | `Ctrl+Shift+E`       | `Cmd+Shift+E`           |
+| Toggle Split   | `Ctrl+Alt+S`         | `Cmd+Opt+S`             |
+| Show Files     | `Ctrl+Shift+E`       | `Cmd+Shift+E`           |
+| Show Backlinks | `Ctrl+Shift+B`       | `Cmd+Shift+B`           |
+| Show AI Panel  | `Ctrl+Alt+A`         | `Cmd+Opt+A`             |
 | Zoom In/Out    | `Ctrl+=` / `Ctrl+-`  | `Cmd+=` / `Cmd+-`       |
 | Reset Zoom     | `Ctrl+0`             | `Cmd+0`                 |
+
+The only bindings actually registered are the ones in
+`src/renderer/src/state/shortcuts.ts`. That registry covers File (new, open,
+save, save-as, export), Edit (find, replace), View (quick toggle, split view,
+files/backlinks/AI panels, zoom) and App (settings, command palette). The
+formatting, link, image and block-structure rows above are aspirational: the
+note context menu inserts that markup, but those keys are not bound. Export
+also has no default binding.
 
 ---
 
 ## 9. Settings Schema (persisted in `config.json`)
+
+Source of truth is `src/shared/settings-schema.ts`. The API key is stored
+encrypted at rest under `enc:v1:` when the OS keychain is available; on systems
+without `safeStorage` it falls back to plaintext in this file.
 
 ```json
 {
@@ -357,15 +382,16 @@ The following functional capabilities are fully specified in the PRD logic and s
     "showMargin": true
   },
   "appearance": {
-    "theme": "system",
-    "customCSS": "",
-    "toolbarVisible": true,
-    "statusBarVisible": true,
-    "sidebarWidth": 280
+    "theme": "dark",
+    "accentColor": "",
+    "panelOrientation": "horizontal"
   },
   "files": {
     "vaultPath": "",
     "recentFilesMax": 10,
+    "recentFiles": [],
+    "openTabs": [],
+    "activeTabPath": null,
     "imageFolderName": "_assets",
     "cleanupUnusedImages": "prompt",
     "defaultNewFileContent": "",
@@ -382,9 +408,26 @@ The following functional capabilities are fully specified in the PRD logic and s
     "enableWikiLinks": false,
     "spellCheck": false,
     "portableMode": false
+  },
+  "shortcuts": {
+    "bindings": {}
+  },
+  "ai": {
+    "provider": "OpenAI",
+    "model": "gpt-4o",
+    "apiKey": "",
+    "systemPrompt": "<DEFAULT_AI_SYSTEM_PROMPT>"
   }
 }
 ```
+
+Themes: `dark`, `graphite`, `midnight`, `light`, `paper`, `dracula`, `nord`.
+
+> Note: `appearance.customCSS`, `appearance.toolbarVisible`,
+> `appearance.statusBarVisible` and `appearance.sidebarWidth` were in this
+> schema but nothing read them. They were removed rather than left as dead keys.
+> Older `config.json` files may still carry them; the loader ignores unknown
+> keys.
 
 ---
 
@@ -431,81 +474,82 @@ pnpm build
 
 ---
 
-## 11. Project Structure
-
 ```
 writemd/
 ├── .github/
-│   └── workflows/           # CI/CD (build, test, release)
-├── build/                   # electron-builder config & assets
+│   ├── workflows/           # ci.yml, release.yml
+│   └── dependabot.yml
+├── docs/                    # FAQ, fixtures, screenshots
+├── resources/               # app icon
+├── scripts/                 # release-time helpers
 ├── src/
-│   ├── main/                # Main process (TypeScript)
-│   │   ├── index.ts         # Entry point
-│   │   ├── window.ts        # Window management
-│   │   ├── menu.ts          # Application menu
-│   │   ├── file-associations.ts
-│   │   ├── auto-updater.ts
-│   │   ├── ipc.ts           # Main↔Renderer channels
-│   │   └── utils/
-│   ├── renderer/            # Renderer process (UI)
-│   │   ├── index.html       # Entry HTML
-│   │   ├── main.ts          # Bootstrap
-│   │   ├── styles/
-│   │   │   ├── variables.css    # CSS custom properties
-│   │   │   ├── themes/          # Theme definitions
-│   │   │   ├── global.css       # Reset, base, utilities
-│   │   │   └── components/      # Component-scoped styles
-│   │   ├── components/
-│   │   │   ├── AppShell.ts      # Root layout (web component)
-│   │   │   ├── TitleBar.ts
-│   │   │   ├── Toolbar.ts
-│   │   │   ├── Editor/          # Editor wrapper component
-│   │   │   │   ├── Editor.ts
-│   │   │   │   ├── LivePreviewDecorations.ts
-│   │   │   │   ├── SourceMode.ts
-│   │   │   │   └── SplitView.ts
-│   │   │   ├── Sidebar.ts
-│   │   │   ├── StatusBar.ts
-│   │   │   ├── SettingsModal.ts
-│   │   │   ├── ExportDialog.ts
-│   │   │   ├── ConflictDialog.ts
-│   │   │   ├── WelcomeScreen.ts
-│   │   │   └── common/          # Button, Input, Dropdown, etc.
-│   │   ├── editor/
-│   │   │   ├── cm-extensions/   # CodeMirror extensions
-│   │   │   │   ├── livePreview.ts
-│   │   │   │   ├── keymaps.ts
-│   │   │   │   ├── autocomplete.ts
-│   │   │   │   ├── imageUpload.ts
-│   │   │   │   ├── tableEditing.ts
-│   │   │   │   └── mathRendering.ts
-│   │   │   ├── markdown-it.ts   # Preview parser config
-│   │   │   └── syntaxHighlight.ts
-│   │   ├── state/
-│   │   │   ├── signals.ts       # Signal implementation
-│   │   │   ├── fileState.ts     # Current file, content, dirty
-│   │   │   ├── settings.ts      # Settings store (IndexedDB + sync)
-│   │   │   └── recentFiles.ts
-│   │   ├── utils/
-│   │   │   ├── fs.ts            # File read/write (IPC wrappers)
-│   │   │   ├── path.ts
-│   │   │   ├── image.ts         # Image save/optimize
-│   │   │   ├── export.ts        # PDF/HTML generation
-│   │   │   └── shortcuts.ts
-│   │   └── preload/
-│   │       └── index.ts         # Preload script (contextBridge)
-├── shared/                    # Shared types/constants
-│   ├── types.ts
-│   ├── ipc-channels.ts
-│   └── constants.ts
+│   ├── main/                # main process
+│   │   ├── index.ts             # BrowserWindow, lifecycle, navigation guard
+│   │   ├── ipc.ts               # every main<->renderer channel
+│   │   ├── path-guard.ts        # vault + registered-path containment
+│   │   ├── vault.ts             # vault root, tree, migration
+│   │   ├── settings.ts          # config.json read/write, keyring
+│   │   ├── export.ts            # PDF / HTML / DOCX
+│   │   ├── updater.ts           # electron-updater wiring
+│   │   └── file-associations.ts
+│   ├── preload/
+│   │   ├── index.ts             # contextBridge surface
+│   │   └── index.d.ts           # window.electronAPI typing
+│   ├── renderer/
+│   │   ├── index.html
+│   │   ├── src/
+│   │   │   ├── renderer.ts      # bootstrap
+│   │   │   ├── components/      # Lit web components (flat)
+│   │   │   │   ├── App.ts           # root layout
+│   │   │   │   ├── TopBar.ts        # titlebar, window controls, tab slot
+│   │   │   │   ├── Tab.ts           # one tab
+│   │   │   │   ├── VerticalTabBar.ts
+│   │   │   │   ├── Editor.ts        # CodeMirror host, split, resizer
+│   │   │   │   ├── DocBar.ts        # per-pane title bar + note menu
+│   │   │   │   ├── FindPanel.ts
+│   │   │   │   ├── LivePreview.ts   # live-preview facet/extension
+│   │   │   │   ├── EditorTheme.ts   # CodeMirror theme
+│   │   │   │   ├── SettingsModal.ts
+│   │   │   │   ├── CommandPalette.ts
+│   │   │   │   ├── ConflictDialog.ts
+│   │   │   │   ├── ConfirmDialog.ts
+│   │   │   │   ├── WelcomeScreen.ts
+│   │   │   │   ├── VaultExplorer.ts
+│   │   │   │   ├── BacklinksPanel.ts
+│   │   │   │   ├── AiPanel.ts
+│   │   │   │   ├── TextMenu.ts      # note context menu
+│   │   │   │   ├── menu-styles.ts   # shared menu CSS
+│   │   │   │   └── ...              # Button, IconButton, InfoPill, ModeMenu,
+│   │   │   │                        # ModeToggle, Panel, Sidebar, SurfaceLauncher
+│   │   │   ├── components/
+│   │   │   │   ├── extensions/      # CodeMirror extensions
+│   │   │   │   │   ├── live-decorations.ts, live-table.ts
+│   │   │   │   │   ├── wiki-link-plugin.ts, link-click.ts, safe-links.ts
+│   │   │   │   │   ├── frontmatter-plugin.ts, math-plugin.ts
+│   │   │   │   │   ├── table-keys.ts, table-line.ts, table-toolbar.ts
+│   │   │   │   │   ├── list-continuation.ts, slash-command.ts
+│   │   │   │   │   ├── freeze-mouse.ts, read-only.ts, tree-progress.ts
+│   │   │   │   └── widgets/         # live-preview node widgets
+│   │   │   │       ├── TableWidget.ts, ImageWidget.ts, MathWidget.ts,
+│   │   │   │       ├── MermaidWidget.ts, CodeBlockWidget.ts,
+│   │   │   │       ├── BulletWidget.ts, TaskCheckboxWidget.ts
+│   │   │   ├── state/             # singletons: file, settings, shortcuts, conflict
+│   │   │   ├── styles/            # global.css, themes.css
+│   │   │   └── utils/links.ts
+│   └── shared/                # imported by both processes
+│       ├── electron-api.ts        # bridge type surface
+│       ├── settings-schema.ts     # WriteMdSettings + DEFAULT_SETTINGS
+│       └── ai-providers.ts
 ├── tests/
-│   ├── unit/
-│   ├── integration/
-│   └── e2e/
-├── package.json
-├── tsconfig.json
-├── vite.config.ts
-├── electron-builder.json
+│   ├── helpers/temp-root.ts
+│   ├── setup.ts                   # jsdom shims
+│   ├── e2e/                       # Playwright, launches the real app
+│   └── *.test.ts                  # vitest, jsdom
+├── electron.vite.config.ts
+├── electron-builder.yml
+├── vitest.config.ts
+├── playwright.config.ts
+├── tsconfig.json / tsconfig.node.json / tsconfig.web.json / tsconfig.test.json
 └── README.md
 ```
 
@@ -513,14 +557,20 @@ writemd/
 
 ## 12. Milestones & Timeline
 
+This section is the original plan, kept for reference. It is not a status
+tracker: most of it shipped and the checkboxes were never updated. For actual
+progress see `phases.md` and the release notes. Two corrections worth carrying
+forward: the theme system ships 7 themes, not 5, and settings persist to
+`config.json`, not IndexedDB.
+
 ### Phase 1: Foundation (Week 1-2)
 
 - [ ] Electron + Vite + TypeScript setup
 - [ ] Main/Renderer IPC + Preload
 - [ ] Frameless window + custom titlebar
 - [ ] Basic layout (AppShell, Toolbar, StatusBar)
-- [ ] Theme system (CSS variables, 5 themes)
-- [ ] Settings persistence (IndexedDB)
+- [ ] Theme system (CSS variables, 7 themes)
+- [ ] Settings persistence (`config.json`)
 - [ ] Vault setup: default `~/Documents/WriteMd Vault/`, picker UI, file watcher
 - [ ] File associations (register .md on install)
 
@@ -564,11 +614,20 @@ writemd/
 ### Phase 6: Release Prep (Week 10)
 
 - [ ] Auto-updater
-- [ ] Code signing (Windows/macOS)
+- [ ] Code signing (Windows/macOS). Still open. `electron-builder.yml` has no
+      `win.signtoolOptions` and no `mac.identity`, and `notarize: false`. On macOS
+      `quitAndInstall` uses Squirrel, which requires a signed and notarized build, so
+      the install path will fail until this is done.
 - [ ] Installer build + test
 - [ ] Documentation (README, keyboard shortcuts)
 - [ ] Beta testing
 - [ ] v1.0 release
+
+> Note: the auto-updater feed cannot resolve today.
+> `electron-builder.yml` publishes with `provider: github` and no `owner` or
+> `repo`, and `package.json` has no `repository` field, so electron-updater has
+> nowhere to look for a release. Separately, `SettingsModal.ts` renders a thrown
+> update-check error as "up-to-date", so this is not visible from the UI.
 
 ---
 
@@ -646,7 +705,7 @@ writemd/
 
 ---
 
-**Document Version:** 1.0
-**Last Updated:** 2026-09-18
-**Author:** [Your Name]
-**Status:** Ready for Development
+**Document Version:** 1.1
+**Last Updated:** 2026-09-30
+**Author:** danieldamilola
+**Status:** Shipped (v1.1.0)

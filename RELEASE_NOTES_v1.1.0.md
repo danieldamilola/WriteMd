@@ -1,23 +1,25 @@
 # Release Notes - v1.1.0
 
 **Features**
-* **Export to Word**: One-click `.docx` from the editor note menu and command palette, converted from the same HTML as PDF export. Images in the document embed automatically.
-* **Vertical Tabs**: Optional side tab rail (Settings → Appearance → Vertical tabs) with the active tab highlighted and a working close button, matching the Figma vertical layout.
-* **Single Top-Bar Row**: In vertical mode the file path, renameable title, reading toggle, and note menu sit in the top bar as one row; the panel below holds only the document.
-* **Collapsible Panel**: New toggle beside Settings that hides the side rail so the editor takes the full width.
-* **Editable AI System Prompt**: Settings → AI Assistant now has a System Prompt box with Reset to default. The open file's content is still attached automatically.
-* **Offline UI Font**: Geist Mono now ships inside the app, so the interface typeface loads with no network. Also selectable as the editor font.
-* **Auto-Updates in Settings**: Update checks moved out of the top bar into Settings → About, with check, download progress, and restart-to-update.
+
+- **Export to Word**: One-click `.docx` from the editor note menu and command palette, converted from the same HTML as PDF export. Images in the document embed automatically.
+- **Vertical Tabs**: Optional side tab rail (Settings → Appearance → Vertical tabs) with the active tab highlighted and a working close button, matching the Figma vertical layout.
+- **Single Top-Bar Row**: In vertical mode the file path, renameable title, reading toggle, and note menu sit in the top bar as one row; the panel below holds only the document.
+- **Collapsible Panel**: New toggle beside Settings that hides the side rail so the editor takes the full width.
+- **Editable AI System Prompt**: Settings → AI Assistant now has a System Prompt box with Reset to default. The open file's content is still attached automatically.
+- **Offline UI Font**: Geist Mono now ships inside the app, so the interface typeface loads with no network. Also selectable as the editor font.
+- **Auto-Updates in Settings**: Update checks moved out of the top bar into Settings → About, with check, download progress, and restart-to-update.
 
 **Bug Fixes**
-* **Wrong PDF Margins**: Custom margins were sent in pixels instead of inches, producing broken page geometry. They now convert correctly and clamp inside the page.
-* **Missing DOCX Images**: Document-relative images came out broken in Word files. They now embed directly.
-* **CI Install Failure**: Added the missing workspace package declaration so `pnpm install --frozen-lockfile` passes.
-* **Dead Top-Bar Icons**: The reading toggle and note menu sat in the window-drag region and swallowed clicks. They now receive clicks; the note menu opens below the dots button instead of being clipped by the bar.
-* **Collapsed Horizontal Layout**: The document strip stretched to fill the panel and squeezed the body into a gap. It now keeps its natural height.
-* **Tab Close on Keyboard**: Pressing Enter on the close button also re-selected the tab. Key handling now ignores events bubbled from the button.
-* **Welcome Screen Listener Leak**: Detached welcome screens kept receiving settings updates. The subscription now releases on detach.
-* **Project-Wide Dashes**: All em/en dashes replaced with hyphens per the unslop style.
+
+- **Wrong PDF Margins**: Custom margins were sent in pixels instead of inches, producing broken page geometry. They now convert correctly and clamp inside the page.
+- **Missing DOCX Images**: Document-relative images came out broken in Word files. They now embed directly.
+- **CI Install Failure**: Added the missing workspace package declaration so `pnpm install --frozen-lockfile` passes.
+- **Dead Top-Bar Icons**: The reading toggle and note menu sat in the window-drag region and swallowed clicks. They now receive clicks; the note menu opens below the dots button instead of being clipped by the bar.
+- **Collapsed Horizontal Layout**: The document strip stretched to fill the panel and squeezed the body into a gap. It now keeps its natural height.
+- **Tab Close on Keyboard**: Pressing Enter on the close button also re-selected the tab. Key handling now ignores events bubbled from the button.
+- **Welcome Screen Listener Leak**: Detached welcome screens kept receiving settings updates. The subscription now releases on detach.
+- **Project-Wide Dashes**: All em/en dashes replaced with hyphens per the unslop style.
 
 Commits in this release
 

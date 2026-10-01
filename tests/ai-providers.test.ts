@@ -1,11 +1,14 @@
 import { describe, it, expect } from 'vitest'
-import {
-  AI_PROVIDERS,
-  getAiProvider,
-  AiResponseError
-} from '../src/shared/ai-providers'
+import { AI_PROVIDERS, getAiProvider, AiResponseError } from '../src/shared/ai-providers'
 
-const ctx = (overrides: Record<string, unknown> = {}) => ({
+const ctx = (
+  overrides: Record<string, unknown> = {}
+): {
+  model: string
+  apiKey: string
+  messages: { role: 'user'; content: string }[]
+  [key: string]: unknown
+} => ({
   model: 'test-model',
   apiKey: 'sk-key',
   messages: [{ role: 'user' as const, content: 'hi' }],
@@ -31,12 +34,10 @@ describe('AI provider adapters', () => {
   })
 
   it('builds OpenAI-compatible chat requests with a bearer token', () => {
-    const req = AI_PROVIDERS.OpenAI.buildChatRequest(
-      ctx({ systemPrompt: 'be brief' })
-    )
+    const req = AI_PROVIDERS.OpenAI.buildChatRequest(ctx({ systemPrompt: 'be brief' }))
     expect(req.url).toBe('https://api.openai.com/v1/chat/completions')
     expect(req.headers.Authorization).toBe('Bearer sk-key')
-    const body = req.body as { messages: { role: string }[]; model: string }
+    const body = req.body as { messages: { role: string; content?: string }[]; model: string }
     expect(body.model).toBe('test-model')
     expect(body.messages[0].role).toBe('system')
     expect(body.messages[0].content).toBe('be brief')
@@ -87,12 +88,13 @@ describe('AI provider adapters', () => {
   })
 
   it('extracts and sorts model ids', () => {
-    expect(
-      AI_PROVIDERS.OpenAI.extractModelIds({ data: [{ id: 'b' }, { id: 'a' }] })
-    ).toEqual(['a', 'b'])
-    expect(
-      AI_PROVIDERS.GoogleGemini.extractModelIds({ models: [{ name: 'models/m-1' }] })
-    ).toEqual(['m-1'])
+    expect(AI_PROVIDERS.OpenAI.extractModelIds({ data: [{ id: 'b' }, { id: 'a' }] })).toEqual([
+      'a',
+      'b'
+    ])
+    expect(AI_PROVIDERS.GoogleGemini.extractModelIds({ models: [{ name: 'models/m-1' }] })).toEqual(
+      ['m-1']
+    )
     expect(AI_PROVIDERS.Ollama.extractModelIds({ models: [{ name: 'llama3' }] })).toEqual([
       'llama3'
     ])

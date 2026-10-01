@@ -1,7 +1,8 @@
 import { BrowserWindow, dialog, type BrowserWindow as BrowserWindowType } from 'electron'
-import { writeFile, rename, stat, readFile } from 'fs/promises'
+import { writeFile, rename, stat, readFile, unlink } from 'fs/promises'
 import { dirname, resolve, relative, extname } from 'path'
 import { mkdirSync } from 'fs'
+import { randomUUID } from 'crypto'
 import MarkdownIt from 'markdown-it'
 import { getSettings } from './settings'
 
@@ -121,11 +122,22 @@ function defaultExportPath(docPath: string | null, ext: string): string | undefi
   return docPath.replace(/\.[^/.]+$/, `.${ext}`)
 }
 
+/**
+ * Same contract as the `file:write` handler: unique temp name so concurrent
+ * exports to the same target cannot clobber each other, and the temp is
+ * removed if anything fails, so a failed export leaves no litter next to the
+ * user's file.
+ */
 async function atomicWrite(targetPath: string, data: string | Buffer): Promise<number> {
   mkdirSync(dirname(targetPath), { recursive: true })
-  const tempPath = `${targetPath}.tmp`
-  await writeFile(tempPath, data)
-  await rename(tempPath, targetPath)
+  const tempPath = `${targetPath}.${randomUUID()}.tmp`
+  try {
+    await writeFile(tempPath, data)
+    await rename(tempPath, targetPath)
+  } catch (e) {
+    await unlink(tempPath).catch(() => {})
+    throw e
+  }
   const stats = await stat(targetPath)
   return stats.mtimeMs
 }
@@ -221,7 +233,13 @@ export async function exportHtml(
     'html'
   )
   if (!filePath) return { ok: false, reason: 'canceled' }
-  await atomicWrite(filePath, html)
+  // Wrapped like the other two exports so a permission or disk error comes
+  // back as a result object instead of a raw IPC rejection.
+  try {
+    await atomicWrite(filePath, html)
+  } catch (e) {
+    return { ok: false, reason: e instanceof Error ? e.message : String(e) }
+  }
   return { ok: true, path: filePath }
 }
 
@@ -230,7 +248,12 @@ export async function exportHtml(
 // Uses @turbodocx/html-to-docx to convert the same markdown-rendered HTML
 // into a real Office Open XML document. Light, print-style, white background.
 // ---------------------------------------------------------------------------
-type HtmlToDocx = (html: string, header?: string | null, options?: Record<string, unknown>, footer?: string | null) => Promise<ArrayBuffer | Blob | Uint8Array>
+type HtmlToDocx = (
+  html: string,
+  header?: string | null,
+  options?: Record<string, unknown>,
+  footer?: string | null
+) => Promise<ArrayBuffer | Blob | Uint8Array>
 
 const IMAGE_MIME: Record<string, string> = {
   '.png': 'image/png',
@@ -248,10 +271,14 @@ const IMAGE_MIME: Record<string, string> = {
  * document directory are embedded; absolute URLs, data URIs, unknown types,
  * and paths escaping the directory pass through unchanged.
  */
-async function embedLocalImages(html: string, docPath: string | null): Promise<string> {
+export async function embedLocalImages(html: string, docPath: string | null): Promise<string> {
   if (!docPath) return html
   const baseDir = dirname(docPath)
-  let out = html
+  // Matches are collected before any rewriting, then applied by slicing the
+  // string. Rewriting inside the loop with String.replace would only ever hit
+  // the first identical tag, so a document repeating the same image would
+  // leave every copy after the first unembedded.
+  const edits: Array<{ start: number; end: number; text: string }> = []
   for (const m of html.matchAll(/<img\b[^>]*\bsrc="([^"]+)"[^>]*>/g)) {
     const src = m[1]
     if (/^(https?:|data:|file:)/i.test(src)) continue
@@ -262,11 +289,21 @@ async function embedLocalImages(html: string, docPath: string | null): Promise<s
     if (!mime) continue
     try {
       const bytes = await readFile(abs)
-      const replacement = m[0].replace(`src="${src}"`, `src="data:${mime};base64,${bytes.toString('base64')}"`)
-      out = out.replace(m[0], () => replacement)
+      const dataUri = `data:${mime};base64,${bytes.toString('base64')}`
+      const start = m.index
+      const end = start + m[0].length
+      const rewritten =
+        m[0].slice(0, m[0].indexOf('src=')) +
+        `src="${dataUri}"` +
+        m[0].slice(m[0].indexOf('src=') + src.length + 'src="'.length)
+      edits.push({ start, end, text: rewritten })
     } catch {
       // Unreadable asset: leave the tag as-is
     }
+  }
+  let out = html
+  for (const edit of edits.sort((a, b) => b.start - a.start)) {
+    out = out.slice(0, edit.start) + edit.text + out.slice(edit.end)
   }
   return out
 }
@@ -294,13 +331,19 @@ export async function exportDocx(
   const rawHtml = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${escapeHtml(title)}</title></head><body><article>${body}</article></body></html>`
   const docHtml = await embedLocalImages(rawHtml, docPath)
 
-  const filePath = await showExportSaveDialog(getWindow, defaultExportPath(docPath, 'docx'), 'Word Document', 'docx')
+  const filePath = await showExportSaveDialog(
+    getWindow,
+    defaultExportPath(docPath, 'docx'),
+    'Word Document',
+    'docx'
+  )
   if (!filePath) return { ok: false, reason: 'canceled' }
 
   try {
     await ensureDocxRuntime()
     const mod = await import('@turbodocx/html-to-docx')
-    const convert = ((mod as { default?: HtmlToDocx }).default ?? (mod as unknown as HtmlToDocx)) as HtmlToDocx
+    const convert = ((mod as { default?: HtmlToDocx }).default ??
+      (mod as unknown as HtmlToDocx)) as HtmlToDocx
     const out = await convert(docHtml, null, {
       title,
       creator: 'WriteMd',

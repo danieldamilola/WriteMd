@@ -4,6 +4,7 @@ import type { ElectronAPI } from '../../../shared/electron-api'
 import { DEFAULT_AI_SYSTEM_PROMPT } from '../../../shared/settings-schema'
 import { SettingsStore } from '../state/settings'
 import { showConfirm } from './ConfirmDialog'
+import { icon } from './icons'
 import { scrollbarStyles } from './scrollbars'
 import {
   COMMANDS,
@@ -19,7 +20,36 @@ function api(): ElectronAPI | undefined {
   return typeof window !== 'undefined' ? window.electronAPI : undefined
 }
 
-type SettingsTab = 'general' | 'appearance' | 'editor' | 'files' | 'shortcuts' | 'advanced' | 'ai' | 'about'
+type SettingsTab =
+  'general' | 'appearance' | 'editor' | 'files' | 'shortcuts' | 'advanced' | 'ai' | 'about'
+
+/**
+ * The element that actually holds focus, descending through open shadow roots.
+ *
+ * `document.activeElement` only ever reports the outermost host, so capturing it
+ * and calling focus() on it later restores nothing: the host is not focusable
+ * and focus falls back to body. The settings button that opens this modal lives
+ * inside `writemd-top-bar`'s shadow root, so the real target is two levels down.
+ */
+function deepActiveElement(): HTMLElement | null {
+  let el: Element | null = document.activeElement
+  while (el?.shadowRoot?.activeElement) el = el.shadowRoot.activeElement
+  return el as HTMLElement | null
+}
+
+/** Human labels used both by the nav buttons and by search filtering. */ const TAB_LABELS: Record<
+  SettingsTab,
+  string
+> = {
+  general: 'General',
+  appearance: 'Appearance',
+  editor: 'Editor',
+  files: 'Files',
+  shortcuts: 'Shortcuts',
+  advanced: 'Advanced',
+  ai: 'AI Assistant',
+  about: 'About'
+}
 
 interface ThemeDefinition {
   id: string
@@ -58,6 +88,23 @@ const FONT_FAMILIES = [
   { id: 'JetBrains Mono', name: 'JetBrains Mono', type: 'Monospace' },
   { id: 'Geist Mono', name: 'Geist Mono', type: 'Monospace' }
 ]
+
+/**
+ * Known models per provider, shown until the live list arrives. This lived as
+ * two identical literals inside the class; a third partial copy sits in the
+ * shared schema. One definition, referenced by both call sites.
+ */
+const PROVIDER_MODEL_DEFAULTS: Record<string, string[]> = {
+  OpenAI: ['gpt-4o', 'gpt-4-turbo', 'gpt-3.5-turbo'],
+  Anthropic: ['claude-3-5-sonnet-20240620', 'claude-3-opus-20240229', 'claude-3-haiku-20240307'],
+  GoogleGemini: ['gemini-1.5-pro', 'gemini-1.5-flash'],
+  Mistral: ['mistral-large-latest', 'open-mixtral-8x22b'],
+  Groq: ['llama3-70b-8192', 'llama3-8b-8192', 'mixtral-8x7b-32768'],
+  DeepSeek: ['deepseek-chat', 'deepseek-coder'],
+  xAI: ['grok-2', 'grok-2-mini'],
+  OpenRouter: ['openai/gpt-4o', 'anthropic/claude-3.5-sonnet', 'google/gemini-1.5-pro'],
+  Ollama: ['llama3', 'mistral', 'phi3']
+}
 
 @customElement('writemd-settings-modal')
 export class SettingsModal extends LitElement {
@@ -508,6 +555,7 @@ export class SettingsModal extends LitElement {
   `
 
   @state() private tab: SettingsTab = 'general'
+  @state() private searchQuery = ''
 
   // Settings State
   @state() private vaultPath = ''
@@ -527,7 +575,9 @@ export class SettingsModal extends LitElement {
   @state() private pdfMargin = 24
   @state() private appVersion = ''
   @state() private panelOrientation: 'horizontal' | 'vertical' = 'horizontal'
-  @state() private updateStatus: 'idle' | 'checking' | 'available' | 'downloading' | 'downloaded' | 'up-to-date' | 'error' = 'idle'
+  @state() private updateStatus:
+    'idle' | 'checking' | 'available' | 'downloading' | 'downloaded' | 'up-to-date' | 'error' =
+    'idle'
   @state() private updateVersion = ''
   @state() private updateError = ''
   @state() private downloadProgress = 0
@@ -550,7 +600,8 @@ export class SettingsModal extends LitElement {
   connectedCallback(): void {
     super.connectedCallback()
     this.loadCurrentSettings()
-    window.addEventListener('keydown', this.handleKeyDown)
+    this.previouslyFocused = deepActiveElement()
+    window.addEventListener('keydown', this.handleKeyDown, true)
     this.addEventListener('click', this.handleBackdropClick)
     void api()
       ?.app?.getVersion?.()
@@ -590,11 +641,16 @@ export class SettingsModal extends LitElement {
   }
 
   disconnectedCallback(): void {
-    window.removeEventListener('keydown', this.handleKeyDown)
+    window.removeEventListener('keydown', this.handleKeyDown, true)
     this.removeEventListener('click', this.handleBackdropClick)
     this.updaterUnsubs.forEach((fn) => fn())
     this.updaterUnsubs = []
+    const target = this.previouslyFocused
+    this.previouslyFocused = null
     super.disconnectedCallback()
+    // Hand focus back to whatever opened the modal instead of dropping it on
+    // the body at the top of the document.
+    if (target?.isConnected) target.focus()
   }
 
   private loadCurrentSettings(): void {
@@ -614,30 +670,15 @@ export class SettingsModal extends LitElement {
     this.pdfPageSize = s.get('export.pdfPageSize', 'A4')
     this.pdfTheme = s.get('export.pdfTheme', 'light')
     this.pdfMargin = s.get('export.pdfMargin', 24)
-    this.panelOrientation = s.get('appearance.panelOrientation', 'horizontal') as 'horizontal' | 'vertical'
+    this.panelOrientation = s.get('appearance.panelOrientation', 'horizontal') as
+      'horizontal' | 'vertical'
     this.aiProvider = s.get('ai.provider', 'OpenAI')
     this.aiModel = s.get('ai.model', 'gpt-4o')
     this.aiApiKey = s.get('ai.apiKey', '')
     this.aiSystemPrompt = s.get('ai.systemPrompt', DEFAULT_AI_SYSTEM_PROMPT)
 
-    const defaults: Record<string, string[]> = {
-      OpenAI: ['gpt-4o', 'gpt-4-turbo', 'gpt-3.5-turbo'],
-      Anthropic: [
-        'claude-3-5-sonnet-20240620',
-        'claude-3-opus-20240229',
-        'claude-3-haiku-20240307'
-      ],
-      GoogleGemini: ['gemini-1.5-pro', 'gemini-1.5-flash'],
-      Mistral: ['mistral-large-latest', 'open-mixtral-8x22b'],
-      Groq: ['llama3-70b-8192', 'llama3-8b-8192', 'mixtral-8x7b-32768'],
-      DeepSeek: ['deepseek-chat', 'deepseek-coder'],
-      xAI: ['grok-2', 'grok-2-mini'],
-      OpenRouter: ['openai/gpt-4o', 'anthropic/claude-3.5-sonnet', 'google/gemini-1.5-pro'],
-      Ollama: ['llama3', 'mistral', 'phi3']
-    }
-
     if (this.availableModels.length === 0) {
-      this.availableModels = defaults[this.aiProvider] || []
+      this.availableModels = [...(PROVIDER_MODEL_DEFAULTS[this.aiProvider] ?? [])]
       if (this.aiModel && !this.availableModels.includes(this.aiModel)) {
         this.availableModels.unshift(this.aiModel)
       }
@@ -656,7 +697,88 @@ export class SettingsModal extends LitElement {
       this.finishCapture(e)
       return
     }
-    if (e.key === 'Escape') this.close()
+    if (e.key === 'Escape') {
+      // Capture phase via the window listener above is shared with
+      // ConflictDialog; stopImmediatePropagation keeps one Escape from
+      // resolving both.
+      e.stopImmediatePropagation()
+      this.close()
+      return
+    }
+    if (e.key === 'Tab') this.trapFocus(e)
+  }
+
+  /** Keep Tab inside the dialog; the document behind it is not inert. */
+  private trapFocus(e: KeyboardEvent): void {
+    const focusable = Array.from(
+      this.renderRoot?.querySelectorAll<HTMLElement>(
+        'button, input, select, textarea, [tabindex]:not([tabindex="-1"])'
+      ) ?? []
+    ).filter((el) => !el.hasAttribute('disabled') && el.offsetParent !== null)
+    if (focusable.length === 0) return
+    const first = focusable[0]
+    const last = focusable[focusable.length - 1]
+    const active = (this.shadowRoot as ShadowRoot | null)?.activeElement
+    if (e.shiftKey && (active === first || !active)) {
+      e.preventDefault()
+      last.focus()
+    } else if (!e.shiftKey && active === last) {
+      e.preventDefault()
+      first.focus()
+    }
+  }
+
+  private previouslyFocused: HTMLElement | null = null
+
+  /** Enter/Space on a theme / accent / font card. */
+  private handleCardKey = (e: KeyboardEvent): void => {
+    if (e.key !== 'Enter' && e.key !== ' ') return
+    e.preventDefault()
+    ;(e.currentTarget as HTMLElement).click()
+  }
+
+  private handleSearchInput = (e: InputEvent): void => {
+    this.searchQuery = (e.target as HTMLInputElement).value
+    // Jump to the first surviving section so the panel never shows a section
+    // the nav has just hidden.
+    const matches = this.matchingTabs()
+    if (matches.length > 0 && !matches.includes(this.tab)) this.tab = matches[0]
+  }
+
+  private handleSearchKey = (e: KeyboardEvent): void => {
+    if (e.key !== 'Enter' && e.key !== 'ArrowDown') return
+    e.preventDefault()
+    const first = this.matchingTabs()[0]
+    if (first) this.tab = first
+  }
+
+  /**
+   * The search box was rendered but nothing read its value, so typing did
+   * nothing at all. Match on the section label, and on the setting names inside
+   * the section's own rendered text once that section has been visited.
+   */
+  private matchingTabs(): SettingsTab[] {
+    const all = Object.keys(TAB_LABELS) as SettingsTab[]
+    const q = this.searchQuery.trim().toLowerCase()
+    if (!q) return all
+    return all.filter((t) => {
+      if (TAB_LABELS[t].toLowerCase().includes(q)) return true
+      return this.sectionText(t)?.toLowerCase().includes(q) ?? false
+    })
+  }
+
+  /** Sections the search box has not filtered out. */
+  private get visibleTabs(): SettingsTab[] {
+    return this.matchingTabs()
+  }
+
+  /** Text content of a tab's panel, used only for search matching. */
+  private sectionText(tab: SettingsTab): string | null {
+    return this.renderRoot?.querySelector(`[data-tab="${tab}"]`)?.textContent ?? null
+  }
+
+  firstUpdated(): void {
+    this.renderRoot?.querySelector<HTMLElement>('input, button')?.focus()
   }
 
   private shortcutOverrides(): Record<string, string> {
@@ -770,27 +892,13 @@ export class SettingsModal extends LitElement {
     const provider = (e.target as HTMLSelectElement).value
     this.updateSetting('ai.provider', provider)
 
-    // Set some sensible defaults before fetching
-    const defaults: Record<string, string[]> = {
-      OpenAI: ['gpt-4o', 'gpt-4-turbo', 'gpt-3.5-turbo'],
-      Anthropic: [
-        'claude-3-5-sonnet-20240620',
-        'claude-3-opus-20240229',
-        'claude-3-haiku-20240307'
-      ],
-      GoogleGemini: ['gemini-1.5-pro', 'gemini-1.5-flash'],
-      Mistral: ['mistral-large-latest', 'open-mixtral-8x22b'],
-      Groq: ['llama3-70b-8192', 'llama3-8b-8192', 'mixtral-8x7b-32768'],
-      DeepSeek: ['deepseek-chat', 'deepseek-coder'],
-      xAI: ['grok-2', 'grok-2-mini'],
-      OpenRouter: ['openai/gpt-4o', 'anthropic/claude-3.5-sonnet', 'google/gemini-1.5-pro'],
-      Ollama: ['llama3', 'mistral', 'phi3']
-    }
-
-    this.availableModels = defaults[provider] || []
+    // Show known models immediately so the dropdown is not empty while the
+    // network fetch for the live list is in flight.
+    this.availableModels = [...(PROVIDER_MODEL_DEFAULTS[provider] ?? [])]
     if (this.availableModels.length > 0) {
       this.updateSetting('ai.model', this.availableModels[0])
     }
+    void this.fetchModels()
   }
 
   private async handleCheckForUpdates(): Promise<void> {
@@ -822,8 +930,18 @@ export class SettingsModal extends LitElement {
     }
   }
 
-  private handleInstallUpdate(): void {
-    void api()?.updater?.install?.()
+  private async handleInstallUpdate(): Promise<void> {
+    const updater = api()?.updater
+    if (!updater) return
+    // quitAndInstall throws when there is no downloaded update to apply, which
+    // is the normal case on an unsigned build. Without the catch this surfaced
+    // as an unhandled rejection with no UI feedback.
+    try {
+      await updater.install?.()
+    } catch (e) {
+      this.updateStatus = 'error'
+      this.updateError = e instanceof Error ? e.message : String(e)
+    }
   }
 
   render(): unknown {
@@ -832,135 +950,112 @@ export class SettingsModal extends LitElement {
         class="modal-dialog"
         role="dialog"
         aria-modal="true"
+        aria-label="Settings"
         @click=${(e: MouseEvent) => e.stopPropagation()}
       >
         <!-- Sidebar Navigation -->
         <div class="sidebar">
           <div class="sidebar-search">
-            <input type="text" placeholder="Search settings..." />
+            <input
+              type="text"
+              aria-label="Search settings"
+              placeholder="Search settings..."
+              @keydown=${this.handleSearchKey}
+              @input=${this.handleSearchInput}
+            />
           </div>
           <div class="sidebar-nav">
             <div class="nav-group">Workspace</div>
             <button
               class="nav-btn ${this.tab === 'general' ? 'active' : ''}"
+              ?hidden=${!this.visibleTabs.includes('general')}
               @click=${() => (this.tab = 'general')}
             >
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <circle cx="12" cy="12" r="3" />
-                <path d="M12 2v3M12 19v3M2 12h3M19 12h3" />
-              </svg>
-              General
-            </button>
-            <button
-              class="nav-btn ${this.tab === 'editor' ? 'active' : ''}"
-              @click=${() => (this.tab = 'editor')}
-            >
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <path d="M12 20h9" />
-                <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" />
-              </svg>
-              Editor
-            </button>
-            <button
-              class="nav-btn ${this.tab === 'files' ? 'active' : ''}"
-              @click=${() => (this.tab = 'files')}
-            >
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
-                <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
-              </svg>
-              Files & Vault
-            </button>
-            <div class="nav-group">Application</div>
-            <button
-              class="nav-btn ${this.tab === 'appearance' ? 'active' : ''}"
-              @click=${() => (this.tab = 'appearance')}
-            >
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <circle cx="12" cy="12" r="10" />
-                <path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20" />
-                <path d="M2 12h20" />
-              </svg>
-              Appearance
-            </button>
-            <button
-              class="nav-btn ${this.tab === 'shortcuts' ? 'active' : ''}"
-              @click=${() => (this.tab = 'shortcuts')}
-            >
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <rect x="2" y="6" width="20" height="12" rx="2" />
-                <path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M6 14h.01M18 14h.01M9 14h6" />
-              </svg>
-              Shortcuts
-            </button>
-            <button
-              class="nav-btn ${this.tab === 'advanced' ? 'active' : ''}"
-              @click=${() => (this.tab = 'advanced')}
-            >
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <circle cx="12" cy="12" r="3" />
-                <path
-                  d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"
-                />
-              </svg>
-              Advanced
-            </button>
-            <div class="nav-group">Plugins</div>
-            <button
-              class="nav-btn ${this.tab === 'ai' ? 'active' : ''}"
-              @click=${() => (this.tab = 'ai')}
-            >
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <path
-                  d="M12 2L15.09 8.26L22 9.27L17 14.14L18.18 21.02L12 17.77L5.82 21.02L7 14.14L2 9.27L8.91 8.26L12 2Z"
-                />
-              </svg>
-              AI Assistant
-            </button>
-            <button
-              class="nav-btn ${this.tab === 'about' ? 'active' : ''}"
-              @click=${() => (this.tab = 'about')}
-            >
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <circle cx="12" cy="12" r="10" />
-                <path d="M12 16v-4" />
-                <path d="M12 8h.01" />
-              </svg>
-              About
-            </button>
-          </div>
-        </div>
-
-        <!-- Main Area -->
-        <div class="main-area">
-          <div class="main-header">
-            <h2>
-              ${this.tab === 'files' ? 'Files & Vault' : this.tab.charAt(0).toUpperCase() + this.tab.slice(1)}
-            </h2>
-            <button class="close-btn" @click=${this.close}>
-              <svg
-                viewBox="0 0 24 24"
-                width="18"
-                height="18"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="2"
+                ${icon('sliders')} General
+              </button>
+              <button
+                class="nav-btn ${this.tab === 'editor' ? 'active' : ''}"
+                ?hidden=${!this.visibleTabs.includes('editor')}
+                @click=${() => (this.tab = 'editor')}
               >
-                <line x1="18" y1="6" x2="6" y2="18" />
-                <line x1="6" y1="6" x2="18" y2="18" />
-              </svg>
-            </button>
+                ${icon('pencil')} Editor
+              </button>
+              <button
+                class="nav-btn ${this.tab === 'files' ? 'active' : ''}"
+                ?hidden=${!this.visibleTabs.includes('files')}
+                @click=${() => (this.tab = 'files')}
+              >
+                ${icon('folder-open')} Files & Vault
+              </button>
+              <div class="nav-group">Application</div>
+              <button
+                class="nav-btn ${this.tab === 'appearance' ? 'active' : ''}"
+                ?hidden=${!this.visibleTabs.includes('appearance')}
+                @click=${() => (this.tab = 'appearance')}
+              >
+                ${icon('palette')} Appearance
+              </button>
+              <button
+                class="nav-btn ${this.tab === 'shortcuts' ? 'active' : ''}"
+                ?hidden=${!this.visibleTabs.includes('shortcuts')}
+                @click=${() => (this.tab = 'shortcuts')}
+              >
+                ${icon('keyboard')} Shortcuts
+              </button>
+              <button
+                class="nav-btn ${this.tab === 'advanced' ? 'active' : ''}"
+                ?hidden=${!this.visibleTabs.includes('advanced')}
+                @click=${() => (this.tab = 'advanced')}
+              >
+                ${icon('settings')} Advanced
+              </button>
+              <div class="nav-group">Plugins</div>
+              <button
+                class="nav-btn ${this.tab === 'ai' ? 'active' : ''}"
+                ?hidden=${!this.visibleTabs.includes('ai')}
+                @click=${() => (this.tab = 'ai')}
+              >
+                ${icon('sparkle')} AI Assistant
+              </button>
+              <button
+                class="nav-btn ${this.tab === 'about' ? 'active' : ''}"
+                ?hidden=${!this.visibleTabs.includes('about')}
+                @click=${() => (this.tab = 'about')}
+              >
+                ${icon('info')} About
+              </button>
+            </div>
           </div>
 
-          <div class="content-panel">
-            ${this.tab === 'general' ? this.renderGeneral() : ''}
-            ${this.tab === 'appearance' ? this.renderAppearance() : ''}
-            ${this.tab === 'editor' ? this.renderEditor() : ''}
-            ${this.tab === 'files' ? this.renderFiles() : ''}
-            ${this.tab === 'shortcuts' ? this.renderShortcuts() : ''}
-            ${this.tab === 'advanced' ? this.renderAdvanced() : ''}
-            ${this.tab === 'ai' ? this.renderAI() : ''}
-            ${this.tab === 'about' ? this.renderAbout() : ''}
+          <!-- Main Area -->
+          <div class="main-area">
+            <div class="main-header">
+              <h2>${this.tab === 'files' ? 'Files & Vault' : TAB_LABELS[this.tab]}</h2>
+              <button class="close-btn" aria-label="Close settings" @click=${this.close}>
+                <svg
+                  viewBox="0 0 24 24"
+                  width="18"
+                  height="18"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                >
+                  <line x1="18" y1="6" x2="6" y2="18" />
+                  <line x1="6" y1="6" x2="18" y2="18" />
+                </svg>
+              </button>
+            </div>
+
+            <div class="content-panel" data-tab=${this.tab}>
+              ${this.tab === 'general' ? this.renderGeneral() : ''}
+              ${this.tab === 'appearance' ? this.renderAppearance() : ''}
+              ${this.tab === 'editor' ? this.renderEditor() : ''}
+              ${this.tab === 'files' ? this.renderFiles() : ''}
+              ${this.tab === 'shortcuts' ? this.renderShortcuts() : ''}
+              ${this.tab === 'advanced' ? this.renderAdvanced() : ''}
+              ${this.tab === 'ai' ? this.renderAI() : ''}
+              ${this.tab === 'about' ? this.renderAbout() : ''}
+            </div>
           </div>
         </div>
       </div>
@@ -1026,6 +1121,11 @@ export class SettingsModal extends LitElement {
             (t) => html`
               <div
                 class="theme-card ${this.theme === t.id ? 'active' : ''}"
+                role="radio"
+                tabindex="0"
+                aria-checked=${this.theme === t.id}"
+                aria-label=${t.name + ' theme'}
+                @keydown=${this.handleCardKey}
                 @click=${() => this.updateSetting('appearance.theme', t.id)}
               >
                 <div class="theme-box-wrapper">
@@ -1048,6 +1148,11 @@ export class SettingsModal extends LitElement {
             (c, i) => html`
               <div
                 class="color-circle-wrapper ${this.accentColor === c ? 'active' : ''}"
+                role="radio"
+                tabindex="0"
+                aria-checked=${this.accentColor === c}
+                aria-label=${c + ' accent'}
+                @keydown=${this.handleCardKey}
                 @click=${() => this.updateSetting('appearance.accentColor', c)}
               >
                 <div class="color-circle" style="background: ${c}">
@@ -1100,6 +1205,11 @@ export class SettingsModal extends LitElement {
             (f) => html`
               <div
                 class="font-card ${this.fontFamily === f.id ? 'active' : ''}"
+                role="radio"
+                tabindex="0"
+                aria-checked=${this.fontFamily === f.id}
+                aria-label=${f.name}
+                @keydown=${this.handleCardKey}
                 @click=${() => this.updateSetting('editor.fontFamily', f.id)}
               >
                 <div class="font-info">
@@ -1445,7 +1555,9 @@ export class SettingsModal extends LitElement {
         case 'checking':
           return 'Checking for updates...'
         case 'available':
-          return this.updateVersion ? `Update available: v${this.updateVersion}` : 'Update available'
+          return this.updateVersion
+            ? `Update available: v${this.updateVersion}`
+            : 'Update available'
         case 'downloading':
           return `Downloading... ${this.downloadProgress}%`
         case 'downloaded':
@@ -1465,33 +1577,53 @@ export class SettingsModal extends LitElement {
         <div class="setting-row">
           <div>
             <div class="setting-label">WriteMd Desktop</div>
-            <div class="setting-desc">v${this.appVersion || '1.0.0'}</div>
+            <div class="setting-desc">
+              ${this.appVersion ? `v${this.appVersion}` : 'Version unavailable'}
+            </div>
           </div>
         </div>
         <div class="setting-row">
           <div>
             <div class="setting-label">Updates</div>
-            <div class="setting-desc">${statusText}</div>
+            <div class="setting-desc" role="status" aria-live="polite">${statusText}</div>
           </div>
           <div style="display: flex; gap: 8px; align-items: center;">
-            ${this.updateStatus === 'available'
-              ? html`<button class="control-btn" @click=${this.handleDownloadUpdate}>Download</button>`
-              : ''}
-            ${this.updateStatus === 'downloaded'
-              ? html`<button class="control-btn" style="background: var(--accent); color: var(--accent-text); border-color: var(--accent);" @click=${this.handleInstallUpdate}>Restart to update</button>`
-              : ''}
-            ${this.updateStatus === 'checking' || this.updateStatus === 'downloading'
-              ? html`<button class="control-btn" disabled>
-                  ${this.updateStatus === 'checking' ? 'Checking...' : `${this.downloadProgress}%`}
-                </button>`
-              : html`<button class="control-btn" @click=${this.handleCheckForUpdates}>Check for updates</button>`}
+            ${
+              this.updateStatus === 'available'
+                ? html`<button class="control-btn" @click=${this.handleDownloadUpdate}>
+                    Download
+                  </button>`
+                : ''
+            }
+            ${
+              this.updateStatus === 'downloaded'
+                ? html`<button
+                    class="control-btn"
+                    style="background: var(--accent); color: var(--accent-text); border-color: var(--accent);"
+                    @click=${this.handleInstallUpdate}
+                  >
+                    Restart to update
+                  </button>`
+                : ''
+            }
+            ${
+              this.updateStatus === 'checking' || this.updateStatus === 'downloading'
+                ? html`<button class="control-btn" disabled>
+                    ${this.updateStatus === 'checking' ? 'Checking...' : `${this.downloadProgress}%`}
+                  </button>`
+                : html`<button class="control-btn" @click=${this.handleCheckForUpdates}>
+                    Check for updates
+                  </button>`
+            }
           </div>
         </div>
-        ${this.updateStatus === 'error'
-          ? html`<div class="setting-desc" style="color: var(--danger); padding: 8px 0 8px 0;">
-              ${this.updateError}
-            </div>`
-          : ''}
+        ${
+          this.updateStatus === 'error'
+            ? html`<div class="setting-desc" style="color: var(--danger); padding: 8px 0 8px 0;">
+                ${this.updateError}
+              </div>`
+            : ''
+        }
       </div>
     `
   }

@@ -1,8 +1,10 @@
 import { describe, it, expect, vi } from 'vitest'
+import { join } from 'path'
+import { tmpdir } from 'os'
 
 vi.mock('electron', () => ({
   app: {
-    getPath: () => 'C:/Temp/writemd-phase5-test'
+    getPath: () => join(tmpdir(), 'writemd-phase5-test')
   },
   BrowserWindow: class {},
   dialog: {

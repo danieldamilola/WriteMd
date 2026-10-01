@@ -12,7 +12,7 @@ export class ConflictDialog extends LitElement {
       display: flex;
       align-items: center;
       justify-content: center;
-      background: rgba(0, 0, 0, 0.65);
+      background: var(--scrim, rgba(0, 0, 0, 0.65));
       backdrop-filter: blur(4px);
       -webkit-backdrop-filter: blur(4px);
       animation: fadeIn 120ms ease-out;
@@ -63,7 +63,7 @@ export class ConflictDialog extends LitElement {
       height: 36px;
       border-radius: 8px;
       background: rgba(224, 122, 95, 0.15);
-      color: var(--syntax-h2, #e07a5f);
+      color: var(--warning, #e07a5f);
       display: flex;
       align-items: center;
       justify-content: center;
@@ -131,8 +131,18 @@ export class ConflictDialog extends LitElement {
       transition:
         background var(--transition-fast),
         border-color var(--transition-fast);
-      outline: none;
       user-select: none;
+    }
+
+    /* Suppressing the outline without a replacement made all three buttons
+       invisible to keyboard focus. Only drop it for pointer interaction. */
+    .btn:focus:not(:focus-visible) {
+      outline: none;
+    }
+
+    .btn:focus-visible {
+      outline: 2px solid var(--border-focus);
+      outline-offset: 2px;
     }
 
     .btn-secondary {
@@ -175,22 +185,56 @@ export class ConflictDialog extends LitElement {
 
   connectedCallback(): void {
     super.connectedCallback()
-    window.addEventListener('keydown', this.handleKeyDown)
+    window.addEventListener('keydown', this.handleKeyDown, true)
   }
 
   disconnectedCallback(): void {
-    window.removeEventListener('keydown', this.handleKeyDown)
+    window.removeEventListener('keydown', this.handleKeyDown, true)
     super.disconnectedCallback()
   }
 
   private handleKeyDown = (e: KeyboardEvent): void => {
+    if (!this.conflict) return
     if (e.key === 'Escape') {
       e.preventDefault()
+      // Capture phase, and stop propagation: App and SettingsModal each attach
+      // their own Escape handler to window. A sibling listener on the same
+      // target cannot be stopped by stopPropagation, only by
+      // stopImmediatePropagation, so without this one Escape could resolve the
+      // conflict and close a modal behind it.
+      e.stopImmediatePropagation()
       this.fileState.resolveConflictDismiss()
     } else if (e.key === 'Enter') {
       e.preventDefault()
+      e.stopImmediatePropagation()
       this.fileState.resolveConflictReview()
+    } else if (e.key === 'Tab') {
+      this.trapFocus(e)
     }
+  }
+
+  /** Keep Tab inside the dialog: the document behind it is not inert. */
+  private trapFocus(e: KeyboardEvent): void {
+    const buttons = Array.from(
+      this.renderRoot?.querySelectorAll<HTMLElement>('.actions button') ?? []
+    )
+    if (buttons.length === 0) return
+    const first = buttons[0]
+    const last = buttons[buttons.length - 1]
+    const active = (this.shadowRoot as ShadowRoot | null)?.activeElement
+    if (e.shiftKey && (active === first || !active)) {
+      e.preventDefault()
+      last.focus()
+    } else if (!e.shiftKey && active === last) {
+      e.preventDefault()
+      first.focus()
+    }
+  }
+
+  firstUpdated(): void {
+    // Focus the safe default so Enter does not fire the destructive choice by
+    // accident. The global Enter handler is what actually resolves it.
+    this.renderRoot?.querySelector<HTMLElement>('.btn-secondary')?.focus()
   }
 
   private handleReview = (): void => {
@@ -232,7 +276,7 @@ export class ConflictDialog extends LitElement {
 
         <div class="file-badge">${this.conflict?.path ?? ''}</div>
 
-        <div class="message">
+        <div class="message" aria-live="assertive">
           <strong>${fileName}</strong> has been modified on disk by another application while you
           have unsaved changes. Review the differences in Split View to resolve changes.
         </div>

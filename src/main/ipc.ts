@@ -1,5 +1,5 @@
 import { ipcMain, dialog, shell, net, app, type BrowserWindow } from 'electron'
-import { readFile, writeFile, stat, rename, unlink } from 'fs/promises'
+import { readFile, writeFile, stat, rename, unlink, open } from 'fs/promises'
 import { watch, existsSync, mkdirSync, type FSWatcher } from 'fs'
 import { dirname, join, resolve } from 'path'
 import { randomUUID } from 'crypto'
@@ -22,6 +22,11 @@ import {
   canProbePath,
   canRenamePath,
   canOpenWithShell,
+  canWriteImageExtension,
+  canWriteDocument,
+  isSaneVaultRoot,
+  isAllowedExternalProtocol,
+  normalizePath,
   assertCanAccess,
   isSubpath
 } from './path-guard'
@@ -93,12 +98,32 @@ export function setupIpc(getWindow: () => BrowserWindow | null): void {
 
   ipcMain.handle('file:write', async (_, filePath: string, content: string) => {
     assertCanAccess(filePath)
+    if (!canWriteDocument(filePath)) {
+      throw new Error(`Refusing to write unsupported file type: ${filePath}`)
+    }
     mkdirSync(dirname(filePath), { recursive: true })
     // Unique temp name: concurrent writes to the same file must not clobber
     // each other's temp file (and stale temps are cleaned up on failure).
     const tempPath = `${filePath}.${randomUUID()}.tmp`
     try {
-      await writeFile(tempPath, content, 'utf-8')
+      // A fresh temp file gets 0644 by default, so the rename would silently
+      // widen a note the user had restricted to 0600. Carry the original mode
+      // across, or fall back to owner-only for a brand new file.
+      let mode: number | undefined
+      try {
+        mode = (await stat(filePath)).mode & 0o777
+      } catch {
+        mode = 0o600
+      }
+      const handle = await open(tempPath, 'w', mode)
+      try {
+        await handle.writeFile(content, 'utf-8')
+        // Flush before the rename, otherwise a crash can leave the renamed file
+        // present but empty, which defeats the point of writing via temp.
+        await handle.sync()
+      } finally {
+        await handle.close()
+      }
       await rename(tempPath, filePath)
     } catch (e) {
       await unlink(tempPath).catch(() => {})
@@ -106,14 +131,6 @@ export function setupIpc(getWindow: () => BrowserWindow | null): void {
     }
     const stats = await stat(filePath)
     return { mtime: stats.mtimeMs }
-  })
-
-  ipcMain.handle('file:open-dialog', async (_, options: Electron.OpenDialogOptions) => {
-    const w = getWindow()
-    if (!w) return { canceled: true, filePaths: [] }
-    const result = await dialog.showOpenDialog(w, options)
-    registerExternalPaths(result.filePaths)
-    return result
   })
 
   ipcMain.handle('file:save-dialog', async (_, options: Electron.SaveDialogOptions) => {
@@ -145,34 +162,50 @@ export function setupIpc(getWindow: () => BrowserWindow | null): void {
     }
   })
 
-  ipcMain.handle('file:list-dir', async (_, dirPath: string) => {
-    if (!canAccessPath(dirPath)) return []
-    return listMarkdownFiles(dirPath)
-  })
-
   ipcMain.handle('file:watch', (_, filePath: string) => {
-    if (watchedPaths.has(filePath)) return
     if (!canAccessPath(filePath)) return
+    // Keyed by normalized path so `C:\A.md` and `c:\a.md` share one watcher
+    // instead of racing two 'change' events for the same file.
+    const key = normalizePath(filePath)
+    if (watchedPaths.has(key)) return
     try {
       const watcher = watch(filePath, { persistent: false })
-      watcher.on('change', () => getWindow()?.webContents.send('file:changed', filePath))
-      watcher.on('error', () => watchedPaths.delete(filePath))
-      watchedPaths.set(filePath, watcher)
+      // 'rename' matters as much as 'change' here. macOS fs.watch is
+      // FSEvents-backed and reports an atomic replace as 'rename', and this app
+      // (plus Obsidian, git, and every sync client) writes via rename-over. On
+      // a 'change'-only subscription the conflict dialog never sees those.
+      const emit = (): void => getWindow()?.webContents.send('file:changed', filePath)
+      watcher.on('change', emit)
+      watcher.on('rename', emit)
+      // Close before dropping the entry: a watcher removed from the map without
+      // close() keeps its file descriptor open until app quit.
+      watcher.on('error', () => {
+        watchedPaths.delete(key)
+        watcher.close()
+      })
+      watchedPaths.set(key, watcher)
     } catch {
       // ignore
     }
   })
 
   ipcMain.handle('file:unwatch', (_, filePath: string) => {
-    const watcher = watchedPaths.get(filePath)
+    const key = normalizePath(filePath)
+    const watcher = watchedPaths.get(key)
     if (watcher) {
       watcher.close()
-      watchedPaths.delete(filePath)
+      watchedPaths.delete(key)
     }
   })
 
   ipcMain.handle('file:save-image', async (_, docPath: string, base64Data: string, ext: string) => {
     assertCanAccess(docPath)
+    // `ext` crosses the IPC boundary, so it is validated here rather than
+    // trusted. Without this check a value like `png/../../x` would place the
+    // upload outside the asset folder entirely.
+    if (!canWriteImageExtension(ext)) {
+      throw new Error(`Refusing to save image with extension: ${ext}`)
+    }
     const docDir = dirname(docPath)
     const assetsDir = join(docDir, '_assets')
     mkdirSync(assetsDir, { recursive: true })
@@ -214,6 +247,13 @@ export function setupIpc(getWindow: () => BrowserWindow | null): void {
 
   ipcMain.handle('vault:get-path', () => getVaultPath())
   ipcMain.handle('vault:set-path', async (_, vaultPath: string) => {
+    // This handler defines the root that every other path guard in the app is
+    // measured against, so an unvalidated value here voids all of them: a vault
+    // of "C:\" makes isPathInVault true for the entire drive, and
+    // ensureVaultExists would mkdir it. Reject at the door instead.
+    if (!isSaneVaultRoot(vaultPath)) {
+      throw new Error(`Refusing to use that folder as the vault: ${vaultPath}`)
+    }
     await setVaultPath(vaultPath)
     ensureVaultExists()
   })
@@ -226,6 +266,9 @@ export function setupIpc(getWindow: () => BrowserWindow | null): void {
     await setSettings(settings)
   })
 
+  // Single owner for the open dialog: every chosen path is registered so the
+  // renderer can read/write it afterwards. `file:open-dialog` used to be a
+  // byte-identical twin of this handler.
   ipcMain.handle('dialog:show-open-dialog', async (_, options: Electron.OpenDialogOptions) => {
     const w = getWindow()
     if (!w) return { canceled: true, filePaths: [] }
@@ -242,17 +285,13 @@ export function setupIpc(getWindow: () => BrowserWindow | null): void {
     await shell.openPath(targetPath)
   })
 
+  // Routed here rather than handled in the renderer so every outbound link,
+  // from any surface, passes the same protocol allowlist.
   ipcMain.handle('shell:open-external', async (_, url: string) => {
-    let parsed: URL
-    try {
-      parsed = new URL(url)
-    } catch {
-      throw new Error(`Invalid URL: ${url}`)
-    }
     // Only well-known safe schemes may leave the app; file:/// or custom
     // protocol handlers would let a crafted link launch arbitrary content.
-    if (!['http:', 'https:', 'mailto:'].includes(parsed.protocol)) {
-      throw new Error(`Protocol not allowed: ${parsed.protocol}`)
+    if (!isAllowedExternalProtocol(url)) {
+      throw new Error(`Protocol not allowed: ${url}`)
     }
     await shell.openExternal(url)
   })

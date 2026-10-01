@@ -1,21 +1,16 @@
 import { WidgetType } from '@codemirror/view'
+import MarkdownIt from 'markdown-it'
 
-/** Parse inline markdown (bold, italic, code, links) in table cells */
-export function parseInlineMarkdown(text: string): string {
-  let result = text
-  // Code spans (must be first to avoid processing markup inside code)
-  result = result.replace(/`([^`]+)`/g, '<code>$1</code>')
-  // Bold
-  result = result.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-  result = result.replace(/__(.+?)__/g, '<strong>$1</strong>')
-  // Italic
-  result = result.replace(/\*(.+?)\*/g, '<em>$1</em>')
-  result = result.replace(/_(.+?)_/g, '<em>$1</em>')
-  // Strikethrough
-  result = result.replace(/~~(.+?)~~/g, '<del>$1</del>')
-  // Links
-  result = result.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2">$1</a>')
-  return result
+/**
+ * Table cells are rendered with markdown-it rather than a hand-rolled regex
+ * pass. `html: false` is the security-relevant part: cell text comes straight
+ * off disk, and any inline-HTML allowance would hand it to innerHTML below.
+ */
+const md = new MarkdownIt({ html: false, linkify: true, breaks: false })
+
+/** Render one cell's inline markdown to safe HTML. */
+export function renderInlineMarkdown(text: string): string {
+  return md.renderInline(text)
 }
 
 export class TableWidget extends WidgetType {
@@ -60,7 +55,7 @@ export class TableWidget extends WidgetType {
     const headRow = document.createElement('tr')
     headerCells.forEach((cell, i) => {
       const th = document.createElement('th')
-      th.innerHTML = parseInlineMarkdown(cell)
+      th.innerHTML = renderInlineMarkdown(cell)
       if (aligns[i]) th.style.textAlign = aligns[i]
       headRow.appendChild(th)
     })
@@ -74,7 +69,7 @@ export class TableWidget extends WidgetType {
         const tr = document.createElement('tr')
         headerCells.forEach((_h, i) => {
           const td = document.createElement('td')
-          td.innerHTML = parseInlineMarkdown(cells[i] ?? '')
+          td.innerHTML = renderInlineMarkdown(cells[i] ?? '')
           if (aligns[i]) td.style.textAlign = aligns[i]
           tr.appendChild(td)
         })

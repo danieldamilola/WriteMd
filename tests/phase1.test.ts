@@ -1,7 +1,15 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { existsSync, rmSync } from 'fs'
+import { makeTempRoot } from './helpers/temp-root'
 
-const TEST_ROOT = 'C:/Temp/writemd-phase1-test'
+// Was a fixed 'C:/Temp/writemd-phase1-test': Windows-only, and the name
+// collided with the phase2/3/5 suites when vitest ran files in parallel.
+const TEST_ROOT = makeTempRoot('phase1')
+
+// vault.ts builds paths with path.join, so on Windows they come back with
+// backslashes. Compare with separators normalized on both sides rather than
+// assuming one flavour.
+const norm = (p: string): string => p.replace(/\\/g, '/')
 
 vi.mock('electron', () => ({
   app: {
@@ -19,7 +27,7 @@ describe('phase 1 foundation', () => {
   it('creates the vault folder on ensureVaultExists', async () => {
     const { ensureVaultExists } = await import('../src/main/vault')
     const p = ensureVaultExists()
-    expect(p.replace(/\\/g, '/')).toBe(`${TEST_ROOT}/Documents/WriteMd Vault`)
+    expect(norm(p)).toBe(norm(`${TEST_ROOT}/Documents/WriteMd Vault`))
     expect(existsSync(p)).toBe(true)
   })
 
@@ -29,8 +37,8 @@ describe('phase 1 foundation', () => {
     mkdirSync(legacy, { recursive: true })
     writeFileSync(`${legacy}/note.md`, '# hi')
     const { getDefaultVaultPath } = await import('../src/main/vault')
-    const p = getDefaultVaultPath().replace(/\\/g, '/')
-    expect(p).toBe(`${TEST_ROOT}/Documents/WriteMd Vault`)
+    const p = getDefaultVaultPath()
+    expect(norm(p)).toBe(norm(`${TEST_ROOT}/Documents/WriteMd Vault`))
     expect(exists(`${TEST_ROOT}/Documents/WriteMd Vault/note.md`)).toBe(true)
     expect(exists(legacy)).toBe(false)
   })

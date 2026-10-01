@@ -1,0 +1,18 @@
+{
+  "extends": "@electron-toolkit/tsconfig/tsconfig.web.json",
+  "include": [
+    "tests/**/*.ts",
+    "vitest.config.ts",
+    "playwright.config.ts",
+    "src/renderer/**/*.ts",
+    "src/renderer/src/**/*.d.ts",
+    "src/preload/*.d.ts",
+    "src/shared/**/*"
+  ],
+  "compilerOptions": {
+    "composite": true,
+    "experimentalDecorators": true,
+    "useDefineForClassFields": false,
+    "types": ["node", "vitest/globals"]
+  }
+}

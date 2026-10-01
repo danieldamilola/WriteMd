@@ -28,7 +28,10 @@ files:
   - '!{.env,.env.*,.npmrc,pnpm-lock.yaml}'
   - '!{tsconfig.json,tsconfig.node.json,tsconfig.web.json}'
 asarUnpack:
-  - resources/**
+  # Resources live in build/, and directories.buildResources points there.
+  # Unpacking the icon assets out of the asar is unnecessary; nothing at
+  # runtime reads them from disk.
+  - build/**
 win:
   executableName: writemd
 nsis:
@@ -41,12 +44,24 @@ nsis:
   installerHeader: build/installer-header.bmp
   installerSidebar: build/installer-sidebar.bmp
 mac:
+  category: public.app-category.productivity
+  # Uncomment with real certificates. Until then electron-updater's
+  # quitAndInstall cannot install anything on macOS: Squirrel.Mac refuses
+  # unsigned bundles. Requires an Apple Developer membership, a Developer ID
+  # Application certificate, and an app-specific password for notarization.
+  # identity: null
+  # hardenedRuntime: true
+  # notarize: true
   entitlementsInherit: build/entitlements.mac.plist
   extendInfo:
-    - NSCameraUsageDescription: Application requests access to the device's camera.
-    - NSMicrophoneUsageDescription: Application requests access to the device's microphone.
-    - NSDocumentsFolderUsageDescription: Application requests access to the user's Documents folder.
-    - NSDownloadsFolderUsageDescription: Application requests access to the user's Downloads folder.
+    # This app requests neither camera nor microphone access. Declaring them
+    # invites App Store review questions and, on recent macOS, can surface a
+    # permission prompt the app never uses.
+    NSDocumentsFolderUsageDescription: WriteMd opens and saves Markdown documents in your Documents folder.
+    NSDownloadsFolderUsageDescription: WriteMd opens Markdown documents from your Downloads folder.
+  # Unsigned until signing is configured. Gatekeeper blocks this on any Mac
+  # that is not the developer's; `xattr -dr com.apple.quarantine` clears it
+  # locally.
   notarize: false
 dmg:
   artifactName: ${name}-${version}.${ext}
@@ -62,3 +77,7 @@ appImage:
 npmRebuild: false
 publish:
   provider: github
+  # Resolved from package.json's repository field; named here as well so the
+  # feed works even if that field is dropped.
+  owner: danieldamilola
+  repo: WriteMd

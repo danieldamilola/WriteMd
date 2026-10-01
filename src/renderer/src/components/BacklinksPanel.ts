@@ -38,14 +38,14 @@ export class BacklinksPanel extends LitElement {
         box-sizing: border-box;
         padding: 12px 8px;
         font-family: 'Geist Mono', monospace;
-        color: #d4d4d4;
+        color: var(--text);
       }
       .toolbar {
         display: flex;
         align-items: center;
         justify-content: space-between;
         padding: 0 8px 8px 8px;
-        color: #737373;
+        color: var(--text-muted);
         font-size: 12px;
       }
       .toolbar button {
@@ -54,7 +54,7 @@ export class BacklinksPanel extends LitElement {
         gap: 6px;
         background: transparent;
         border: none;
-        color: #737373;
+        color: var(--text-muted);
         font: inherit;
         font-size: 12px;
         cursor: pointer;
@@ -62,8 +62,8 @@ export class BacklinksPanel extends LitElement {
         border-radius: 4px;
       }
       .toolbar button:hover {
-        color: #ffffff;
-        background: rgba(255, 255, 255, 0.06);
+        color: var(--text);
+        background: var(--bg-hover);
       }
       .toolbar button svg {
         width: 13px;
@@ -78,25 +78,25 @@ export class BacklinksPanel extends LitElement {
         cursor: pointer;
       }
       .hit:hover {
-        background: rgba(255, 255, 255, 0.05);
+        background: var(--bg-hover);
       }
       .hit-name {
         font-size: 13px;
-        color: #e8e8e8;
+        color: var(--text);
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
       }
       .hit-snippet {
         font-size: 12px;
-        color: #737373;
+        color: var(--text-muted);
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
       }
       .empty-msg {
         padding: 24px 16px;
-        color: #595959;
+        color: var(--text-muted);
         font-size: 13px;
         text-align: center;
       }

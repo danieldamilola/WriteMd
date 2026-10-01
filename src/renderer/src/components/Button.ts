@@ -42,10 +42,10 @@ export class WriteMdButton extends LitElement {
       width: 100%;
       height: 44px;
       padding: 10px;
-      background: #161616;
+      background: var(--bg-card);
       border: none;
       border-radius: 4px;
-      color: #ffffff;
+      color: var(--text);
       font-family: 'Geist Mono', monospace;
       font-size: 14px;
       line-height: 18px;
@@ -56,11 +56,11 @@ export class WriteMdButton extends LitElement {
     }
 
     button:hover {
-      background: #1e1e1e;
+      background: var(--bg-hover);
     }
 
     button:active {
-      background: #121212;
+      background: var(--bg-active);
     }
 
     :host([variant='vault']) button {

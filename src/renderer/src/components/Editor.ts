@@ -30,15 +30,23 @@ import {
   livePreviewPlugin,
   readOnlyExtension,
   documentPathFacet,
+  linkClickStyleFacet,
   tableLinePlugin
 } from './LivePreview'
+import { makeLinkClickHandler } from './extensions/link-click'
 import { mathPlugin } from './extensions/math-plugin'
 import { frontmatterPlugin } from './extensions/frontmatter-plugin'
 import { wikiLinkPlugin } from './extensions/wiki-link-plugin'
 import { slashCommandPlugin } from './extensions/slash-command'
 import { tableKeymapPlugin } from './extensions/table-keys'
 import { tableToolbarField } from './extensions/table-toolbar'
-import { FileState, ViewMode, SplitSurface, SecondaryDocState } from '../state/file-state'
+import {
+  FileState,
+  ViewMode,
+  SplitSurface,
+  SecondaryDocState,
+  shouldMountSecondaryView
+} from '../state/file-state'
 import './Panel'
 import './InfoPill'
 import './DocBar'
@@ -48,10 +56,32 @@ import './VaultExplorer'
 import type { ElectronAPI } from '../../../shared/electron-api'
 import { DEFAULT_AI_SYSTEM_PROMPT } from '../../../shared/settings-schema'
 import type { VaultTreeNode } from '../../../shared/electron-api'
-import { basenameNoExt, cleanWikiTarget } from '../utils/links'
+import { basenameNoExt, cleanWikiTarget, shortPath } from '../utils/links'
+import { navigateLink, resolveOrCreateLink, type NavigateDeps } from '../utils/navigate'
 
 function api(): ElectronAPI | undefined {
   return typeof window !== 'undefined' ? window.electronAPI : undefined
+}
+
+/**
+ * Does a line's text declare the given anchor? GitHub slugifies headings by
+ * lowercasing, dropping punctuation and joining runs of spaces, so `# My Note!`
+ * and `#my-note` have to land on the same line.
+ */
+function headingMatches(lineText: string, anchor: string): boolean {
+  const slug = lineText
+    .replace(/^#{1,6}\s+/, '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^\w\s-]/g, '')
+    .replace(/\s+/g, '-')
+  if (slug === anchor) return true
+  return (
+    lineText
+      .replace(/^#{1,6}\s+/, '')
+      .trim()
+      .toLowerCase() === anchor
+  )
 }
 
 @customElement('writemd-editor')
@@ -66,7 +96,12 @@ export class Editor extends LitElement {
         min-height: 0;
         min-width: 0;
         position: relative;
-        background: #0a0a0a;
+        /* Transparent, not --bg. This element's 5px padding is the gutter that
+           separates the window frame from the pane, and painting it introduced a
+           third tone between the two: frame, gutter, pane. Leaving it
+           transparent lets the frame show through, so the shell reads as exactly
+           two surfaces. */
+        background: transparent;
         box-sizing: border-box;
         padding: 0 5px 5px 5px;
       }
@@ -95,6 +130,23 @@ export class Editor extends LitElement {
         z-index: 400;
       }
 
+      .notice {
+        position: absolute;
+        top: 12px;
+        left: 50%;
+        transform: translateX(-50%);
+        z-index: 500;
+        max-width: min(520px, 80%);
+        padding: 8px 14px;
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        background: var(--bg-elevated);
+        color: var(--text-secondary);
+        font-size: 12px;
+        box-shadow: 0 6px 20px rgb(0 0 0 / 18%);
+        pointer-events: none;
+      }
+
       .pane {
         flex: 1;
         display: flex;
@@ -113,7 +165,7 @@ export class Editor extends LitElement {
         justify-content: space-between;
         height: 49px;
         padding: 0 20px;
-        border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+        border-bottom: 1px solid var(--border-subtle);
         flex-shrink: 0;
         user-select: none;
         font-family: 'Geist Mono', monospace;
@@ -123,7 +175,7 @@ export class Editor extends LitElement {
       .sub-header-left {
         display: flex;
         align-items: center;
-        color: #595959;
+        color: var(--text-muted);
         font-size: 13px;
         overflow: hidden;
         white-space: nowrap;
@@ -133,7 +185,7 @@ export class Editor extends LitElement {
       }
 
       .sub-header-center {
-        color: #d4d4d4;
+        color: var(--text);
         font-size: 14px;
         font-weight: 500;
         text-align: center;
@@ -167,10 +219,12 @@ export class Editor extends LitElement {
       .resizer:hover,
       .resizer:active,
       .resizer.dragging {
-        background: rgba(255, 255, 255, 0.1);
+        background: var(--bg-active);
       }
-
-
+      .resizer:focus-visible {
+        background: var(--accent);
+        outline: none;
+      }
 
       input.title-input {
         background: transparent;
@@ -188,8 +242,8 @@ export class Editor extends LitElement {
 
       input.title-input:hover,
       input.title-input:focus {
-        background: rgba(255, 255, 255, 0.05);
-        border-color: rgba(255, 255, 255, 0.1);
+        background: var(--bg-hover);
+        border-color: var(--border);
       }
 
       .sub-header-right {
@@ -207,7 +261,7 @@ export class Editor extends LitElement {
         width: 24px;
         height: 24px;
         border-radius: 4px;
-        color: #6b6b6b;
+        color: var(--text-muted);
         cursor: pointer;
         transition:
           color 120ms ease,
@@ -215,8 +269,8 @@ export class Editor extends LitElement {
       }
 
       .icon-action:hover {
-        color: #ffffff;
-        background: rgba(255, 255, 255, 0.06);
+        color: var(--text);
+        background: var(--bg-hover);
       }
 
       .icon-action svg {
@@ -230,22 +284,6 @@ export class Editor extends LitElement {
 
       .icon-action.faint:hover {
         opacity: 1;
-      }
-
-      .menu-wrap {
-        position: relative;
-      }
-
-      .menu-backdrop {
-        position: fixed;
-        inset: 0;
-        z-index: 90;
-      }
-
-      .m-panel.note-menu {
-        top: 28px;
-        right: 0;
-        min-width: 230px;
       }
 
       /* Editor body area */
@@ -280,7 +318,7 @@ export class Editor extends LitElement {
         align-items: center;
         justify-content: center;
         height: 100%;
-        color: #595959;
+        color: var(--text-muted);
         font-family: 'Geist Mono', monospace;
         gap: 12px;
       }
@@ -316,6 +354,8 @@ export class Editor extends LitElement {
   @state() private findWholeWord = false
   @state() private findCaseSensitive = false
   @state() private findRegex = false
+  @state() private notice = ''
+  private noticeTimer: number | null = null
 
   @state() private leftPaneWidth = 50 // percentage
   @state() private isDraggingResizer = false
@@ -332,7 +372,8 @@ export class Editor extends LitElement {
     window.addEventListener('writemd-find', this.handleGlobalFind)
     window.addEventListener('writemd-open-wikilink', this.handleOpenWikiLink)
     this.settingsStore = SettingsStore.getInstance()
-    this.panelOrientation = this.settingsStore.get('appearance.panelOrientation', 'horizontal') as 'horizontal' | 'vertical'
+    this.panelOrientation = this.settingsStore.get('appearance.panelOrientation', 'horizontal') as
+      'horizontal' | 'vertical'
     this.checkAiConfigured()
     this.settingsUnsubs.push(
       this.settingsStore.subscribe('ai.apiKey', () => this.checkAiConfigured())
@@ -496,11 +537,13 @@ If the user asks questions about their file, use the above content to answer.`
       const match = response.match(replaceRegex)
 
       if (match) {
-        this.applyAiReplacement(match[1])
+        const applied = await this.applyAiReplacement(match[1], currentPath)
         // Remove the block from the chat response so it doesn't clutter the UI
-        const cleanResponse =
-          response.replace(replaceRegex, '').trim() || 'I have updated the document.'
-        this.aiMessages = [...this.aiMessages, { role: 'assistant', content: cleanResponse }]
+        const cleaned = response.replace(replaceRegex, '').trim()
+        const note = applied
+          ? cleaned || 'I have updated the document.'
+          : 'I left your document alone: you switched tabs before the reply arrived. Ask again with that file active.'
+        this.aiMessages = [...this.aiMessages, { role: 'assistant', content: note }]
       } else {
         this.aiMessages = [...this.aiMessages, { role: 'assistant', content: response }]
       }
@@ -512,8 +555,21 @@ If the user asks questions about their file, use the above content to answer.`
     }
   }
 
-  /** Apply an AI-provided document replacement and force-save it to disk. */
-  private async applyAiReplacement(newContent: string): Promise<void> {
+  /**
+   * Apply an AI-provided document replacement and force-save it to disk.
+   * Returns false when the target document is no longer the active one.
+   */
+  private async applyAiReplacement(
+    newContent: string,
+    targetPath: string | null
+  ): Promise<boolean> {
+    // setContent and save() both act on whatever is active now. If the user
+    // switched documents while the model was thinking, the reply belongs to the
+    // file it was asked about, not to the one on screen. Bail out rather than
+    // overwrite a document the user never asked the model to touch.
+    if (this.fileState.getState().path !== targetPath) {
+      return false
+    }
     if (this.editorView) {
       this.editorView.dispatch({
         changes: { from: 0, to: this.editorView.state.doc.length, insert: newContent }
@@ -524,6 +580,7 @@ If the user asks questions about their file, use the above content to answer.`
     // Force an immediate save to disk so the 'dirty' flag is cleared.
     // This prevents the OS file watcher from firing while dirty=true and popping the conflict modal.
     await this.fileState.save()
+    return true
   }
 
   private handleAiSubmitEvent(e: Event): void {
@@ -534,7 +591,13 @@ If the user asks questions about their file, use the above content to answer.`
   disconnectedCallback(): void {
     window.removeEventListener('writemd-find', this.handleGlobalFind)
     window.removeEventListener('writemd-open-wikilink', this.handleOpenWikiLink)
+    if (this.noticeTimer !== null) window.clearTimeout(this.noticeTimer)
     this.unsubscribe?.()
+    // Before destroying the views: stopResize re-measures them, and it must not
+    // run against an already-destroyed view. A teardown mid-drag would otherwise
+    // leave the two document listeners and the resize cursor in place, pinning
+    // this element and both views.
+    this.stopResize()
     this.editorView?.destroy()
     this.secondaryEditorView?.destroy()
     this.editorView = null
@@ -550,29 +613,56 @@ If the user asks questions about their file, use the above content to answer.`
 
   updated(changedProperties: Map<string, unknown>): void {
     super.updated(changedProperties)
-    if (!this.editorView && (this.filePath || this.content)) {
+    // The container only exists in the non-empty render branch. If the view is
+    // still live but the container was just removed (or replaced), the view is
+    // bound to a detached node and the next open renders a blank pane. Same
+    // hazard initEditor() documents, so handle it here too.
+    const container = this.shadowRoot?.querySelector('#primary-cm-wrapper')
+    if (this.editorView && !container) {
+      this.editorView.destroy()
+      this.editorView = null
+    }
+    if (!this.editorView && container) {
       this.initEditor()
     }
 
-    if (this.splitActive && this.secondaryDoc && !this.secondaryEditorView) {
-      this.initSecondaryEditor()
-    } else if ((!this.splitActive || !this.secondaryDoc) && this.secondaryEditorView) {
+    if (
+      shouldMountSecondaryView({
+        splitActive: this.splitActive,
+        secondaryDoc: this.secondaryDoc,
+        splitSurface: this.splitSurface
+      })
+    ) {
+      if (!this.secondaryEditorView) this.initSecondaryEditor()
+    } else if (this.secondaryEditorView) {
       this.secondaryEditorView.destroy()
       this.secondaryEditorView = null
     }
   }
 
+  /**
+   * Mode-scoped extensions. The table editing affordances live here rather than
+   * in the base list, so reading mode does not build a table toolbar tooltip or
+   * bind Tab-to-next-cell against a view the user cannot type in. Anything
+   * added to `getBaseExtensions` instead of here runs in every mode, so new
+   * extensions belong in this function unless they are mode-independent.
+   */
   private getModeExtensions(mode: ViewMode): Extension[] {
     const normalized = mode === 'wysiwyg' || mode === 'split' ? 'live' : mode
     if (normalized === 'reading') {
-      return [readOnlyExtension(true), livePreviewPlugin()]
+      return [readOnlyExtension(true), livePreviewPlugin({ onLinkClick: this.handleLinkClick })]
     }
     if (normalized === 'source') {
       return [
         lineNumbers(),
         highlightActiveLineGutter(),
         highlightActiveLine(),
-        readOnlyExtension(false)
+        readOnlyExtension(false),
+        // Source mode renders no link decorations, so matching a click has to
+        // come from the syntax tree. Without this, `[a](b.md)` is inert here
+        // while it works in every other mode.
+        linkClickStyleFacet.of('syntax'),
+        makeLinkClickHandler(this.handleLinkClick)
       ]
     }
     // Default: 'live' (Obsidian Live Preview)
@@ -581,7 +671,10 @@ If the user asks questions about their file, use the above content to answer.`
       highlightActiveLineGutter(),
       highlightActiveLine(),
       readOnlyExtension(false),
-      livePreviewPlugin()
+      tableKeymapPlugin,
+      tableToolbarField,
+      tableLinePlugin,
+      livePreviewPlugin({ onLinkClick: this.handleLinkClick })
     ]
   }
 
@@ -650,11 +743,8 @@ If the user asks questions about their file, use the above content to answer.`
       frontmatterPlugin,
       wikiLinkPlugin,
       slashCommandPlugin,
-      tableKeymapPlugin,
-      tableToolbarField,
       keymap.of([...defaultKeymap, ...historyKeymap]),
       markdown({ extensions: [GFM], codeLanguages: languages }),
-      tableLinePlugin,
       comp.of(this.getModeExtensions(mode)),
       pathComp.of(documentPathFacet.of(currentPath)),
       EditorView.updateListener.of((update) => {
@@ -682,9 +772,12 @@ If the user asks questions about their file, use the above content to answer.`
 
   private initEditor(): void {
     const container = this.shadowRoot?.querySelector('#primary-cm-wrapper')
-    if (!container) return
-
+    // Destroy before the early return, not after it. The container is absent
+    // whenever the empty state is rendered, and bailing out first left a live
+    // view whose DOM had just been removed by the template.
     this.editorView?.destroy()
+    this.editorView = null
+    if (!container) return
 
     const state = EditorState.create({
       doc: this.content,
@@ -703,9 +796,9 @@ If the user asks questions about their file, use the above content to answer.`
 
   private initSecondaryEditor(): void {
     const container = this.shadowRoot?.querySelector('#secondary-cm-wrapper')
-    if (!container || !this.secondaryDoc) return
-
     this.secondaryEditorView?.destroy()
+    this.secondaryEditorView = null
+    if (!container || !this.secondaryDoc) return
 
     const state = EditorState.create({
       doc: this.secondaryDoc.content,
@@ -812,7 +905,30 @@ If the user asks questions about their file, use the above content to answer.`
     this.openFind(mode)
   }
 
-  /** Follow a clicked `[[wiki-link]]`: open the matching file anywhere. */
+  /**
+   * Every dependency `navigateLink` needs to turn a destination into an action.
+   * `documentPathFacet` on the clicked view decides which document the link is
+   * relative to, so the split pane resolves against its own path.
+   */
+  private navigateDeps(sourcePath: string | null): NavigateDeps {
+    return {
+      sourcePath,
+      getApi: api,
+      openFile: (path) => this.fileState.openFile(path),
+      scrollToAnchor: (anchor) => this.scrollToAnchor(anchor),
+      onMissing: (path) => {
+        this.showNotice(`No file at ${shortPath(path)}`)
+      }
+    }
+  }
+
+  /** Follow a clicked markdown link: web URLs leave the app, everything else opens. */
+  private handleLinkClick = (raw: string, view: EditorView): void => {
+    const sourcePath = view.state.facet(documentPathFacet)
+    void navigateLink(raw, this.navigateDeps(sourcePath))
+  }
+
+  /** Follow a clicked `[[wiki-link]]`: open the matching file, creating it if needed. */
   private handleOpenWikiLink = (e: Event): void => {
     const raw = (e as CustomEvent<{ name?: string }>).detail?.name ?? ''
     const target = cleanWikiTarget(raw)
@@ -823,6 +939,13 @@ If the user asks questions about their file, use the above content to answer.`
   private async openWikiTarget(target: string): Promise<void> {
     const stem = basenameNoExt(target.toLowerCase())
     const withSubpath = target.replace(/\\/g, '/').includes('/')
+
+    // The wiki pane fires from a widget inside one of the two views, so the
+    // anchor and relative-path cases resolve against whichever document the
+    // click happened in.
+    const sourcePath = this.wikiSourcePath()
+    const deps = this.navigateDeps(sourcePath)
+
     // Open tabs first (any folder), then vault files, then recent files.
     const tabs = this.fileState.getState().tabs
     const tabHit = tabs.find((t) => t.path && basenameNoExt(t.path.toLowerCase()) === stem)
@@ -830,18 +953,8 @@ If the user asks questions about their file, use the above content to answer.`
       await this.fileState.openFile(tabHit.path)
       return
     }
-    const collect = (node: VaultTreeNode, out: string[]): void => {
-      if (node.isDirectory) {
-        for (const child of node.children ?? []) collect(child, out)
-      } else if (node.path) {
-        out.push(node.path)
-      }
-    }
-    const vaultPaths: string[] = []
-    const tree = await api()
-      ?.vault?.getTree?.()
-      .catch(() => undefined)
-    if (tree) collect(tree, vaultPaths)
+
+    const vaultPaths = await this.vaultPaths()
     const recent = this.settingsStore?.get<string[]>('files.recentFiles', []) ?? []
     const candidates = [...vaultPaths, ...recent]
     const hit = candidates.find((p) => {
@@ -856,25 +969,92 @@ If the user asks questions about their file, use the above content to answer.`
       await this.fileState.openFile(hit)
       return
     }
+
     // Obsidian behavior: create the note on click.
     const vaultPath = await api()
       ?.vault?.getPath?.()
       .catch(() => undefined)
-    if (!vaultPath) return
+    if (!vaultPath) {
+      this.showNotice('Set a vault folder before creating linked notes.')
+      return
+    }
     const safe = target
       .replace(/\\/g, '/')
       .split('/')
-      .map((seg) => seg.replace(/[<>:"|?*]/g, '').trim())
+      // `..` is stripped along with the illegal filename characters: a wiki
+      // target must not be able to walk out of the vault on the create path.
+      .map((seg) =>
+        seg
+          .replace(/[<>:"|?*]/g, '')
+          .replace(/^\.+$/, '')
+          .trim()
+      )
       .filter(Boolean)
       .join('/')
     if (!safe) return
-    const newPath = `${vaultPath.replace(/\\/g, '/')}/${safe}${safe.toLowerCase().endsWith('.md') ? '' : '.md'}`
-    try {
-      await api()?.file?.write?.(newPath, '')
-      await this.fileState.openFile(newPath)
-    } catch (err) {
-      console.error('Failed to create linked note:', err)
+
+    const created = await resolveOrCreateLink(`${vaultPath.replace(/\\/g, '/')}/${safe}`, {
+      ...deps,
+      createMissing: async (path) => {
+        await api()?.file?.write?.(path, '')
+      }
+    })
+    if (created) await this.fileState.openFile(created)
+  }
+
+  /** Every file path in the vault, flattened out of the tree. */
+  private async vaultPaths(): Promise<string[]> {
+    const out: string[] = []
+    const collect = (node: VaultTreeNode): void => {
+      if (node.isDirectory) {
+        for (const child of node.children ?? []) collect(child)
+      } else if (node.path) {
+        out.push(node.path)
+      }
     }
+    const tree = await api()
+      ?.vault?.getTree?.()
+      .catch(() => undefined)
+    if (tree) collect(tree)
+    return out
+  }
+
+  /** Document path of whichever pane the last interaction came from. */
+  private wikiSourcePath(): string | null {
+    const { secondaryDoc, splitActive } = this.fileState.getState()
+    if (splitActive && secondaryDoc?.path) return secondaryDoc.path
+    return this.fileState.getState().path
+  }
+
+  /** Reveal a `#heading` anchor in the focused editor view. */
+  private scrollToAnchor(anchor: string): void {
+    const needle = anchor.trim().toLowerCase()
+    if (!needle) return
+    const view = this.findTargetView ?? this.editorView
+    if (!view) return
+    for (let pos = 0; pos <= view.state.doc.length; pos++) {
+      const line = view.state.doc.lineAt(pos)
+      const text = line.text.slice(0, line.to).toLowerCase()
+      if (headingMatches(text, needle)) {
+        view.dispatch({
+          selection: { anchor: line.from },
+          effects: EditorView.scrollIntoView(line.from, { y: 'start' })
+        })
+        view.focus()
+        return
+      }
+      pos = line.to
+    }
+  }
+
+  /** Transient status line above the editor. Rendered by `notice` in the template. */
+  private showNotice(message: string): void {
+    this.notice = message
+    if (this.noticeTimer !== null) window.clearTimeout(this.noticeTimer)
+    this.noticeTimer = window.setTimeout(() => {
+      this.noticeTimer = null
+      this.notice = ''
+    }, 4000)
   }
 
   private openFind(mode: 'find' | 'replace'): void {
@@ -999,12 +1179,33 @@ If the user asks questions about their file, use the above content to answer.`
     }
   }
 
+  /** Enter/Space on an icon-action div, so it is reachable by keyboard. */
+  private handleIconActionKey = (e: KeyboardEvent): void => {
+    if (e.key !== 'Enter' && e.key !== ' ') return
+    e.preventDefault()
+    ;(e.currentTarget as HTMLElement).click()
+  }
+
   private startResize = (e: MouseEvent): void => {
     e.preventDefault()
     this.isDraggingResizer = true
     document.addEventListener('mousemove', this.doResize)
     document.addEventListener('mouseup', this.stopResize)
     document.body.style.cursor = 'col-resize'
+  }
+
+  /**
+   * Arrow-key resize. The resizer had no role, no tabindex and no keyboard
+   * path at all, so split width was mouse-only.
+   */
+  private handleResizerKey = (e: KeyboardEvent): void => {
+    const step = e.shiftKey ? 10 : 2
+    if (e.key === 'ArrowLeft') this.leftPaneWidth = Math.max(20, this.leftPaneWidth - step)
+    else if (e.key === 'ArrowRight') this.leftPaneWidth = Math.min(80, this.leftPaneWidth + step)
+    else return
+    e.preventDefault()
+    this.editorView?.requestMeasure()
+    this.secondaryEditorView?.requestMeasure()
   }
 
   private doResize = (e: MouseEvent): void => {
@@ -1018,7 +1219,9 @@ If the user asks questions about their file, use the above content to answer.`
     }
   }
 
+  /** Idempotent: safe to call when no drag is in progress. */
   private stopResize = (): void => {
+    if (!this.isDraggingResizer) return
     this.isDraggingResizer = false
     document.removeEventListener('mousemove', this.doResize)
     document.removeEventListener('mouseup', this.stopResize)
@@ -1047,6 +1250,7 @@ If the user asks questions about their file, use the above content to answer.`
 
     return html`
       <div class="workspace">
+        ${this.notice ? html`<div class="notice" role="status">${this.notice}</div>` : ''}
         ${
           this.findOpen && this.editorView
             ? html`<writemd-find-panel
@@ -1067,132 +1271,92 @@ If the user asks questions about their file, use the above content to answer.`
         }
         <!-- split view - 1 (Responsive Left Pane) -->
         <div class="panes">
-        <writemd-panel
-          class="pane"
-          style=${this.splitActive ? `flex: 0 0 calc(${this.leftPaneWidth}% - 2.5px);` : ''}
-        >
-          ${isVerticalTabs ? '' : html`<writemd-doc-bar></writemd-doc-bar>`}
-
-          <!-- Body Content Area (CodeMirror permanently mounted, reconfigured via Compartment) -->
-          <div
-            class="body-area"
-            @paste=${(e: ClipboardEvent) => this.handlePaste(e, false)}
-            @dragover=${(e: DragEvent) => e.preventDefault()}
-            @drop=${(e: DragEvent) => this.handleDrop(e, false)}
-            @contextmenu=${this.handleTextMenu}
+          <writemd-panel
+            class="pane"
+            style=${this.splitActive ? `flex: 0 0 calc(${this.leftPaneWidth}% - 2.5px);` : ''}
           >
-            <div id="primary-cm-wrapper" class="cm-wrapper"></div>
+            ${isVerticalTabs ? '' : html`<writemd-doc-bar></writemd-doc-bar>`}
 
-            <!-- Bottom-right Info Pill -->
-            <writemd-info-pill
-              .content=${this.content}
-              .mode=${this.viewMode}
-              @mode-change=${this.handleExplicitModeChange}
-            ></writemd-info-pill>
-            ${
-              this.textMenu && this.editorView
-                ? html`<writemd-text-menu
-                    .x=${Math.min(this.textMenu.x, window.innerWidth - 240)}
-                    .y=${Math.min(this.textMenu.y, window.innerHeight - 380)}
-                    .flip=${this.textMenu.x > window.innerWidth - 480}
-                    .view=${this.editorView}
-                    @close=${() => (this.textMenu = null)}
-                  ></writemd-text-menu>`
-                : ''
-            }
-          </div>
-        </writemd-panel>
+            <!-- Body Content Area (CodeMirror permanently mounted, reconfigured via Compartment) -->
+            <div
+              class="body-area"
+              @paste=${(e: ClipboardEvent) => this.handlePaste(e, false)}
+              @dragover=${(e: DragEvent) => e.preventDefault()}
+              @drop=${(e: DragEvent) => this.handleDrop(e, false)}
+              @contextmenu=${this.handleTextMenu}
+            >
+              <div id="primary-cm-wrapper" class="cm-wrapper"></div>
 
-        <!-- split view - 2 (Right Pane, only when splitActive is true) -->
-        ${
-          this.splitActive
-            ? html`
-                <div
-                  class="resizer ${this.isDraggingResizer ? 'dragging' : ''}"
-                  @mousedown=${this.startResize}
-                ></div>
-                <writemd-panel class="pane">
-                  ${
-                    this.secondaryDoc && this.splitSurface === 'file'
-                      ? html`
-                          <!-- Secondary Document Editor -->
-                          <div class="sub-header">
-                            <div class="sub-header-left">
-                              ${this.getDisplayPath(this.secondaryDoc.path)}
-                            </div>
-                            <div class="sub-header-center">
-                              ${
-                                this.secondaryDoc.isDiff
-                                  ? html`<span style="color: #e07a5f; font-weight: 600;"
-                                      >External Changes Diff</span
-                                    >`
-                                  : html`<input
-                                      type="text"
-                                      class="title-input"
-                                      .value=${this.getDisplayTitle(this.secondaryDoc.path)}
-                                      @blur=${(e: Event) => this.handleRename(e, true)}
-                                      @keydown=${(e: KeyboardEvent) => this.handleRenameKeyDown(e, true)}
-                                    />`
-                              }
-                            </div>
-                            <div class="sub-header-right">
-                              <div
-                                class="icon-action"
-                                title="Close split pane"
-                                @click=${() => this.fileState.closeSecondaryFile()}
-                              >
-                                <svg
-                                  viewBox="0 0 12 12"
-                                  fill="none"
-                                  stroke="currentColor"
-                                  stroke-width="1.5"
-                                >
-                                  <line x1="2" y1="2" x2="10" y2="10" />
-                                  <line x1="10" y1="2" x2="2" y2="10" />
-                                </svg>
-                              </div>
-                            </div>
-                          </div>
+              <!-- Bottom-right Info Pill -->
+              <writemd-info-pill
+                .content=${this.content}
+                .mode=${this.viewMode}
+                @mode-change=${this.handleExplicitModeChange}
+              ></writemd-info-pill>
+              ${
+                this.textMenu && this.editorView
+                  ? html`<writemd-text-menu
+                      .x=${Math.min(this.textMenu.x, window.innerWidth - 240)}
+                      .y=${Math.min(this.textMenu.y, window.innerHeight - 380)}
+                      .flip=${this.textMenu.x > window.innerWidth - 480}
+                      .view=${this.editorView}
+                      @close=${() => (this.textMenu = null)}
+                    ></writemd-text-menu>`
+                  : ''
+              }
+            </div>
+          </writemd-panel>
 
-                          <div
-                            class="body-area"
-                            @paste=${(e: ClipboardEvent) => this.handlePaste(e, true)}
-                            @dragover=${(e: DragEvent) => e.preventDefault()}
-                            @drop=${(e: DragEvent) => this.handleDrop(e, true)}
-                          >
-                            <div id="secondary-cm-wrapper" class="cm-wrapper"></div>
-                            <writemd-info-pill
-                              .content=${this.secondaryDoc.content}
-                              .mode=${this.secondaryDoc.viewMode}
-                              @mode-change=${(e: CustomEvent<{ mode: ViewMode }>) => {
-                                if (this.secondaryDoc) {
-                                  this.secondaryDoc = {
-                                    ...this.secondaryDoc,
-                                    viewMode: e.detail.mode
-                                  }
-                                  if (this.secondaryEditorView) {
-                                    this.secondaryEditorView.dispatch({
-                                      effects: this.secondaryModeCompartment.reconfigure(
-                                        this.getModeExtensions(e.detail.mode)
-                                      )
-                                    })
-                                  }
-                                }
-                              }}
-                            ></writemd-info-pill>
-                          </div>
-                        `
-                      : this.splitSurface === 'files'
+          <!-- split view - 2 (Right Pane, only when splitActive is true) -->
+          ${
+            this.splitActive
+              ? html`
+                  <div
+                    class="resizer ${this.isDraggingResizer ? 'dragging' : ''}"
+                    role="separator"
+                    tabindex="0"
+                    aria-orientation="vertical"
+                    aria-label="Resize split panes"
+                    aria-valuenow=${Math.round(this.leftPaneWidth)}
+                    aria-valuemin="20"
+                    aria-valuemax="80"
+                    @mousedown=${this.startResize}
+                    @keydown=${this.handleResizerKey}
+                  ></div>
+                  <writemd-panel class="pane">
+                    ${
+                      this.secondaryDoc && this.splitSurface === 'file'
                         ? html`
-                            <!-- Vault Files Tree Panel -->
+                            <!-- Secondary Document Editor -->
                             <div class="sub-header">
-                              <div class="sub-header-left">Vault</div>
-                              <div class="sub-header-center">Files</div>
+                              <div class="sub-header-left">
+                                ${this.getDisplayPath(this.secondaryDoc.path)}
+                              </div>
+                              <div class="sub-header-center">
+                                ${
+                                  this.secondaryDoc.isDiff
+                                    ? html`<span style="color: var(--warning); font-weight: 600;"
+                                        >External Changes Diff</span
+                                      >`
+                                    : html`<input
+                                        type="text"
+                                        class="title-input"
+                                        aria-label="Split pane document title"
+                                        .value=${this.getDisplayTitle(this.secondaryDoc.path)}
+                                        @blur=${(e: Event) => this.handleRename(e, true)}
+                                        @keydown=${(e: KeyboardEvent) => this.handleRenameKeyDown(e, true)}
+                                      />`
+                                }
+                              </div>
                               <div class="sub-header-right">
                                 <div
                                   class="icon-action"
+                                  role="button"
+                                  tabindex="0"
+                                  aria-label="Close split pane"
                                   title="Close split pane"
-                                  @click=${() => this.fileState.toggleSplitView(false)}
+                                  @keydown=${this.handleIconActionKey}
+                                  @click=${() => this.fileState.closeSecondaryFile()}
                                 >
                                   <svg
                                     viewBox="0 0 12 12"
@@ -1206,18 +1370,41 @@ If the user asks questions about their file, use the above content to answer.`
                                 </div>
                               </div>
                             </div>
-                            <writemd-vault-explorer></writemd-vault-explorer>
+
+                            <div
+                              class="body-area"
+                              @paste=${(e: ClipboardEvent) => this.handlePaste(e, true)}
+                              @dragover=${(e: DragEvent) => e.preventDefault()}
+                              @drop=${(e: DragEvent) => this.handleDrop(e, true)}
+                            >
+                              <div id="secondary-cm-wrapper" class="cm-wrapper"></div>
+                              <writemd-info-pill
+                                .content=${this.secondaryDoc.content}
+                                .mode=${this.secondaryDoc.viewMode}
+                                @mode-change=${(e: CustomEvent<{ mode: ViewMode }>) => {
+                                  // Go through FileState, not local state: a local
+                                  // mutation is overwritten by the next notify()
+                                  // from the store, which dispatches a second
+                                  // reconfigure and leaves the two out of sync.
+                                  void this.fileState.setSecondaryViewMode(e.detail.mode)
+                                }}
+                              ></writemd-info-pill>
+                            </div>
                           `
-                        : this.splitSurface === 'backlinks'
+                        : this.splitSurface === 'files'
                           ? html`
-                              <!-- Backlinks Panel -->
+                              <!-- Vault Files Tree Panel -->
                               <div class="sub-header">
-                                <div class="sub-header-left">Document</div>
-                                <div class="sub-header-center">Backlinks</div>
+                                <div class="sub-header-left">Vault</div>
+                                <div class="sub-header-center">Files</div>
                                 <div class="sub-header-right">
                                   <div
                                     class="icon-action"
+                                    role="button"
+                                    tabindex="0"
+                                    aria-label="Close split pane"
                                     title="Close split pane"
+                                    @keydown=${this.handleIconActionKey}
                                     @click=${() => this.fileState.toggleSplitView(false)}
                                   >
                                     <svg
@@ -1232,37 +1419,22 @@ If the user asks questions about their file, use the above content to answer.`
                                   </div>
                                 </div>
                               </div>
-                              <writemd-backlinks-panel
-                                .currentPath=${this.filePath}
-                              ></writemd-backlinks-panel>
+                              <writemd-vault-explorer></writemd-vault-explorer>
                             `
-                          : this.splitSurface === 'ai'
+                          : this.splitSurface === 'backlinks'
                             ? html`
-                                <!-- AI Panel -->
+                                <!-- Backlinks Panel -->
                                 <div class="sub-header">
-                                  <div class="sub-header-left">Assistant</div>
-                                  <div class="sub-header-center">AI</div>
+                                  <div class="sub-header-left">Document</div>
+                                  <div class="sub-header-center">Backlinks</div>
                                   <div class="sub-header-right">
                                     <div
                                       class="icon-action"
-                                      title="Clear chat history"
-                                      @click=${() => (this.aiMessages = [])}
-                                    >
-                                      <svg
-                                        viewBox="0 0 24 24"
-                                        fill="none"
-                                        stroke="currentColor"
-                                        stroke-width="1.5"
-                                      >
-                                        <path d="M3 6h18" />
-                                        <path
-                                          d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"
-                                        />
-                                      </svg>
-                                    </div>
-                                    <div
-                                      class="icon-action"
+                                      role="button"
+                                      tabindex="0"
+                                      aria-label="Close split pane"
                                       title="Close split pane"
+                                      @keydown=${this.handleIconActionKey}
                                       @click=${() => this.fileState.toggleSplitView(false)}
                                     >
                                       <svg
@@ -1277,46 +1449,103 @@ If the user asks questions about their file, use the above content to answer.`
                                     </div>
                                   </div>
                                 </div>
-                                <writemd-ai-panel
-                                  .configured=${this.isAiConfigured}
-                                  .messages=${this.aiMessages}
-                                  .loading=${this.aiIsLoading}
-                                  @ai-submit=${this.handleAiSubmitEvent}
-                                ></writemd-ai-panel>
+                                <writemd-backlinks-panel
+                                  .currentPath=${this.filePath}
+                                ></writemd-backlinks-panel>
                               `
-                            : html`
-                                <!-- Open a surface Launcher Panel -->
-                                <div class="sub-header">
-                                  <div class="sub-header-left">Surface</div>
-                                  <div class="sub-header-center">Open a surface</div>
-                                  <div class="sub-header-right">
-                                    <div
-                                      class="icon-action"
-                                      title="Close split pane"
-                                      @click=${() => this.fileState.toggleSplitView(false)}
-                                    >
-                                      <svg
-                                        viewBox="0 0 12 12"
-                                        fill="none"
-                                        stroke="currentColor"
-                                        stroke-width="1.5"
+                            : this.splitSurface === 'ai'
+                              ? html`
+                                  <!-- AI Panel -->
+                                  <div class="sub-header">
+                                    <div class="sub-header-left">Assistant</div>
+                                    <div class="sub-header-center">AI</div>
+                                    <div class="sub-header-right">
+                                      <div
+                                        class="icon-action"
+                                        role="button"
+                                        tabindex="0"
+                                        aria-label="Clear chat history"
+                                        title="Clear chat history"
+                                        @keydown=${this.handleIconActionKey}
+                                        @click=${() => (this.aiMessages = [])}
                                       >
-                                        <line x1="2" y1="2" x2="10" y2="10" />
-                                        <line x1="10" y1="2" x2="2" y2="10" />
-                                      </svg>
+                                        <svg
+                                          viewBox="0 0 24 24"
+                                          fill="none"
+                                          stroke="currentColor"
+                                          stroke-width="1.5"
+                                        >
+                                          <path d="M3 6h18" />
+                                          <path
+                                            d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"
+                                          />
+                                        </svg>
+                                      </div>
+                                      <div
+                                        class="icon-action"
+                                        role="button"
+                                        tabindex="0"
+                                        aria-label="Close split pane"
+                                        title="Close split pane"
+                                        @keydown=${this.handleIconActionKey}
+                                        @click=${() => this.fileState.toggleSplitView(false)}
+                                      >
+                                        <svg
+                                          viewBox="0 0 12 12"
+                                          fill="none"
+                                          stroke="currentColor"
+                                          stroke-width="1.5"
+                                        >
+                                          <line x1="2" y1="2" x2="10" y2="10" />
+                                          <line x1="10" y1="2" x2="2" y2="10" />
+                                        </svg>
+                                      </div>
                                     </div>
                                   </div>
-                                </div>
+                                  <writemd-ai-panel
+                                    .configured=${this.isAiConfigured}
+                                    .messages=${this.aiMessages}
+                                    .loading=${this.aiIsLoading}
+                                    @ai-submit=${this.handleAiSubmitEvent}
+                                  ></writemd-ai-panel>
+                                `
+                              : html`
+                                  <!-- Open a surface Launcher Panel -->
+                                  <div class="sub-header">
+                                    <div class="sub-header-left">Surface</div>
+                                    <div class="sub-header-center">Open a surface</div>
+                                    <div class="sub-header-right">
+                                      <div
+                                        class="icon-action"
+                                        role="button"
+                                        tabindex="0"
+                                        aria-label="Close split pane"
+                                        title="Close split pane"
+                                        @keydown=${this.handleIconActionKey}
+                                        @click=${() => this.fileState.toggleSplitView(false)}
+                                      >
+                                        <svg
+                                          viewBox="0 0 12 12"
+                                          fill="none"
+                                          stroke="currentColor"
+                                          stroke-width="1.5"
+                                        >
+                                          <line x1="2" y1="2" x2="10" y2="10" />
+                                          <line x1="10" y1="2" x2="2" y2="10" />
+                                        </svg>
+                                      </div>
+                                    </div>
+                                  </div>
 
-                                <writemd-surface-launcher
-                                  @select-surface=${this.handleSurfaceSelection}
-                                ></writemd-surface-launcher>
-                              `
-                  }
-                </writemd-panel>
-              `
-            : ''
-        }
+                                  <writemd-surface-launcher
+                                    @select-surface=${this.handleSurfaceSelection}
+                                  ></writemd-surface-launcher>
+                                `
+                    }
+                  </writemd-panel>
+                `
+              : ''
+          }
         </div>
       </div>
     `

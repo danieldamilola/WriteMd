@@ -2,8 +2,12 @@ import { html, css, LitElement } from 'lit'
 import { customElement, property } from 'lit/decorators.js'
 import { unsafeHTML } from 'lit/directives/unsafe-html.js'
 import MarkdownIt from 'markdown-it'
+import { createLinkInterceptor } from './extensions/safe-links'
 
-const md = new MarkdownIt({ breaks: true, linkify: true })
+// `html: false` is what makes the unsafeHTML below safe: raw markup in a model
+// response is escaped rather than parsed. linkify only ever emits http/https/
+// ftp/mailto, and clicks are intercepted, so none of it can navigate.
+const md = new MarkdownIt({ breaks: true, linkify: true, html: false })
 
 export interface AiMessage {
   role: 'user' | 'assistant'
@@ -41,6 +45,23 @@ export class AiPanel extends LitElement {
     )
   }
 
+  connectedCallback(): void {
+    super.connectedCallback()
+    // Model output can contain links, and the whole file under edit is pasted
+    // into the prompt, so a URL from a malicious note can come back as a chat
+    // link. Route clicks to the main process instead of navigating the window.
+    this.addEventListener('click', this.interceptLinks, true)
+  }
+
+  disconnectedCallback(): void {
+    this.removeEventListener('click', this.interceptLinks, true)
+    super.disconnectedCallback()
+  }
+
+  // Capture phase: the rendered message markup lives in this element's shadow
+  // root, and a bubble-phase handler could be pre-empted from below.
+  private readonly interceptLinks = createLinkInterceptor(() => this.shadowRoot) as EventListener
+
   /** Keep the latest message visible above the pinned input. */
   updated(): void {
     const log = this.shadowRoot?.querySelector('.chat-log')
@@ -64,6 +85,9 @@ export class AiPanel extends LitElement {
       >
         <div
           class="chat-log"
+          role="log"
+          aria-live="polite"
+          aria-label="Assistant conversation"
           style="flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; font-family: var(--font-body); font-size: 14px; color: var(--text);"
         >
           <div style="display: flex; gap: 8px;">
@@ -113,6 +137,7 @@ export class AiPanel extends LitElement {
         <div style="flex-shrink: 0;">
           <input
             type="text"
+            aria-label="Ask the AI assistant"
             placeholder="Ask AI..."
             .disabled=${this.loading}
             style="width: 100%; padding: 12px; background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 6px; color: var(--text); font-family: var(--font-body); box-sizing: border-box; opacity: ${

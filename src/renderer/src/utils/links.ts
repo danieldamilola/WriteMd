@@ -30,8 +30,12 @@ export function cleanWikiTarget(raw: string): string {
   return raw.split('|')[0].split('#')[0].trim()
 }
 
+/** `C:\...` / `c:/...` is a Windows path, not a `c:` URI scheme. */
+const DRIVE_RE = /^[a-zA-Z]:[\\/]/
+
 export function isExternalUrl(target: string): boolean {
   const t = target.trim()
+  if (DRIVE_RE.test(t)) return false
   return (
     t.startsWith('//') ||
     /^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(t) ||
@@ -59,8 +63,8 @@ export function normalizeExternalUrl(target: string): string {
   return /^https?:\/\//i.test(t) ? t : `https://${t}`
 }
 
-/** Lowercased `/`-separated path with `.`/`..` resolved, drive letters kept. */
-export function normalizePath(p: string): string {
+/** `/`-separated path with `.`/`..` resolved, drive letters kept, case intact. */
+export function normalizePathExact(p: string): string {
   const forward = p.replace(/\\/g, '/')
   const drive = forward.match(/^[a-zA-Z]:\//) ? forward.slice(0, 2) : ''
   const rest = drive ? forward.slice(2) : forward
@@ -75,7 +79,16 @@ export function normalizePath(p: string): string {
     }
     out.push(seg)
   }
-  return `${drive}${absolute ? '/' : ''}${out.join('/')}`.toLowerCase()
+  return `${drive}${absolute ? '/' : ''}${out.join('/')}`
+}
+
+/**
+ * Case-folded form of `normalizePathExact`, for comparing two paths where the
+ * filesystem may or may not care about case. Never use this to open a file:
+ * lowercasing would break `Notes/Deploy.md` on a case-sensitive filesystem.
+ */
+export function normalizePath(p: string): string {
+  return normalizePathExact(p).toLowerCase()
 }
 
 export function basenameNoExt(p: string): string {
@@ -91,18 +104,32 @@ function dirnameOf(p: string): string {
 
 /**
  * Resolve a markdown link destination against the linking file.
- * Returns a normalized absolute-ish path, or null for external/anchor links.
+ * Returns a case-preserving path, or null for external/anchor links.
+ *
+ * Use this before opening a file. `resolveMdTarget` below is the same thing
+ * case-folded, which is right for backlink comparison but wrong for navigation.
  */
-export function resolveMdTarget(sourcePath: string, rawTarget: string): string | null {
+export function resolveLinkPath(sourcePath: string | null, rawTarget: string): string | null {
   let t = rawTarget.trim()
   if (t.startsWith('<') && t.endsWith('>')) t = t.slice(1, -1).trim()
+  if (t.includes(' ')) return null
   t = t.split('#')[0].trim()
+  t = t.split('?')[0].trim()
   if (!t || isExternalUrl(rawTarget.trim())) return null
   const forward = t.replace(/\\/g, '/')
   if (/^[a-zA-Z]:\//.test(forward) || forward.startsWith('/')) {
-    return normalizePath(forward)
+    return normalizePathExact(forward)
   }
-  return normalizePath(`${dirnameOf(sourcePath)}/${forward}`)
+  const dir = sourcePath ? dirnameOf(sourcePath) : ''
+  return normalizePathExact(dir ? `${dir}/${forward}` : forward)
+}
+
+/**
+ * Resolve a markdown link destination against the linking file, case-folded.
+ * Returns a normalized path, or null for external/anchor links.
+ */
+export function resolveMdTarget(sourcePath: string, rawTarget: string): string | null {
+  return resolveLinkPath(sourcePath, rawTarget)?.toLowerCase() ?? null
 }
 
 /**

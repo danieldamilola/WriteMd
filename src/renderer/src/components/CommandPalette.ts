@@ -1,6 +1,17 @@
 import { html, css, LitElement } from 'lit'
 import { customElement, state } from 'lit/decorators.js'
 import { SettingsStore } from '../state/settings'
+
+/**
+ * The element that actually holds focus, descending through open shadow roots.
+ * `document.activeElement` only reports the outermost host, and calling focus()
+ * on that host does nothing, so focus would land back on body.
+ */
+function deepActiveElement(): HTMLElement | null {
+  let el: Element | null = document.activeElement
+  while (el?.shadowRoot?.activeElement) el = el.shadowRoot.activeElement
+  return el as HTMLElement | null
+}
 import { scrollbarStyles } from './scrollbars'
 import { COMMANDS, effectiveBinding, formatBinding, fuzzyMatch } from '../state/shortcuts'
 
@@ -17,14 +28,14 @@ export class CommandPalette extends LitElement {
         justify-content: center;
         align-items: flex-start;
         padding-top: 12vh;
-        background: rgba(0, 0, 0, 0.5);
+        background: var(--scrim, rgba(0, 0, 0, 0.5));
       }
       .panel {
         width: min(560px, 92vw);
-        background: #141414;
-        border: 1px solid #2e2e32;
+        background: var(--bg-elevated);
+        border: 1px solid var(--border-subtle);
         border-radius: 8px;
-        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+        box-shadow: var(--shadow-3);
         overflow: hidden;
       }
       input {
@@ -32,9 +43,9 @@ export class CommandPalette extends LitElement {
         box-sizing: border-box;
         background: transparent;
         border: none;
-        border-bottom: 1px solid #2a2a2e;
+        border-bottom: 1px solid var(--border-subtle);
         padding: 12px 16px;
-        color: #e8e8e8;
+        color: var(--text);
         font-size: 14px;
         outline: none;
         font-family: inherit;
@@ -51,21 +62,21 @@ export class CommandPalette extends LitElement {
         padding: 8px 12px;
         border-radius: 4px;
         cursor: pointer;
-        color: #c9c9c9;
+        color: var(--text-secondary);
         font-size: 13px;
       }
       .item.selected {
-        background: #2b2b2f;
-        color: #ffffff;
+        background: var(--bg-active);
+        color: var(--text);
       }
       .hint {
-        color: #8a8a8a;
+        color: var(--text-muted);
         font-size: 12px;
         font-family: var(--font-mono, monospace);
       }
       .empty {
         padding: 16px;
-        color: #8a8a8a;
+        color: var(--text-muted);
         font-size: 13px;
         text-align: center;
       }
@@ -77,9 +88,13 @@ export class CommandPalette extends LitElement {
 
   private settingsStore = SettingsStore.getInstance()
 
+  private previouslyFocused: HTMLElement | null = null
+
   connectedCallback(): void {
     super.connectedCallback()
     this.addEventListener('click', this.handleBackdropClick)
+    // Capture whatever opened the palette so focus can go back to it on close.
+    this.previouslyFocused = deepActiveElement()
   }
 
   disconnectedCallback(): void {
@@ -91,12 +106,19 @@ export class CommandPalette extends LitElement {
     this.shadowRoot?.querySelector('input')?.focus()
   }
 
-  private handleBackdropClick = (e: MouseEvent): void => {
-    if (e.target === this) this.close()
+  private close(): void {
+    const target = this.previouslyFocused
+    this.previouslyFocused = null
+    // Restore after the event that dispatched this finishes, since the host
+    // removes the palette during its own handler.
+    queueMicrotask(() => {
+      if (target?.isConnected) target.focus()
+    })
+    this.dispatchEvent(new CustomEvent('close', { bubbles: true, composed: true }))
   }
 
-  private close(): void {
-    this.dispatchEvent(new CustomEvent('close', { bubbles: true, composed: true }))
+  private handleBackdropClick = (e: MouseEvent): void => {
+    if (e.target === this) this.close()
   }
 
   private get filtered(): typeof COMMANDS {
@@ -133,7 +155,15 @@ export class CommandPalette extends LitElement {
       const cmd = list[this.selected]
       if (cmd) this.run(cmd.id)
     } else if (e.key === 'Escape') {
+      // Capture phase: App also listens for Escape on window, and a sibling
+      // listener cannot be silenced with stopPropagation alone.
+      e.stopImmediatePropagation()
       this.close()
+    } else if (e.key === 'Tab') {
+      // The input and the list are the only focusables, so trap rather than let
+      // Tab walk into the document behind the dialog.
+      e.preventDefault()
+      this.shadowRoot?.querySelector('input')?.focus()
     }
   }
 
@@ -148,18 +178,27 @@ export class CommandPalette extends LitElement {
       >
         <input
           type="text"
+          role="combobox"
+          aria-label="Search commands"
+          aria-expanded="true"
+          aria-controls="cmd-list"
+          aria-activedescendant=${list[this.selected] ? `cmd-${this.selected}` : ''}
+          autocomplete="off"
           placeholder="Type a command..."
           .value=${this.query}
           @input=${this.handleInput}
           @keydown=${this.handleKeyDown}
         />
-        <div class="list">
+        <div class="list" id="cmd-list" role="listbox" aria-label="Commands">
           ${
             list.length === 0
               ? html`<div class="empty">No matching commands</div>`
               : list.map(
                   (c, i) => html`
                     <div
+                      id=${`cmd-${i}`}
+                      role="option"
+                      aria-selected=${i === this.selected ? 'true' : 'false'}
                       class=${i === this.selected ? 'item selected' : 'item'}
                       @click=${() => this.run(c.id)}
                       @mousemove=${() => {

@@ -5,7 +5,10 @@ export default defineConfig({
   timeout: 30000,
   retries: process.env.CI ? 2 : 0,
   workers: 1,
+  // `out/main/index.js` is what package.json's "main" points at, and nothing
+  // built it before. A fresh clone ran the specs against a missing bundle.
+  globalSetup: './tests/e2e/global-setup.ts',
   use: {
-    trace: 'on-first-retry',
-  },
+    trace: 'on-first-retry'
+  }
 })

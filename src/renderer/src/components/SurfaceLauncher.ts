@@ -13,7 +13,7 @@ export class SurfaceLauncher extends LitElement {
       width: 100%;
       height: 100%;
       font-family: 'Geist Mono', monospace;
-      color: #ffffff;
+      color: var(--text);
       user-select: none;
       box-sizing: border-box;
       padding: 24px;
@@ -31,7 +31,7 @@ export class SurfaceLauncher extends LitElement {
     .title {
       font-size: 16px;
       font-weight: 400;
-      color: #ffffff;
+      color: var(--text);
       letter-spacing: 0.02em;
     }
 
@@ -54,7 +54,7 @@ export class SurfaceLauncher extends LitElement {
     }
 
     .row:hover {
-      background: rgba(255, 255, 255, 0.05);
+      background: var(--bg-hover);
     }
 
     .left {
@@ -69,12 +69,12 @@ export class SurfaceLauncher extends LitElement {
       display: flex;
       align-items: center;
       justify-content: center;
-      color: #595959;
+      color: var(--text-muted);
       transition: color 100ms ease;
     }
 
     .row:hover .icon {
-      color: #8c8c8c;
+      color: var(--text-muted);
     }
 
     .icon svg {
@@ -84,12 +84,12 @@ export class SurfaceLauncher extends LitElement {
 
     .label {
       font-size: 14px;
-      color: #ffffff;
+      color: var(--text);
     }
 
     .shortcut {
       font-size: 10px;
-      color: #737373;
+      color: var(--text-muted);
       letter-spacing: 0.02em;
     }
   `

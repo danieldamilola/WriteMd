@@ -24,7 +24,14 @@ export class MathWidget extends WidgetType {
       katex.render(this.content, renderContainer, {
         displayMode: this.isBlock,
         throwOnError: false,
-        errorColor: '#ff6b6b'
+        errorColor: '#ff6b6b',
+        // Formula source is raw document content. `trust: false` is KaTeX's
+        // default but it is what disables \href, \url, \htmlClass and friends,
+        // so it is set explicitly rather than inherited.
+        trust: false,
+        // Bound the parser so a pathological formula cannot hang the editor.
+        maxSize: 20,
+        maxExpand: 1000
       })
     } catch {
       renderContainer.textContent = `[Math Error] ${this.content}`

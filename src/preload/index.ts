@@ -28,10 +28,12 @@ const writemdAPI = {
   file: {
     read: (path: string) => ipcRenderer.invoke('file:read', path),
     write: (path: string, content: string) => ipcRenderer.invoke('file:write', path, content),
+    // One handler, two names. `dialog.showOpenDialog` below is the same
+    // channel, kept because existing call sites use both spellings.
     openDialog: (options: {
       properties?: string[]
       filters?: { name: string; extensions: string[] }[]
-    }) => ipcRenderer.invoke('file:open-dialog', options),
+    }) => ipcRenderer.invoke('dialog:show-open-dialog', options),
     saveDialog: (options: {
       defaultPath?: string
       filters?: { name: string; extensions: string[] }[]

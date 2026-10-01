@@ -1,0 +1,20 @@
+# Normalize line endings on checkin so prettier and .editorconfig (end_of_line=lf)
+# agree with the working tree. Without this, core.autocrlf=true on Windows
+# checks files out with CRLF and `pnpm lint` reports a prettier warning for every
+# single line in the repo.
+* text=auto eol=lf
+
+# Binary assets that must never be line-ending normalized.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.webp binary
+*.bmp binary
+*.ico binary
+*.icns binary
+# woff2 was missing here, so the two tracked font files resolved to
+# "text: auto" and survived only because git sniffs the wOF2 magic bytes.
+# Detection is not policy.
+*.woff binary
+*.woff2 binary

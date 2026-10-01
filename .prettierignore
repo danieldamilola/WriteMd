@@ -1,6 +1,15 @@
 out
 dist
 pnpm-lock.yaml
-LICENSE.md
+# The file is LICENSE, with no extension. Naming LICENSE.md here meant prettier
+# still tried to format it.
+LICENSE
+# tsconfig.json is excluded by the tsconfig.*.json rule below; keep the bare one
+# for clarity.
 tsconfig.json
 tsconfig.*.json
+# Prettier cannot infer a parser for these and errors out when `pnpm format`
+# walks the tree.
+.gitattributes
+.editorconfig
+.gitignore

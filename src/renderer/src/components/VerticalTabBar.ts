@@ -52,7 +52,7 @@ export class VerticalTabBar extends LitElement {
     }
     .tab-add:hover {
       color: var(--text);
-      background: rgba(255, 255, 255, 0.06);
+      background: var(--bg-hover);
     }
   `
 
@@ -61,9 +61,16 @@ export class VerticalTabBar extends LitElement {
   @property({ type: String }) secondaryPath: string | null = null
   @property({ type: Boolean }) secondaryDirty = false
 
+  /** Enter/Space on the add-tab button, which is a div. */
+  private handleAddKey = (e: KeyboardEvent): void => {
+    if (e.key !== 'Enter' && e.key !== ' ') return
+    e.preventDefault()
+    this.dispatchEvent(new CustomEvent('add-tab', { bubbles: true, composed: true }))
+  }
+
   render(): unknown {
     return html`
-      <div class="tab-list">
+      <div class="tab-list" role="tablist" aria-label="Open documents">
         ${this.tabs.map(
           (t, i) => html`
             <writemd-tab
@@ -72,38 +79,61 @@ export class VerticalTabBar extends LitElement {
               .dirty=${t.dirty}
               @select=${(): void => {
                 this.dispatchEvent(
-                  new CustomEvent('select-tab', { detail: { index: i }, bubbles: true, composed: true })
+                  new CustomEvent('select-tab', {
+                    detail: { index: i },
+                    bubbles: true,
+                    composed: true
+                  })
                 )
               }}
               @close=${(): void => {
                 this.dispatchEvent(
-                  new CustomEvent('close-tab', { detail: { index: i }, bubbles: true, composed: true })
+                  new CustomEvent('close-tab', {
+                    detail: { index: i },
+                    bubbles: true,
+                    composed: true
+                  })
                 )
               }}
             ></writemd-tab>
           `
         )}
-        ${this.secondaryPath
-          ? html`
-              <writemd-tab
-                label=${tabLabel(this.secondaryPath)}
-                ?active=${false}
-                .dirty=${this.secondaryDirty}
-                @close=${(): void => {
-                  this.dispatchEvent(new CustomEvent('close-secondary', { bubbles: true, composed: true }))
-                }}
-              ></writemd-tab>
-            `
-          : ''}
+        ${
+          this.secondaryPath
+            ? html`
+                <writemd-tab
+                  label=${tabLabel(this.secondaryPath)}
+                  ?active=${false}
+                  .dirty=${this.secondaryDirty}
+                  @close=${(): void => {
+                    this.dispatchEvent(
+                      new CustomEvent('close-secondary', { bubbles: true, composed: true })
+                    )
+                  }}
+                ></writemd-tab>
+              `
+            : ''
+        }
       </div>
       <div
         class="tab-add"
+        role="button"
+        tabindex="0"
+        aria-label="Open file in new tab"
         title="Open file in new tab"
         @click=${(): void => {
           this.dispatchEvent(new CustomEvent('add-tab', { bubbles: true, composed: true }))
         }}
+        @keydown=${this.handleAddKey}
       >
-        <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5">
+        <svg
+          width="14"
+          height="14"
+          viewBox="0 0 14 14"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.5"
+        >
           <line x1="7" y1="2" x2="7" y2="12" />
           <line x1="2" y1="7" x2="12" y2="7" />
         </svg>

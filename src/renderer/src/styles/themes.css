@@ -1,41 +1,157 @@
-/* writemd theme palettes. Swap via [data-theme="..."] on <html>. */
+/*
+ * WriteMd theme system.
+ *
+ * Structure follows opencode's approach (packages/ui/src/theme): a theme supplies
+ * a small set of seeds, and the neutral scale is *derived* from them in OKLCH so
+ * every relationship holds identically in all seven themes. The alternative, which
+ * this file used to do, is ~48 hand-picked hexes per theme. That silently drifts:
+ * two themes end up with different frame-to-surface contrast, a value gets
+ * hardcoded that should have been derived, and nothing catches it.
+ *
+ * What a theme owns:
+ *   --seed-bg        the window's base surface
+ *   --seed-ink       primary text
+ *   --neutral-dir    +1 when the theme is dark, -1 when light. This is the only
+ *                    sign a theme sets: dark surfaces sink below the base,
+ *                    light surfaces rise above it.
+ *   --accent / --danger / --warning / --success and the syntax/code ramps,
+ *                    which are genuine per-theme design choices
+ *
+ * Everything else is computed in :root below.
+ *
+ * Requires Chromium 119+ for relative colour syntax (oklch(from ...)). Electron
+ * 39 ships Chromium 140.
+ */
+
+:root {
+  /*
+   * One perceptual ramp, shared by every theme.
+   *
+   * --ramp-frame is measured, not chosen: dark's --bg #1a1b1e sits at OKLCH
+   * lightness 0.2223 and the intended window frame #0a0a0a at 0.1448, a step of
+   * 0.0775. Encoding the step keeps the relationship and loses the magic number.
+   */
+  --ramp-frame: 0.0775;
+  --ramp-raised: 0.049;
+  --ramp-gutter: 0.041;
+  --ramp-card: 0.037;
+
+  /* Overlay strength for ink, applied over whatever surface sits beneath. */
+  --hover-alpha: 6%;
+  --active-alpha: 11%;
+  --border-alpha: 17%;
+  --border-subtle-alpha: 10%;
+  --selection-alpha: 25%;
+  --danger-wash-alpha: 12%;
+  --accent-wash-alpha: 12%;
+
+  /* Text steps down from ink on dark themes, up on light ones. */
+  --ramp-text-secondary: 0.18;
+  --ramp-text-muted: 0.44;
+
+  /* Shadows scale with a per-theme strength; light themes need far less. */
+  --shadow-strength: 1;
+
+  --shadow-1: 0 1px 2px rgb(0 0 0 / calc(0.3 * var(--shadow-strength)));
+  --shadow-2: 0 4px 12px rgb(0 0 0 / calc(0.4 * var(--shadow-strength)));
+  --shadow-3: 0 8px 24px rgb(0 0 0 / calc(0.5 * var(--shadow-strength)));
+
+  /*
+   * Derived neutral scale.
+   *
+   * `from var(--seed-bg)` reads the seed's own lightness and chroma, so a theme
+   * only has to supply one background colour and gets a coherent ramp. Out-of-
+   * gamut results clamp, which is why light themes land on pure white for
+   * elevated surfaces without needing a special case.
+   */
+  --bg: var(--seed-bg);
+
+  /*
+   * The window shell. Sinks below the base so panes read as sitting on it.
+   * Only dark themes get a distinct frame: on a near-white window a recessed
+   * border reads as a grey outline rather than as chrome, so light themes leave
+   * the frame equal to the base. One sign already distinguishes them.
+   */
+  --ramp-frame-active: calc(var(--ramp-frame) * max(0, var(--neutral-dir)));
+  --bg-frame: oklch(from var(--seed-bg) calc(l - var(--ramp-frame-active)) calc(c * 0.75) h);
+
+  /* Panes: inset on dark themes, raised on light ones. */
+  --bg-elevated: oklch(
+    from var(--seed-bg) calc(l - var(--neutral-dir) * var(--ramp-raised)) calc(c * 0.6) h
+  );
+  --bg-secondary: var(--bg-elevated);
+
+  /*
+   * Code and gutters sink in every theme: dark wants #141414 under a #1a1b1e
+   * base, light wants #f5f5f5 under a #fafafa base. Same direction both ways,
+   * so this one does not take neutral-dir.
+   */
+  --bg-code: oklch(from var(--seed-bg) calc(l - var(--ramp-gutter)) calc(c * 0.7) h);
+  --bg-gutter: var(--bg-code);
+
+  /* Floating chips and pills sit above the base in both directions. */
+  --bg-card: oklch(
+    from var(--seed-bg) calc(l + var(--neutral-dir) * var(--ramp-card)) calc(c * 0.7) h
+  );
+
+  /*
+   * Hover and active are translucent rather than absolute steps, so one value
+   * works over the frame, over a pane, and over a menu. An absolute hex would
+   * only be correct on the surface it was authored against.
+   */
+  --bg-hover: color-mix(in oklab, var(--seed-ink) var(--hover-alpha), transparent);
+  --bg-active: color-mix(in oklab, var(--seed-ink) var(--active-alpha), transparent);
+
+  /* Text ramp, expressed as steps from ink so it inverts correctly by theme. */
+  --text: var(--seed-ink);
+  --text-secondary: oklch(
+    from var(--seed-ink) calc(l - var(--neutral-dir) * var(--ramp-text-secondary)) c h
+  );
+  --text-muted: oklch(
+    from var(--seed-ink) calc(l - var(--neutral-dir) * var(--ramp-text-muted)) c h
+  );
+
+  --border: color-mix(in oklab, var(--seed-ink) var(--border-alpha), transparent);
+  --border-subtle: color-mix(in oklab, var(--seed-ink) var(--border-subtle-alpha), transparent);
+
+  --border-focus: var(--accent);
+  --accent-text: var(--accent-text-seed, #ffffff);
+  --selection: color-mix(in oklab, var(--accent) var(--selection-alpha), transparent);
+
+  --danger-bg: color-mix(in oklab, var(--danger) var(--danger-wash-alpha), var(--seed-bg));
+  --success-bg: color-mix(in oklab, var(--success) var(--accent-wash-alpha), var(--seed-bg));
+  --warning-bg: color-mix(in oklab, var(--warning) var(--accent-wash-alpha), var(--seed-bg));
+
+  --code-bg: var(--bg-code);
+  --menu-bg: var(--bg-elevated);
+  --scrim: color-mix(in oklab, var(--seed-ink) 4%, rgb(0 0 0 / 55%));
+}
+
+/* ─────────────────────────── dark ─────────────────────────── */
 
 :root,
 [data-theme='dark'] {
-  --bg: #1a1b1e;
-  --bg-elevated: #141414;
-  --bg-hover: #2a2b2f;
-  --bg-active: #333439;
-  --bg-gutter: #17181a;
-  --border: #3a3b3f;
-  --border-subtle: #2e2f33;
-  --border-focus: #4a9eff;
-  --text: #e8e8e8;
-  --text-secondary: #b0b0b0;
-  --text-muted: #7a7a7a;
+  --seed-bg: #1a1b1e;
+  --seed-ink: #e8e8e8;
+  --neutral-dir: 1;
+
   --accent: #4a9eff;
   --accent-hover: #5aaaff;
-  --accent-text: #ffffff;
-  --selection: #4a9eff40;
+  --accent-text-seed: #ffffff;
   --danger: #ff6b6b;
-  --danger-bg: #3d1a1a;
   --warning: #ffb84d;
-  --code-bg: #141517;
-  --menu-bg: #131416;
-  --bg-secondary: #141517;
-  --bg-card: #212121;
-  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.3);
-  --shadow-2: 0 4px 12px rgba(0, 0, 0, 0.4);
-  --shadow-3: 0 8px 24px rgba(0, 0, 0, 0.5);
-  --syntax-h1: #e8e8e8;
+  --success: #4cd97a;
+
+  --syntax-h1: var(--seed-ink);
   --syntax-h2: #4a9eff;
-  --syntax-h3: #4cd97a;
-  --syntax-bold: #e8e8e8;
-  --syntax-italic: #b0b0b0;
-  --syntax-link: #5aaaff;
-  --syntax-code: #ff6b6b;
-  --syntax-quote: #7a7a7a;
-  --syntax-list: #ffb84d;
+  --syntax-h3: var(--success);
+  --syntax-bold: var(--seed-ink);
+  --syntax-italic: var(--text-secondary);
+  --syntax-link: var(--accent-hover);
+  --syntax-code: var(--danger);
+  --syntax-quote: var(--text-muted);
+  --syntax-list: var(--warning);
+
   --code-keyword: #569cd6;
   --code-string: #ce9178;
   --code-comment: #6a9955;
@@ -43,45 +159,101 @@
   --code-function: #dcdcaa;
   --code-type: #4ec9b0;
   --code-variable: #9cdcfe;
-  --code-punctuation: #d4d4d4;
+  --code-punctuation: var(--text-secondary);
 }
+
+/* ─────────────────────────── graphite ─────────────────────────── */
+
+[data-theme='graphite'] {
+  --seed-bg: #1e1e1e;
+  --seed-ink: #cccccc;
+  --neutral-dir: 1;
+
+  --accent: #007acc;
+  --accent-hover: #0088dd;
+  --accent-text-seed: #ffffff;
+  --danger: #f44747;
+  --warning: #cca700;
+  --success: #4ec9b0;
+
+  --syntax-h1: var(--seed-ink);
+  --syntax-h2: var(--accent);
+  --syntax-h3: var(--success);
+  --syntax-bold: var(--seed-ink);
+  --syntax-italic: var(--text-secondary);
+  --syntax-link: #4fc1ff;
+  --syntax-code: var(--code-function);
+  --syntax-quote: var(--text-muted);
+  --syntax-list: var(--warning);
+
+  --code-keyword: #569cd6;
+  --code-string: #ce9178;
+  --code-comment: #6a9955;
+  --code-number: #b5cea8;
+  --code-function: #dcdcaa;
+  --code-type: #4ec9b0;
+  --code-variable: #9cdcfe;
+  --code-punctuation: var(--text-secondary);
+}
+
+/* ─────────────────────────── midnight ─────────────────────────── */
+
+[data-theme='midnight'] {
+  --seed-bg: #0f1419;
+  --seed-ink: #cdd6da;
+  --neutral-dir: 1;
+
+  --accent: #599cb9;
+  --accent-hover: #6ab0d0;
+  --accent-text-seed: #0f1419;
+  --danger: #d96c75;
+  --warning: #e5c07b;
+  --success: #98c379;
+
+  --syntax-h1: var(--seed-ink);
+  --syntax-h2: var(--accent);
+  --syntax-h3: var(--success);
+  --syntax-bold: var(--seed-ink);
+  --syntax-italic: var(--text-secondary);
+  --syntax-link: #8abed9;
+  --syntax-code: var(--danger);
+  --syntax-quote: var(--text-muted);
+  --syntax-list: var(--warning);
+
+  --code-keyword: #569cd6;
+  --code-string: #ce9178;
+  --code-comment: #6a9955;
+  --code-number: #b5cea8;
+  --code-function: #dcdcaa;
+  --code-type: #4ec9b0;
+  --code-variable: #9cdcfe;
+  --code-punctuation: var(--text-secondary);
+}
+
+/* ─────────────────────────── light ─────────────────────────── */
 
 [data-theme='light'] {
-  --bg: #fafafa;
-  --bg-elevated: #ffffff;
-  --bg-hover: #f0f0f0;
-  --bg-active: #e8e8e8;
-  --bg-gutter: #f5f5f5;
-  --border: #e0e0e0;
-  --border-subtle: #eeeeee;
-  --border-focus: #2a7de1;
-  --text: #1a1a1a;
-  --text-secondary: #555555;
-  --text-muted: #999999;
+  --seed-bg: #fafafa;
+  --seed-ink: #1a1a1a;
+  --neutral-dir: -1;
+
   --accent: #2a7de1;
   --accent-hover: #1a6fd6;
-  --accent-text: #ffffff;
-  --selection: #2a7de133;
+  --accent-text-seed: #ffffff;
   --danger: #d32f2f;
-  --danger-bg: #fdeaea;
   --warning: #ed6c02;
   --success: #2e7d32;
-  --code-bg: #f5f5f5;
-  --menu-bg: #ffffff;
-  --bg-secondary: #f5f5f5;
-  --bg-card: #f5f5f5;
-  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.06);
-  --shadow-2: 0 4px 12px rgba(0, 0, 0, 0.1);
-  --shadow-3: 0 8px 24px rgba(0, 0, 0, 0.12);
-  --syntax-h1: #1a1a1a;
-  --syntax-h2: #2a7de1;
-  --syntax-h3: #2e7d32;
-  --syntax-bold: #1a1a1a;
-  --syntax-italic: #555555;
-  --syntax-link: #2a7de1;
-  --syntax-code: #d32f2f;
+
+  --syntax-h1: var(--seed-ink);
+  --syntax-h2: var(--accent);
+  --syntax-h3: var(--success);
+  --syntax-bold: var(--seed-ink);
+  --syntax-italic: var(--text-secondary);
+  --syntax-link: var(--accent);
+  --syntax-code: var(--danger);
   --syntax-quote: #6a6552;
-  --syntax-list: #ed6c02;
+  --syntax-list: var(--warning);
+
   --code-keyword: #0000ff;
   --code-string: #a31515;
   --code-comment: #008000;
@@ -91,42 +263,31 @@
   --code-variable: #001080;
   --code-punctuation: #393a34;
 }
+
+/* ─────────────────────────── paper ─────────────────────────── */
 
 [data-theme='paper'] {
-  --bg: #fdf6e3;
-  --bg-elevated: #fefbf3;
-  --bg-hover: #f5ebd8;
-  --bg-active: #ebe1cb;
-  --bg-gutter: #f7efe0;
-  --border: #e8dfcc;
-  --border-subtle: #f0e7d4;
-  --border-focus: #b58900;
-  --text: #3d3a2e;
-  --text-secondary: #6a6552;
-  --text-muted: #99927a;
+  --seed-bg: #fdf6e3;
+  --seed-ink: #3d3a2e;
+  --neutral-dir: -1;
+
   --accent: #b58900;
   --accent-hover: #a07800;
-  --accent-text: #fdf6e3;
-  --selection: #b5890033;
+  --accent-text-seed: #fdf6e3;
   --danger: #cb4b16;
-  --danger-bg: #fcece5;
   --warning: #b58900;
   --success: #5a8c2a;
-  --code-bg: #f5ebd8;
-  --menu-bg: #fbf4e2;
-  --bg-card: #f5ebd8;
-  --shadow-1: 0 1px 2px rgba(60, 55, 40, 0.08);
-  --shadow-2: 0 4px 12px rgba(60, 55, 40, 0.12);
-  --shadow-3: 0 8px 24px rgba(60, 55, 40, 0.15);
-  --syntax-h1: #3d3a2e;
-  --syntax-h2: #b58900;
-  --syntax-h3: #5a8c2a;
-  --syntax-bold: #3d3a2e;
-  --syntax-italic: #6a6552;
-  --syntax-link: #b58900;
-  --syntax-code: #cb4b16;
-  --syntax-quote: #99927a;
-  --syntax-list: #b58900;
+
+  --syntax-h1: var(--seed-ink);
+  --syntax-h2: var(--accent);
+  --syntax-h3: var(--success);
+  --syntax-bold: var(--seed-ink);
+  --syntax-italic: var(--text-secondary);
+  --syntax-link: var(--accent);
+  --syntax-code: var(--danger);
+  --syntax-quote: var(--text-muted);
+  --syntax-list: var(--warning);
+
   --code-keyword: #0000ff;
   --code-string: #a31515;
   --code-comment: #008000;
@@ -137,41 +298,30 @@
   --code-punctuation: #393a34;
 }
 
+/* ─────────────────────────── dracula ─────────────────────────── */
+
 [data-theme='dracula'] {
-  --bg: #282a36;
-  --bg-elevated: #343746;
-  --bg-hover: #44475a;
-  --bg-active: #4f5266;
-  --bg-gutter: #21222c;
-  --border: #44475a;
-  --border-subtle: #3a3d4e;
-  --border-focus: #bd93f9;
-  --text: #f8f8f2;
-  --text-secondary: #b8b8b0;
-  --text-muted: #6272a4;
+  --seed-bg: #282a36;
+  --seed-ink: #f8f8f2;
+  --neutral-dir: 1;
+
   --accent: #bd93f9;
   --accent-hover: #caa9fa;
-  --accent-text: #282a36;
-  --selection: #bd93f940;
+  --accent-text-seed: #282a36;
   --danger: #ff5555;
-  --danger-bg: #3d1e1e;
   --warning: #f1fa8c;
   --success: #50fa7b;
-  --code-bg: #1e1f29;
-  --menu-bg: #21222c;
-  --bg-card: #282a36;
-  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.3);
-  --shadow-2: 0 4px 12px rgba(0, 0, 0, 0.4);
-  --shadow-3: 0 8px 24px rgba(0, 0, 0, 0.5);
-  --syntax-h1: #f8f8f2;
-  --syntax-h2: #bd93f9;
-  --syntax-h3: #50fa7b;
-  --syntax-bold: #f8f8f2;
-  --syntax-italic: #b8b8b0;
+
+  --syntax-h1: var(--seed-ink);
+  --syntax-h2: var(--accent);
+  --syntax-h3: var(--success);
+  --syntax-bold: var(--seed-ink);
+  --syntax-italic: var(--text-secondary);
   --syntax-link: #8be9fd;
   --syntax-code: #ff79c6;
   --syntax-quote: #6272a4;
-  --syntax-list: #f1fa8c;
+  --syntax-list: var(--warning);
+
   --code-keyword: #569cd6;
   --code-string: #ce9178;
   --code-comment: #6a9955;
@@ -179,89 +329,33 @@
   --code-function: #dcdcaa;
   --code-type: #4ec9b0;
   --code-variable: #9cdcfe;
-  --code-punctuation: #d4d4d4;
+  --code-punctuation: var(--text-secondary);
 }
+
+/* ─────────────────────────── nord ─────────────────────────── */
 
 [data-theme='nord'] {
-  --bg: #2e3440;
-  --bg-elevated: #3b4252;
-  --bg-hover: #434c5e;
-  --bg-active: #4c566a;
-  --bg-gutter: #242933;
-  --border: #3b4252;
-  --border-subtle: #363d4b;
-  --border-focus: #88c0d0;
-  --text: #eceff4;
-  --text-secondary: #d8dee9;
-  --text-muted: #616e88;
+  --seed-bg: #2e3440;
+  --seed-ink: #eceff4;
+  --neutral-dir: 1;
+
   --accent: #88c0d0;
   --accent-hover: #8fbcbb;
-  --accent-text: #2e3440;
-  --selection: #88c0d033;
+  --accent-text-seed: #2e3440;
   --danger: #bf616a;
-  --danger-bg: #3d282a;
   --warning: #ebcb8b;
   --success: #a3be8c;
-  --code-bg: #242933;
-  --menu-bg: #20262f;
-  --bg-card: #2e3440;
-  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.2);
-  --shadow-2: 0 4px 12px rgba(0, 0, 0, 0.3);
-  --shadow-3: 0 8px 24px rgba(0, 0, 0, 0.4);
-  --syntax-h1: #eceff4;
-  --syntax-h2: #88c0d0;
-  --syntax-h3: #a3be8c;
-  --syntax-bold: #eceff4;
-  --syntax-italic: #d8dee9;
-  --syntax-link: #8fbcbb;
-  --syntax-code: #bf616a;
+
+  --syntax-h1: var(--seed-ink);
+  --syntax-h2: var(--accent);
+  --syntax-h3: var(--success);
+  --syntax-bold: var(--seed-ink);
+  --syntax-italic: var(--text-secondary);
+  --syntax-link: var(--accent-hover);
+  --syntax-code: var(--danger);
   --syntax-quote: #616e88;
-  --syntax-list: #ebcb8b;
-  --code-keyword: #569cd6;
-  --code-string: #ce9178;
-  --code-comment: #6a9955;
-  --code-number: #b5cea8;
-  --code-function: #dcdcaa;
-  --code-type: #4ec9b0;
-  --code-variable: #9cdcfe;
-  --code-punctuation: #d4d4d4;
-}
+  --syntax-list: var(--warning);
 
-[data-theme='graphite'] {
-  --bg: #1e1e1e;
-  --bg-elevated: #252526;
-  --bg-hover: #2d2d2d;
-  --bg-active: #333333;
-  --bg-gutter: #181818;
-  --border: #3c3c3c;
-  --border-subtle: #2d2d2d;
-  --border-focus: #007acc;
-  --text: #cccccc;
-  --text-secondary: #9e9e9e;
-  --text-muted: #6a6a6a;
-  --accent: #007acc;
-  --accent-hover: #0088dd;
-  --accent-text: #ffffff;
-  --selection: #007acc40;
-  --danger: #f44747;
-  --danger-bg: #3a1a1a;
-  --warning: #cca700;
-  --success: #4ec9b0;
-  --code-bg: #181818;
-  --menu-bg: #151515;
-  --bg-card: #2d2d2d;
-  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.3);
-  --shadow-2: 0 4px 12px rgba(0, 0, 0, 0.4);
-  --shadow-3: 0 8px 24px rgba(0, 0, 0, 0.5);
-  --syntax-h1: #cccccc;
-  --syntax-h2: #007acc;
-  --syntax-h3: #4ec9b0;
-  --syntax-bold: #cccccc;
-  --syntax-italic: #9e9e9e;
-  --syntax-link: #4fc1ff;
-  --syntax-code: #dcdcaa;
-  --syntax-quote: #6a6a6a;
-  --syntax-list: #cca700;
   --code-keyword: #569cd6;
   --code-string: #ce9178;
   --code-comment: #6a9955;
@@ -269,50 +363,5 @@
   --code-function: #dcdcaa;
   --code-type: #4ec9b0;
   --code-variable: #9cdcfe;
-  --code-punctuation: #d4d4d4;
-}
-
-[data-theme='midnight'] {
-  --bg: #0f1419;
-  --bg-elevated: #151d25;
-  --bg-hover: #1c2730;
-  --bg-active: #23303c;
-  --bg-gutter: #0a0e12;
-  --border: #2a3a46;
-  --border-subtle: #1e2a36;
-  --border-focus: #599cb9;
-  --text: #cdd6da;
-  --text-secondary: #9aa8af;
-  --text-muted: #617581;
-  --accent: #599cb9;
-  --accent-hover: #6ab0d0;
-  --accent-text: #0f1419;
-  --selection: #599cb933;
-  --danger: #d96c75;
-  --danger-bg: #2d181a;
-  --warning: #e5c07b;
-  --success: #98c379;
-  --code-bg: #0a0e12;
-  --menu-bg: #0c1116;
-  --bg-card: #1c2730;
-  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.4);
-  --shadow-2: 0 4px 12px rgba(0, 0, 0, 0.5);
-  --shadow-3: 0 8px 24px rgba(0, 0, 0, 0.6);
-  --syntax-h1: #cdd6da;
-  --syntax-h2: #599cb9;
-  --syntax-h3: #98c379;
-  --syntax-bold: #cdd6da;
-  --syntax-italic: #9aa8af;
-  --syntax-link: #8abed9;
-  --syntax-code: #d96c75;
-  --syntax-quote: #617581;
-  --syntax-list: #e5c07b;
-  --code-keyword: #569cd6;
-  --code-string: #ce9178;
-  --code-comment: #6a9955;
-  --code-number: #b5cea8;
-  --code-function: #dcdcaa;
-  --code-type: #4ec9b0;
-  --code-variable: #9cdcfe;
-  --code-punctuation: #d4d4d4;
+  --code-punctuation: var(--text-secondary);
 }
