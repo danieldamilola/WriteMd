@@ -1,5 +1,6 @@
 import { html, css, LitElement } from 'lit'
 import { customElement, property } from 'lit/decorators.js'
+import { scrollbarStyles } from './scrollbars'
 import './Tab'
 
 export interface VerticalTab {
@@ -54,6 +55,8 @@ export class VerticalTabBar extends LitElement {
       color: var(--text);
       background: var(--bg-hover);
     }
+
+    ${scrollbarStyles}
   `
 
   @property({ type: Array }) tabs: VerticalTab[] = []

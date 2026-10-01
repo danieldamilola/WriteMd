@@ -87,6 +87,69 @@ describe('AI provider adapters', () => {
     )
   })
 
+  it('reads the answer off a reasoning model that leaves content null', () => {
+    // This is the shape that produced "missing choices[0].message.content" for
+    // OpenRouter's Nemotron and DeepSeek R1: the answer is in `reasoning`.
+    expect(
+      AI_PROVIDERS.OpenRouter.extractChatText({
+        choices: [{ message: { content: null, reasoning: 'The answer is 42.' } }]
+      })
+    ).toBe('The answer is 42.')
+
+    expect(
+      AI_PROVIDERS.OpenRouter.extractChatText({
+        choices: [{ message: { content: '', reasoning_content: 'via OpenAI field' } }]
+      })
+    ).toBe('via OpenAI field')
+  })
+
+  it('joins content when a gateway returns typed parts instead of a string', () => {
+    expect(
+      AI_PROVIDERS.OpenRouter.extractChatText({
+        choices: [
+          {
+            message: {
+              content: [
+                { type: 'text', text: 'part one ' },
+                { type: 'text', text: 'part two' }
+              ]
+            }
+          }
+        ]
+      })
+    ).toBe('part one part two')
+  })
+
+  it('prefers real content over reasoning when both are present', () => {
+    expect(
+      AI_PROVIDERS.OpenRouter.extractChatText({
+        choices: [{ message: { content: 'final', reasoning: 'scratchpad' } }]
+      })
+    ).toBe('final')
+  })
+
+  it('surfaces the provider error when it answers 200 with one', () => {
+    // OpenRouter does this on free-tier rate limits and upstream failures.
+    expect(() =>
+      AI_PROVIDERS.OpenRouter.extractChatText({
+        error: { message: 'Provider returned error', code: 429 }
+      })
+    ).toThrow(/Provider error: Provider returned error \(429\)/)
+  })
+
+  it('explains an empty answer using the finish reason', () => {
+    expect(() =>
+      AI_PROVIDERS.OpenRouter.extractChatText({
+        choices: [{ message: { content: '' }, finish_reason: 'length' }]
+      })
+    ).toThrow(/output limit/)
+    expect(() =>
+      AI_PROVIDERS.OpenRouter.extractChatText({
+        choices: [{ message: { content: '' }, finish_reason: 'content_filter' }]
+      })
+    ).toThrow(/filtered/)
+  })
+
   it('extracts and sorts model ids', () => {
     expect(AI_PROVIDERS.OpenAI.extractModelIds({ data: [{ id: 'b' }, { id: 'a' }] })).toEqual([
       'a',

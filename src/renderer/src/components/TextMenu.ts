@@ -2,6 +2,7 @@ import { html, css, LitElement } from 'lit'
 import { customElement, property, state } from 'lit/decorators.js'
 import { EditorView } from '@codemirror/view'
 import { menuStyles, menuIcon } from './menu-styles'
+import { scrollbarStyles } from './scrollbars'
 import { api } from '../api'
 import type { VaultTreeNode } from '../../../shared/electron-api'
 import { FileState } from '../state/file-state'
@@ -120,6 +121,10 @@ export class TextMenu extends LitElement {
         outline: 2px solid var(--border-focus);
         outline-offset: -2px;
       }
+
+      /* The submenu pane scrolls when it outgrows the viewport. Shadow DOM
+         blocks global rules, so it has to opt in like every other scroller. */
+      ${scrollbarStyles}
     `
   ]
 

@@ -88,6 +88,20 @@ function headingMatches(lineText: string, anchor: string): boolean {
   )
 }
 
+/**
+ * Unwrap Electron's ipcRenderer wrapper.
+ *
+ * `net.chat` runs in main, so a throw there arrives as
+ * "Error invoking remote method 'net:chat': Error: <the real message>". Showing
+ * that verbatim in the chat log told the user nothing about which call failed.
+ */
+function describeAiError(e: unknown): string {
+  const raw = e instanceof Error ? e.message : String(e)
+  const wrapped = /^Error invoking remote method '[^']*':\s*(?:Error:\s*)?([\s\S]*)$/
+  const match = wrapped.exec(raw)
+  return (match ? match[1] : raw).trim() || 'The request failed.'
+}
+
 @customElement('writemd-editor')
 export class Editor extends LitElement {
   static styles = [
@@ -598,8 +612,10 @@ If the user asks questions about their file, use the above content to answer.`
         this.aiMessages = [...this.aiMessages, { role: 'assistant', content: response }]
       }
     } catch (e) {
-      const message = e instanceof Error ? e.message : 'Failed to chat'
-      this.aiMessages = [...this.aiMessages, { role: 'assistant', content: `Error: ${message}` }]
+      this.aiMessages = [
+        ...this.aiMessages,
+        { role: 'assistant', content: `Error: ${describeAiError(e)}` }
+      ]
     } finally {
       this.aiIsLoading = false
     }

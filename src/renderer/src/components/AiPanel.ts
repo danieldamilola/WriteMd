@@ -4,6 +4,7 @@ import { unsafeHTML } from 'lit/directives/unsafe-html.js'
 import { createChatMarkdownIt } from '../utils/markdown'
 import { emit } from '../events/bus'
 import { icon } from './icons'
+import { scrollbarStyles } from './scrollbars'
 import { createLinkInterceptor } from './extensions/safe-links'
 
 // `html: false` is what makes the unsafeHTML below safe: raw markup in a model
@@ -112,6 +113,11 @@ export class AiPanel extends LitElement {
       height: 13px;
       flex-shrink: 0;
     }
+
+    /* Without this the chat log falls back to the native Windows scrollbar,
+       arrow buttons and all, which is what the panel showed. Shadow DOM blocks
+       global rules, so each scrollable element opts in. */
+    ${scrollbarStyles}
   `
 
   @property({ type: Boolean }) configured = false

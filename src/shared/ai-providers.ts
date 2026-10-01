@@ -38,8 +38,73 @@ function expectText(value: unknown, what: string): string {
   return value
 }
 
+interface ContentPart {
+  type?: string
+  text?: string
+}
+interface OpenAIChoice {
+  message?: {
+    content?: string | ContentPart[] | null
+    reasoning?: string
+    reasoning_content?: string
+  }
+  finish_reason?: string | null
+}
 interface OpenAIChatResponse {
-  choices?: { message?: { content?: string } }[]
+  choices?: OpenAIChoice[]
+  /** OpenRouter and friends answer 200 with an error object on some failures. */
+  error?: { message?: string; code?: number | string }
+}
+
+const FINISH_REASONS: Record<string, string> = {
+  length: 'the model hit the output limit before finishing',
+  content_filter: 'the provider filtered the response',
+  'tool-calls': 'the model asked for a tool call, which this editor does not send'
+}
+
+/**
+ * Pull the assistant text out of an OpenAI-shaped message.
+ *
+ * `content` is a string in the common case, but not always:
+ *
+ *   - reasoning models (OpenRouter's Nemotron and DeepSeek R1, OpenAI's o-series)
+ *     can return `content: null` and put the text in `reasoning`, which is what
+ *     produced "missing choices[0].message.content" for a correctly working key
+ *   - some gateways return `content` as an array of typed parts
+ *   - the field can be an empty string when the answer was cut off
+ *
+ * Returns '' when there is genuinely no text, so the caller can decide how to
+ * report it with the finish reason to hand.
+ */
+function messageText(choice: OpenAIChoice): string {
+  const message = choice.message
+  if (!message) return ''
+
+  const content = message.content
+  if (typeof content === 'string' && content.trim()) return content
+  if (Array.isArray(content)) {
+    const joined = content
+      .filter((p) => p?.type === 'text' || typeof p?.text === 'string')
+      .map((p) => p.text ?? '')
+      .join('')
+      .trim()
+    if (joined) return joined
+  }
+
+  // Reasoning models put the answer here when content is null.
+  const reasoning = message.reasoning ?? message.reasoning_content
+  if (typeof reasoning === 'string' && reasoning.trim()) return reasoning
+
+  return ''
+}
+
+/** The provider's own error, when it answered 200 with one. */
+function providerError(data: unknown): string | null {
+  const res = data as OpenAIChatResponse
+  const err = res?.error
+  if (!err) return null
+  const code = err.code !== undefined ? ` (${String(err.code)})` : ''
+  return typeof err.message === 'string' && err.message ? `${err.message}${code}` : null
 }
 interface OpenAIModelsResponse {
   data?: { id?: string }[]
@@ -66,8 +131,16 @@ function openaiCompatible(
       }
     },
     extractChatText(data: unknown): string {
-      const res = data as OpenAIChatResponse
-      return expectText(res.choices?.[0]?.message?.content, 'choices[0].message.content')
+      const err = providerError(data)
+      if (err) throw new AiResponseError(`Provider error: ${err}`)
+      const choice = (data as OpenAIChatResponse).choices?.[0]
+      const text = choice ? messageText(choice) : ''
+      if (text) return text
+      const finish = choice?.finish_reason
+      if (finish && FINISH_REASONS[finish]) {
+        throw new AiResponseError(`The model returned no answer: ${FINISH_REASONS[finish]}.`)
+      }
+      return expectText(text, 'choices[0].message.content')
     },
     buildModelsRequest(apiKey: string): AiRequest {
       const headers: Record<string, string> = {}
