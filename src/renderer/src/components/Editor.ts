@@ -6,6 +6,7 @@ import { scrollbarStyles } from './scrollbars'
 import { SettingsStore } from '../state/settings'
 import { type AiMessage } from './AiPanel'
 import type { ChatMessage, ChatSessionSummary } from '../../../shared/electron-api'
+import { icon } from './icons'
 import './FindPanel'
 import './AiPanel'
 import './BacklinksPanel'
@@ -100,6 +101,19 @@ function describeAiError(e: unknown): string {
   const wrapped = /^Error invoking remote method '[^']*':\s*(?:Error:\s*)?([\s\S]*)$/
   const match = wrapped.exec(raw)
   return (match ? match[1] : raw).trim() || 'The request failed.'
+}
+
+/** Relative for anything recent, absolute beyond a week. */
+function formatWhen(ts: number): string {
+  const diff = Date.now() - ts
+  const mins = Math.floor(diff / 60000)
+  if (mins < 1) return 'just now'
+  if (mins < 60) return `${mins}m ago`
+  const hours = Math.floor(mins / 60)
+  if (hours < 24) return `${hours}h ago`
+  const days = Math.floor(hours / 24)
+  if (days < 7) return `${days}d ago`
+  return new Date(ts).toLocaleDateString()
 }
 
 @customElement('writemd-editor')
@@ -300,6 +314,72 @@ export class Editor extends LitElement {
         opacity: 0.35;
       }
 
+      /* The history list hangs off the clock button in the AI panel header. */
+      .ai-history-anchor {
+        position: relative;
+        display: flex;
+      }
+
+      .ai-history {
+        position: absolute;
+        top: 30px;
+        right: 0;
+        z-index: 30;
+        width: 250px;
+        max-height: 300px;
+        overflow-y: auto;
+        background: var(--bg-elevated);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        box-shadow: var(--shadow-3);
+        padding: 4px;
+      }
+
+      .ai-history-empty {
+        padding: 12px 10px;
+        text-align: center;
+        font-family: var(--font-mono);
+        font-size: 11px;
+        color: var(--text-muted);
+      }
+
+      .ai-history-item {
+        display: block;
+        width: 100%;
+        text-align: left;
+        border-radius: 5px;
+        padding: 7px 9px;
+        cursor: pointer;
+        color: var(--text-secondary);
+        font-family: var(--font-mono);
+        font-size: 12px;
+        line-height: 1.4;
+      }
+
+      .ai-history-item:hover {
+        background: var(--bg-hover);
+        color: var(--text);
+      }
+
+      .ai-history-item.current {
+        color: var(--text);
+        background: var(--bg-hover);
+      }
+
+      .ai-history-title {
+        display: block;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .ai-history-meta {
+        display: block;
+        margin-top: 2px;
+        font-size: 10px;
+        color: var(--text-muted);
+      }
+
       .icon-action.faint:hover {
         opacity: 1;
       }
@@ -411,6 +491,26 @@ export class Editor extends LitElement {
   /** Persisted chat for the open document. Null until one exists on disk. */
   @state() private aiSessionId: string | null = null
   @state() private aiSessions: ChatSessionSummary[] = []
+  @state() private aiHistoryOpen = false
+
+  /** Click outside closes the history list. */
+  private readonly onAiHistoryPointerDown = (e: Event): void => {
+    if (!this.aiHistoryOpen) return
+    if (!e.composedPath().includes(this)) this.aiHistoryOpen = false
+  }
+
+  private toggleAiHistory = (): void => {
+    const next = !this.aiHistoryOpen
+    this.aiHistoryOpen = next
+    if (next) void this.refreshAiSessions()
+  }
+
+  private handleAiClear = (): void => {
+    this.aiMessages = []
+    // Clearing empties the transcript; starting a new chat is what mints a new
+    // session, so the current id is kept.
+    void this.persistAiSession()
+  }
 
   private settingsStore: SettingsStore | null = null
   private settingsUnsubs: Array<() => void> = []
@@ -418,6 +518,7 @@ export class Editor extends LitElement {
 
   connectedCallback(): void {
     super.connectedCallback()
+    document.addEventListener('pointerdown', this.onAiHistoryPointerDown, true)
     this.busUnsubs.push(on('find:open', this.handleGlobalFind))
     this.busUnsubs.push(on('wiki:open', this.handleOpenWikiLink))
     this.settingsStore = SettingsStore.getInstance()
@@ -610,6 +711,7 @@ export class Editor extends LitElement {
   private handleAiNewSession = (): void => {
     const chat = api()?.chat
     if (!chat) return
+    this.aiHistoryOpen = false
     void (async () => {
       try {
         const session = await chat.createSession(this.filePath)
@@ -622,8 +724,8 @@ export class Editor extends LitElement {
     })()
   }
 
-  private handleAiSelectSession = (e: Event): void => {
-    const id = (e as CustomEvent<{ id: string }>).detail?.id
+  private handleAiSelectSession = (id: string): void => {
+    this.aiHistoryOpen = false
     const chat = api()?.chat
     if (!id || !chat) return
     void (async () => {
@@ -780,6 +882,7 @@ If the user asks questions about their file, use the above content to answer.`
   }
 
   disconnectedCallback(): void {
+    document.removeEventListener('pointerdown', this.onAiHistoryPointerDown, true)
     for (const unsub of this.busUnsubs) unsub()
     this.busUnsubs = []
     if (this.noticeTimer !== null) window.clearTimeout(this.noticeTimer)
@@ -1652,6 +1755,81 @@ If the user asks questions about their file, use the above content to answer.`
                                     <div class="sub-header-left">Assistant</div>
                                     <div class="sub-header-center">AI</div>
                                     <div class="sub-header-right">
+                                      <div class="ai-history-anchor">
+                                        <div
+                                          class="icon-action"
+                                          role="button"
+                                          tabindex="0"
+                                          aria-label="Chat history"
+                                          aria-haspopup="listbox"
+                                          aria-expanded=${this.aiHistoryOpen ? 'true' : 'false'}
+                                          title="Chat history"
+                                          @keydown=${this.handleIconActionKey}
+                                          @click=${this.toggleAiHistory}
+                                        >
+                                          ${icon('clock')}
+                                        </div>
+                                        ${
+                                          this.aiHistoryOpen
+                                            ? html`
+                                                <div
+                                                  class="ai-history"
+                                                  role="listbox"
+                                                  aria-label="Chat history"
+                                                >
+                                                  ${
+                                                    this.aiSessions.length === 0
+                                                      ? html`<div class="ai-history-empty">
+                                                          No saved chats for this file yet.
+                                                        </div>`
+                                                      : this.aiSessions.map(
+                                                          (s) => html`
+                                                            <div
+                                                              class="ai-history-item ${
+                                                                s.id === this.aiSessionId
+                                                                  ? 'current'
+                                                                  : ''
+                                                              }"
+                                                              role="option"
+                                                              tabindex="0"
+                                                              aria-selected=${
+                                                                s.id === this.aiSessionId
+                                                                  ? 'true'
+                                                                  : 'false'
+                                                              }
+                                                              @keydown=${this.handleIconActionKey}
+                                                              @click=${() => this.handleAiSelectSession(s.id)}
+                                                            >
+                                                              <span class="ai-history-title"
+                                                                >${s.title}</span
+                                                              >
+                                                              <span class="ai-history-meta"
+                                                                >${s.messageCount}
+                                                                message${
+                                                                  s.messageCount === 1 ? '' : 's'
+                                                                }
+                                                                - ${formatWhen(s.updatedAt)}</span
+                                                              >
+                                                            </div>
+                                                          `
+                                                        )
+                                                  }
+                                                </div>
+                                              `
+                                            : ''
+                                        }
+                                      </div>
+                                      <div
+                                        class="icon-action"
+                                        role="button"
+                                        tabindex="0"
+                                        aria-label="New chat"
+                                        title="New chat"
+                                        @keydown=${this.handleIconActionKey}
+                                        @click=${this.handleAiNewSession}
+                                      >
+                                        ${icon('plus')}
+                                      </div>
                                       <div
                                         class="icon-action"
                                         role="button"
@@ -1659,7 +1837,7 @@ If the user asks questions about their file, use the above content to answer.`
                                         aria-label="Clear chat history"
                                         title="Clear chat history"
                                         @keydown=${this.handleIconActionKey}
-                                        @click=${() => (this.aiMessages = [])}
+                                        @click=${() => this.handleAiClear()}
                                       >
                                         <svg
                                           viewBox="0 0 24 24"
@@ -1698,13 +1876,7 @@ If the user asks questions about their file, use the above content to answer.`
                                     .configured=${this.isAiConfigured}
                                     .messages=${this.aiMessages}
                                     .loading=${this.aiIsLoading}
-                                    .docPath=${this.filePath}
-                                    .sessionId=${this.aiSessionId}
-                                    .sessions=${this.aiSessions}
                                     @ai-submit=${this.handleAiSubmitEvent}
-                                    @ai-new-session=${this.handleAiNewSession}
-                                    @ai-select-session=${this.handleAiSelectSession}
-                                    @ai-list-sessions=${() => void this.refreshAiSessions()}
                                   ></writemd-ai-panel>
                                 `
                               : html`

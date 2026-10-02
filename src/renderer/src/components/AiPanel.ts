@@ -1,25 +1,11 @@
 import { html, css, LitElement } from 'lit'
-import { customElement, property, state } from 'lit/decorators.js'
+import { customElement, property } from 'lit/decorators.js'
 import { unsafeHTML } from 'lit/directives/unsafe-html.js'
-import type { ChatSessionSummary } from '../../../shared/electron-api'
 import { createChatMarkdownIt } from '../utils/markdown'
 import { emit } from '../events/bus'
 import { icon } from './icons'
 import { scrollbarStyles } from './scrollbars'
 import { createLinkInterceptor } from './extensions/safe-links'
-
-/** Relative for anything recent, absolute beyond a week. */
-function formatWhen(ts: number): string {
-  const diff = Date.now() - ts
-  const mins = Math.floor(diff / 60000)
-  if (mins < 1) return 'just now'
-  if (mins < 60) return `${mins}m ago`
-  const hours = Math.floor(mins / 60)
-  if (hours < 24) return `${hours}h ago`
-  const days = Math.floor(hours / 24)
-  if (days < 7) return `${days}d ago`
-  return new Date(ts).toLocaleDateString()
-}
 
 // `html: false` is what makes the unsafeHTML below safe: raw markup in a model
 // response is escaped rather than parsed. linkify only ever emits http/https/
@@ -248,53 +234,6 @@ export class AiPanel extends LitElement {
   @property({ type: Boolean }) configured = false
   @property({ type: Array }) messages: AiMessage[] = []
   @property({ type: Boolean }) loading = false
-  /** Document these sessions belong to; the list is scoped to it. */
-  @property({ type: String }) docPath: string | null = null
-  @property({ type: String }) sessionId: string | null = null
-  @property({ type: Array }) sessions: ChatSessionSummary[] = []
-
-  @state() private historyOpen = false
-
-  /** Escape closes the list; a click outside does too. */
-  private readonly onDocPointerDown = (e: Event): void => {
-    if (!this.historyOpen) return
-    const path = e.composedPath()
-    if (!path.includes(this)) this.historyOpen = false
-  }
-
-  connectedCallback(): void {
-    super.connectedCallback()
-    // Model output can contain links, and the whole file under edit is pasted
-    // into the prompt, so a URL from a malicious note can come back as a chat
-    // link. Route clicks to the main process instead of navigating the window.
-    this.addEventListener('click', this.interceptLinks, true)
-    document.addEventListener('pointerdown', this.onDocPointerDown, true)
-  }
-
-  disconnectedCallback(): void {
-    this.removeEventListener('click', this.interceptLinks, true)
-    document.removeEventListener('pointerdown', this.onDocPointerDown, true)
-    super.disconnectedCallback()
-  }
-
-  private toggleHistory = (): void => {
-    this.historyOpen = !this.historyOpen
-    if (this.historyOpen) {
-      this.dispatchEvent(new CustomEvent('ai-list-sessions', { bubbles: true, composed: true }))
-    }
-  }
-
-  private newSession = (): void => {
-    this.historyOpen = false
-    this.dispatchEvent(new CustomEvent('ai-new-session', { bubbles: true, composed: true }))
-  }
-
-  private selectSession = (id: string): void => {
-    this.historyOpen = false
-    this.dispatchEvent(
-      new CustomEvent('ai-select-session', { detail: { id }, bubbles: true, composed: true })
-    )
-  }
 
   private submit(e: KeyboardEvent): void {
     if (e.key !== 'Enter') return
@@ -309,6 +248,19 @@ export class AiPanel extends LitElement {
   // Capture phase: the rendered message markup lives in this element's shadow
   // root, and a bubble-phase handler could be pre-empted from below.
   private readonly interceptLinks = createLinkInterceptor(() => this.shadowRoot) as EventListener
+
+  connectedCallback(): void {
+    super.connectedCallback()
+    // Model output can contain links, and the whole file under edit is pasted
+    // into the prompt, so a URL from a malicious note can come back as a chat
+    // link. Route clicks to the main process instead of navigating the window.
+    this.addEventListener('click', this.interceptLinks, true)
+  }
+
+  disconnectedCallback(): void {
+    this.removeEventListener('click', this.interceptLinks, true)
+    super.disconnectedCallback()
+  }
   /** Keep the latest message visible above the pinned input. */
   updated(): void {
     const log = this.shadowRoot?.querySelector('.chat-log')
@@ -340,58 +292,6 @@ export class AiPanel extends LitElement {
       <div
         style="position: relative; display: flex; flex-direction: column; flex: 1; min-height: 0; box-sizing: border-box; overflow: hidden; padding: 12px 12px 12px; gap: 12px;"
       >
-        <div class="ai-bar">
-          <button
-            class="ai-btn"
-            type="button"
-            title="Chat history"
-            aria-label="Chat history"
-            aria-haspopup="listbox"
-            aria-expanded=${this.historyOpen ? 'true' : 'false'}
-            @click=${this.toggleHistory}
-          >
-            ${icon('clock', 13)}
-          </button>
-          <button
-            class="ai-btn"
-            type="button"
-            title="New chat"
-            aria-label="New chat"
-            @click=${this.newSession}
-          >
-            ${icon('plus', 13)}
-          </button>
-          <span class="ai-bar-spacer"></span>
-        </div>
-        ${
-          this.historyOpen
-            ? html`
-                <div class="ai-history" role="listbox" aria-label="Chat history">
-                  ${
-                    this.sessions.length === 0
-                      ? html`<div class="ai-history-empty">No saved chats for this file yet.</div>`
-                      : this.sessions.map(
-                          (s) => html`
-                            <button
-                              class="ai-history-item ${s.id === this.sessionId ? 'current' : ''}"
-                              type="button"
-                              role="option"
-                              aria-selected=${s.id === this.sessionId ? 'true' : 'false'}
-                              @click=${() => this.selectSession(s.id)}
-                            >
-                              <span class="ai-history-title">${s.title}</span>
-                              <span class="ai-history-meta"
-                                >${s.messageCount} message${s.messageCount === 1 ? '' : 's'} -
-                                ${formatWhen(s.updatedAt)}</span
-                              >
-                            </button>
-                          `
-                        )
-                  }
-                </div>
-              `
-            : ''
-        }
         <div
           class="chat-log"
           role="log"
