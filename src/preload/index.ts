@@ -48,8 +48,7 @@ const writemdAPI = {
     /** Electron 32+ removed File.path; this is the supported way back. */
     getPathForFile: (file: File) => webUtils.getPathForFile(file),
     /** Dropped files are not dialog results, so nothing registered them yet. */
-    registerDroppedPaths: (paths: string[]) =>
-      ipcRenderer.invoke('file:register-paths', paths),
+    registerDroppedPaths: (paths: string[]) => ipcRenderer.invoke('file:register-paths', paths),
     resolveAsset: (docPath: string, relativePath: string) =>
       ipcRenderer.invoke('file:resolve-asset', docPath, relativePath),
     watch: (path: string) => ipcRenderer.invoke('file:watch', path),
@@ -131,6 +130,7 @@ const writemdAPI = {
     check: () => ipcRenderer.invoke('updater:check'),
     download: () => ipcRenderer.invoke('updater:download'),
     install: () => ipcRenderer.invoke('updater:install'),
+    getState: () => ipcRenderer.invoke('updater:get-state'),
     onUpdateAvailable: (callback: (info: UpdateInfo) => void) =>
       onChannel('updater:update-available', callback as (...args: unknown[]) => void),
     onUpdateNotAvailable: (callback: (info: UpdateInfo) => void) =>

@@ -168,6 +168,6 @@ work from earlier in the cycle are covered separately.
 All of the above is in the working tree and uncommitted. `pnpm typecheck`,
 `pnpm lint`, `pnpm test` and `pnpm test:e2e` were green as of the last full run.
 
-Also outstanding and unrelated to this work: `RELEASE_NOTES_v1.2.0.md` and two
+Also outstanding and unrelated to this work: `docs/release-notes/RELEASE_NOTES_v1.2.0.md` and two
 screenshots are still uncommitted from earlier in the cycle, and the notes no
 longer describe the panel accurately given the streaming work above.

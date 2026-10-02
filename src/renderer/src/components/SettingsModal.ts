@@ -123,32 +123,32 @@ export class SettingsModal extends LitElement {
       }
     }
 
+    .modal-dialog {
+      width: min(900px, 94vw);
+      height: min(700px, 90vh);
+      display: flex;
+      background: var(--bg-elevated);
+      border: 1px solid var(--border-subtle);
+      border-radius: 12px;
+      box-shadow: var(--shadow-3);
+      overflow: hidden;
+      color: var(--text);
+      animation: dialog-in 180ms cubic-bezier(0.22, 1, 0.36, 1);
+    }
+
+    @keyframes dialog-in {
+      from {
+        opacity: 0;
+        transform: translateY(8px);
+      }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      :host,
       .modal-dialog {
-        width: min(900px, 94vw);
-        height: min(700px, 90vh);
-        display: flex;
-        background: var(--bg-elevated);
-        border: 1px solid var(--border-subtle);
-        border-radius: 12px;
-        box-shadow: var(--shadow-3);
-        overflow: hidden;
-        color: var(--text);
-        animation: dialog-in 180ms cubic-bezier(0.22, 1, 0.36, 1);
+        animation: none;
       }
-
-      @keyframes dialog-in {
-        from {
-          opacity: 0;
-          transform: translateY(8px) scale(0.98);
-        }
-      }
-
-      @media (prefers-reduced-motion: reduce) {
-        :host,
-        .modal-dialog {
-          animation: none;
-        }
-      }
+    }
 
     /* Sidebar Navigation */
     .sidebar {
@@ -591,6 +591,7 @@ export class SettingsModal extends LitElement {
   @state() private pdfTheme = 'light'
   @state() private pdfMargin = 24
   @state() private appVersion = ''
+  @state() private autoCheckForUpdates = true
   @state() private panelOrientation: 'horizontal' | 'vertical' = 'horizontal'
   @state() private updateStatus:
     'idle' | 'checking' | 'available' | 'downloading' | 'downloaded' | 'up-to-date' | 'error' =
@@ -629,6 +630,16 @@ export class SettingsModal extends LitElement {
 
     const updater = api()?.updater
     if (updater) {
+      void updater
+        .getState()
+        .then((state) => {
+          if (state.status === 'idle') return
+          this.updateStatus = state.status
+          this.updateVersion = state.version
+          this.downloadProgress = state.percent
+          this.updateError = state.error
+        })
+        .catch(() => undefined)
       const u1 = updater.onUpdateAvailable?.((info) => {
         this.updateStatus = 'available'
         this.updateVersion = info?.version ?? ''
@@ -695,6 +706,7 @@ export class SettingsModal extends LitElement {
     this.aiKeyStored = s.get<boolean>('ai.apiKeySet', false)
     this.aiKeyUndecryptable = s.get<boolean>('ai.apiKeyUndecryptable', false)
     this.aiSystemPrompt = s.get('ai.systemPrompt', DEFAULT_AI_SYSTEM_PROMPT)
+    this.autoCheckForUpdates = s.get('updates.autoCheckForUpdates', true)
 
     if (this.availableModels.length === 0) {
       this.availableModels = [...(PROVIDER_MODEL_DEFAULTS[this.aiProvider] ?? [])]
@@ -955,7 +967,10 @@ export class SettingsModal extends LitElement {
     this.updateError = ''
     try {
       const result = await updater.check()
-      if (!result) {
+      if (result && 'error' in result) {
+        this.updateStatus = 'error'
+        this.updateError = result.error
+      } else if (!result || !result.updateInfo) {
         this.updateStatus = 'up-to-date'
       }
     } catch (e) {
@@ -989,6 +1004,11 @@ export class SettingsModal extends LitElement {
       this.updateStatus = 'error'
       this.updateError = e instanceof Error ? e.message : String(e)
     }
+  }
+
+  private async handleShowWhatsNew(): Promise<void> {
+    const { showCurrentWhatsNew } = await import('../services/whats-new')
+    await showCurrentWhatsNew()
   }
 
   render(): unknown {
@@ -1611,6 +1631,25 @@ export class SettingsModal extends LitElement {
               ${this.appVersion ? `v${this.appVersion}` : 'Version unavailable'}
             </div>
           </div>
+        </div>
+        <div class="setting-row">
+          <div>
+            <div class="setting-label">Auto-check for updates</div>
+            <div class="setting-desc">Quietly check for updates in the background</div>
+          </div>
+          <button
+            class="toggle-switch"
+            role="switch"
+            aria-checked="${this.autoCheckForUpdates}"
+            @click=${() => this.updateSetting('updates.autoCheckForUpdates', !this.autoCheckForUpdates)}
+          ></button>
+        </div>
+        <div class="setting-row">
+          <div>
+            <div class="setting-label">Release notes</div>
+            <div class="setting-desc">See what changed in this version</div>
+          </div>
+          <button class="control-btn" @click=${this.handleShowWhatsNew}>What's new</button>
         </div>
         <div class="setting-row">
           <div>

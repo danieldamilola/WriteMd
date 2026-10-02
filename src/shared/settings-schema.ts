@@ -37,6 +37,10 @@ export interface WriteMdSettings {
   advanced: {
     enableMermaid: boolean
   }
+  updates: {
+    autoCheckForUpdates: boolean
+    lastSeenWhatsNewVersion: string
+  }
   shortcuts: {
     bindings: Record<string, string>
   }
@@ -105,6 +109,10 @@ export const DEFAULT_SETTINGS: WriteMdSettings = {
   },
   advanced: {
     enableMermaid: true
+  },
+  updates: {
+    autoCheckForUpdates: true,
+    lastSeenWhatsNewVersion: ''
   },
   shortcuts: {
     bindings: {}
