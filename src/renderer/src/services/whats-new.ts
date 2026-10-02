@@ -55,7 +55,10 @@ export async function showCurrentWhatsNew(): Promise<boolean> {
  * first run there is no stored version, so we only record it and stay quiet.
  */
 export async function maybeShowWhatsNew(): Promise<void> {
-  const version = (await api()?.app?.getVersion?.().catch(() => '')) ?? ''
+  const version =
+    (await api()
+      ?.app?.getVersion?.()
+      .catch(() => '')) ?? ''
   if (!version) return
   const store = SettingsStore.getInstance()
   const last = store.get<string>('updates.lastSeenWhatsNewVersion', '')
