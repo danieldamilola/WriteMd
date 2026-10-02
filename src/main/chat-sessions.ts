@@ -63,7 +63,30 @@ export function createSession(docPath: string | null): ChatSession {
   }
 }
 
-export async function saveSession(session: ChatSession): Promise<void> {
+/**
+ * Serialises writes per session.
+ *
+ * The settle handler and the submit handler both persist, and they can overlap.
+ * Two renames onto one destination do not queue: on Windows the loser fails with
+ * EPERM because the target is momentarily open, so the transcript was left as
+ * whichever write happened to win. Chaining them per id means the last write
+ * still lands, in order.
+ */
+const pending = new Map<string, Promise<void>>()
+
+export function saveSession(session: ChatSession): Promise<void> {
+  const id = session.id
+  const next = (pending.get(id) ?? Promise.resolve()).then(() => writeSession(session))
+  // The chain must not reject, or the next save for this id inherits the
+  // failure and never runs. The caller still sees the real error.
+  pending.set(
+    id,
+    next.catch(() => {})
+  )
+  return next
+}
+
+async function writeSession(session: ChatSession): Promise<void> {
   const dir = ensureDir()
   // Temp plus atomic rename, like the document and settings writes. A direct
   // write truncates the live file, so a crash mid-write leaves invalid JSON

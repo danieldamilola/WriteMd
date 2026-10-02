@@ -98,7 +98,12 @@ export class DocBar extends LitElement {
         cursor: pointer;
         transition:
           color 120ms ease,
-          background 120ms ease;
+          background 120ms ease,
+          transform 100ms ease;
+      }
+
+      .icon-action:active {
+        transform: scale(0.92);
       }
       .icon-action:hover {
         color: var(--text);
@@ -127,6 +132,27 @@ export class DocBar extends LitElement {
         position: fixed;
         min-width: 230px;
         z-index: 200;
+        transform-origin: top right;
+        animation: menu-in 140ms cubic-bezier(0.22, 1, 0.36, 1);
+      }
+
+      @keyframes menu-in {
+        from {
+          opacity: 0;
+          transform: translateY(-4px) scale(0.97);
+        }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        .m-panel.note-menu {
+          animation: none;
+        }
+        .icon-action {
+          transition: none;
+        }
+        .icon-action:active {
+          transform: none;
+        }
       }
       :host([compact]) .sub-header {
         height: 28px;

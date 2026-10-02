@@ -5,7 +5,7 @@ import { findNext, findPrevious, getSearchQuery } from '@codemirror/search'
 import { scrollbarStyles } from './scrollbars'
 import { SettingsStore } from '../state/settings'
 import { type AiMessage } from './AiPanel'
-import type { ChatMessage, ChatSessionSummary } from '../../../shared/electron-api'
+import type { AttachedFile, ChatMessage, ChatSessionSummary } from '../../../shared/electron-api'
 import { icon } from './icons'
 import './FindPanel'
 import './AiPanel'
@@ -177,6 +177,20 @@ export class Editor extends LitElement {
         font-size: 12px;
         box-shadow: 0 6px 20px rgb(0 0 0 / 18%);
         pointer-events: none;
+        animation: notice-in 200ms cubic-bezier(0.22, 1, 0.36, 1);
+      }
+
+      @keyframes notice-in {
+        from {
+          opacity: 0;
+          transform: translateX(-50%) translateY(-6px);
+        }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        .notice {
+          animation: none;
+        }
       }
 
       .pane {
@@ -188,6 +202,13 @@ export class Editor extends LitElement {
         position: relative;
         height: 100%;
         overflow: hidden;
+        transition: flex 200ms cubic-bezier(0.22, 1, 0.36, 1);
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        .pane {
+          transition: none;
+        }
       }
 
       /* Sub-header inside editor panel (49px) */
@@ -258,6 +279,49 @@ export class Editor extends LitElement {
         outline: none;
       }
 
+      .pane-in {
+        animation: pane-in 180ms cubic-bezier(0.22, 1, 0.36, 1);
+      }
+
+      @keyframes pane-in {
+        from {
+          opacity: 0;
+          transform: translateX(24px) scale(0.99);
+        }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        .pane-in {
+          animation: none;
+        }
+      }
+
+      /* Swapping surfaces inside the split pane is a content change, not an
+         instant patch: fade the incoming surface. */
+      writemd-ai-panel,
+      writemd-backlinks-panel,
+      writemd-vault-explorer,
+      writemd-surface-launcher,
+      writemd-panel .sub-header + * {
+        animation: surface-in 160ms ease-out;
+      }
+
+      @keyframes surface-in {
+        from {
+          opacity: 0;
+        }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        writemd-ai-panel,
+        writemd-backlinks-panel,
+        writemd-vault-explorer,
+        writemd-surface-launcher,
+        writemd-panel .sub-header + * {
+          animation: none;
+        }
+      }
+
       input.title-input {
         background: transparent;
         border: 1px solid transparent;
@@ -297,7 +361,12 @@ export class Editor extends LitElement {
         cursor: pointer;
         transition:
           color 120ms ease,
-          background 120ms ease;
+          background 120ms ease,
+          transform 100ms ease;
+      }
+
+      .icon-action:active {
+        transform: scale(0.92);
       }
 
       .icon-action:hover {
@@ -333,6 +402,21 @@ export class Editor extends LitElement {
         border-radius: 8px;
         box-shadow: var(--shadow-3);
         padding: 4px;
+        transform-origin: top right;
+        animation: ai-history-in 140ms cubic-bezier(0.22, 1, 0.36, 1);
+      }
+
+      @keyframes ai-history-in {
+        from {
+          opacity: 0;
+          transform: translateY(-4px) scale(0.97);
+        }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        .ai-history {
+          animation: none;
+        }
       }
 
       .ai-history-empty {
@@ -492,17 +576,164 @@ export class Editor extends LitElement {
   @state() private aiSessionId: string | null = null
   @state() private aiSessions: ChatSessionSummary[] = []
   @state() private aiHistoryOpen = false
+  /** Index of the reply currently streaming in, or -1 when none is. */
+  private aiStreamIndex = -1
 
-  /** Click outside closes the history list. */
-  private readonly onAiHistoryPointerDown = (e: Event): void => {
+  /** Files attached to the next prompt, read by the main process. */
+  @state() private aiAttachments: AttachedFile[] = []
+  /** True while a chosen attachment is being read across the bridge. */
+  @state() private aiAttaching = false
+  /** Models the provider reports for the configured key. */
+  @state() private aiModels: string[] = []
+  @state() private aiModelsLoading = false
+
+  /**
+   * Model the composer names on its chip, so the target of a send is visible.
+   *
+   * A getter rather than a field, so there is one source of truth for it. That
+   * means a change to `ai.model` does not by itself re-render anything, hence the
+   * subscription below: without it the chip keeps naming the previous model after
+   * the user picks a different one.
+   */
+  private get aiModel(): string {
+    return this.settingsStore?.get('ai.model', '') ?? ''
+  }
+
+  /** Click outside closes the history list. */ private readonly onAiHistoryPointerDown = (
+    e: Event
+  ): void => {
     if (!this.aiHistoryOpen) return
-    if (!e.composedPath().includes(this)) this.aiHistoryOpen = false
+    const anchor = this.shadowRoot?.querySelector('.ai-history-anchor')
+    if (anchor && !e.composedPath().includes(anchor)) this.aiHistoryOpen = false
   }
 
   private toggleAiHistory = (): void => {
     const next = !this.aiHistoryOpen
     this.aiHistoryOpen = next
     if (next) void this.refreshAiSessions()
+  }
+
+  /**
+   * Ask the provider which models this key can reach.
+   *
+   * Settings already does this for the AI tab, but the composer's chip needs the
+   * list too, and the key never crosses into renderer memory: the request goes
+   * out with an empty key and main substitutes the stored one.
+   */
+  private async refreshAiModels(): Promise<void> {
+    const electron = api()
+    if (!electron?.net) return
+    this.aiModelsLoading = true
+    try {
+      const provider = this.settingsStore?.get('ai.provider', 'OpenAI') ?? 'OpenAI'
+      const models = await electron.net.fetchModels(provider, '')
+      this.aiModels = models
+    } catch (e) {
+      // A provider with no discoverable list is normal (Anthropic), and a failed
+      // list must not take the panel down with it. The chip still opens settings.
+      console.error('Failed to fetch AI models:', e)
+      this.aiModels = []
+    } finally {
+      this.aiModelsLoading = false
+    }
+  }
+
+  /** Switch model from the composer chip. Persisted, so it survives a restart. */
+  private handleAiModelChange = (e: Event): void => {
+    const model = (e as CustomEvent<{ model: string }>).detail.model
+    if (!model || model === this.aiModel) return
+    void this.settingsStore?.set('ai.model', model)
+  }
+
+  /**
+   * Attach files to the next prompt.
+   *
+   * The dialog runs here rather than in the panel because it is what registers
+   * each chosen path with the main process, and the reads have to follow that
+   * registration. One failing file is reported and the rest still attach: a
+   * user picking six screenshots does not want all six lost to one bad path.
+   */
+  private handleAiAttachRequest = async (): Promise<void> => {
+    const electron = api()
+    if (!electron?.dialog || !electron.file?.readAttachment) return
+    let picked: Electron.OpenDialogReturnValue
+    try {
+      picked = await electron.dialog.showOpenDialog({
+        properties: ['openFile', 'multiSelections'],
+        filters: [
+          {
+            name: 'Notes and text',
+            extensions: ['md', 'markdown', 'txt', 'csv', 'json', 'yaml', 'yml']
+          },
+          { name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'gif', 'webp'] },
+          { name: 'All files', extensions: ['*'] }
+        ]
+      })
+    } catch (e) {
+      console.error('Failed to open attach dialog:', e)
+      return
+    }
+    if (picked.canceled || picked.filePaths.length === 0) return
+
+    this.aiAttaching = true
+    const added: AttachedFile[] = []
+    for (const path of picked.filePaths) {
+      try {
+        added.push(await electron.file.readAttachment(path))
+      } catch (e) {
+        // Surfaced as an assistant line rather than a dialog: the user is
+        // looking at the transcript, and the reason belongs next to the prompt
+        // it was meant for.
+        const reason = e instanceof Error ? e.message : String(e)
+        this.aiMessages = [
+          ...this.aiMessages,
+          { role: 'assistant', content: `Could not attach that file: ${reason}` }
+        ]
+      }
+    }
+    this.aiAttachments = [...this.aiAttachments, ...added]
+    this.aiAttaching = false
+  }
+
+  /**
+   * Files dropped on the composer: register the paths (the dialog would have),
+   * then read them through the same guard-checked bridge the picker uses.
+   */
+  private handleAiAttachFiles = async (e: Event): Promise<void> => {
+    const electron = api()
+    if (!electron?.file?.readAttachment || !electron.file.registerDroppedPaths) return
+    const { paths } = (e as CustomEvent<{ paths: string[] }>).detail
+    if (!paths?.length) return
+    try {
+      await electron.file.registerDroppedPaths(paths)
+    } catch (err) {
+      console.error('Failed to register dropped paths:', err)
+    }
+    this.aiAttaching = true
+    const added: AttachedFile[] = []
+    for (const path of paths) {
+      try {
+        added.push(await electron.file.readAttachment(path))
+      } catch (err) {
+        const reason = err instanceof Error ? err.message : String(err)
+        this.aiMessages = [
+          ...this.aiMessages,
+          { role: 'assistant', content: `Could not attach that file: ${reason}` }
+        ]
+      }
+    }
+    this.aiAttachments = [...this.aiAttachments, ...added]
+    this.aiAttaching = false
+  }
+
+  private handleAiAttachRemove = (e: Event): void => {
+    const path = (e as CustomEvent<{ path: string }>).detail.path
+    this.aiAttachments = this.aiAttachments.filter((f) => f.path !== path)
+  }
+
+  /** Stop the reply in flight. The partial answer is kept by the main process. */
+  private handleAiCancel = (): void => {
+    void api()?.net?.cancelChat?.()
   }
 
   private handleAiClear = (): void => {
@@ -529,8 +760,19 @@ export class Editor extends LitElement {
       this.settingsStore.subscribe('ai.apiKeySet', () => this.checkAiConfigured())
     )
     this.settingsUnsubs.push(
-      this.settingsStore.subscribe('ai.provider', () => this.checkAiConfigured())
+      this.settingsStore.subscribe('ai.provider', () => {
+        this.checkAiConfigured()
+        // The old provider's model list is meaningless against the new one.
+        void this.refreshAiModels()
+      })
     )
+    this.settingsUnsubs.push(
+      this.settingsStore.subscribe('ai.apiKeySet', () => void this.refreshAiModels())
+    )
+    // The chip reads the model through a getter, so nothing re-renders when it
+    // changes unless this asks for one.
+    this.settingsUnsubs.push(this.settingsStore.subscribe('ai.model', () => this.requestUpdate()))
+    void this.refreshAiModels()
     this.settingsUnsubs.push(
       this.settingsStore.subscribe('appearance.panelOrientation', (v) => {
         this.panelOrientation = (v as 'horizontal' | 'vertical') ?? 'horizontal'
@@ -671,7 +913,18 @@ export class Editor extends LitElement {
         docPath: this.filePath,
         createdAt: Date.now(),
         updatedAt: Date.now(),
-        messages: this.aiMessages
+        // `streaming` is a live-render flag, not part of the conversation. The
+        // settle handler persists while a reply is still arriving, and a session
+        // file with it would replay the reveal animation on load.
+        messages: this.aiMessages.map((m) => ({
+          role: m.role,
+          content: m.content,
+          filePath: m.filePath,
+          elapsed: m.elapsed,
+          // Names only. The bytes were never in `aiMessages` to begin with,
+          // which is what keeps a session with screenshots from being enormous.
+          attachments: m.attachments
+        }))
       })
     } catch (e) {
       console.error('Failed to save chat session:', e)
@@ -740,11 +993,28 @@ export class Editor extends LitElement {
     })()
   }
 
-  private async handleAiSubmit(input: string): Promise<void> {
-    if (!input.trim() || this.aiIsLoading || !this.settingsStore) return
+  private async handleAiSubmit(input: string, attachments: AttachedFile[] = []): Promise<void> {
+    // An attachment with no words is a real prompt, so the emptiness check is
+    // on both together rather than on the text alone.
+    if ((!input.trim() && attachments.length === 0) || this.aiIsLoading || !this.settingsStore) {
+      return
+    }
 
     const currentPath = this.filePath || 'Untitled'
-    this.aiMessages = [...this.aiMessages, { role: 'user', content: input, filePath: currentPath }]
+    // The transcript keeps the names, not the payloads: a session file holding
+    // three screenshots' worth of base64 would be megabytes of disk per chat.
+    this.aiMessages = [
+      ...this.aiMessages,
+      {
+        role: 'user',
+        content: input,
+        filePath: currentPath,
+        attachments: attachments.map((f) => ({ name: f.name, kind: f.kind, size: f.size }))
+      }
+    ]
+    // Cleared here, not in the panel: this is the moment the files stop being
+    // needed and the owner holds them.
+    this.aiAttachments = []
     this.aiIsLoading = true
 
     const electron = api()
@@ -807,9 +1077,47 @@ If the user asks questions about their file, use the above content to answer.`
           })
       ]
 
+      /*
+       * Attached files ride on the message that carried them, not on a new one.
+       * Older attachments are not re-sent: their bytes are gone by the time a
+       * later question is asked, and a stale screenshot would silently answer a
+       * question it had nothing to do with.
+       */
+      const textFiles = attachments.filter((f) => f.kind === 'text' && f.text)
+      if (textFiles.length > 0) {
+        payloadMessages[payloadMessages.length - 1] = {
+          ...payloadMessages[payloadMessages.length - 1],
+          content: [
+            payloadMessages[payloadMessages.length - 1].content,
+            ...textFiles.map((f) => `\n\n[Attached file: ${f.name}]\n\`\`\`\n${f.text}\n\`\`\``)
+          ].join('')
+        }
+      }
+      const images = attachments.filter((f) => f.kind === 'image' && f.data)
+      if (images.length > 0) {
+        payloadMessages[payloadMessages.length - 1] = {
+          ...payloadMessages[payloadMessages.length - 1],
+          images: images.map((f) => ({
+            data: f.data as string,
+            mediaType: f.mediaType ?? 'image/png',
+            name: f.name
+          }))
+        }
+      }
+
       // Send chat request
       // An empty key tells the main process to use the stored one.
-      const response = await electron.net.chat(provider, model, '', payloadMessages, '')
+      // The reply streams in token by token: `onDelta` appends each chunk to a
+      // placeholder message, which is what the reveal animation follows.
+      this.aiStreamIndex = -1
+      const response = await electron.net.chatStream(
+        provider,
+        model,
+        '',
+        payloadMessages,
+        (delta: string) => this.appendAiDelta(delta),
+        ''
+      )
 
       const replaceRegex = /```writemd-replace\s*\n([\s\S]*?)```/
       const match = response.match(replaceRegex)
@@ -821,13 +1129,20 @@ If the user asks questions about their file, use the above content to answer.`
         const note = applied
           ? cleaned || 'I have updated the document.'
           : 'I left your document alone: you switched tabs before the reply arrived. Ask again with that file active.'
-        this.aiMessages = [...this.aiMessages, { role: 'assistant', content: note }]
-      } else {
+        if (!this.settleAiStream(note)) {
+          this.aiMessages = [...this.aiMessages, { role: 'assistant', content: note }]
+        }
+      } else if (!this.settleAiStream(response)) {
+        // No delta ever arrived, so there is no placeholder to fill.
         this.aiMessages = [...this.aiMessages, { role: 'assistant', content: response }]
       }
       await this.persistAiSession()
       await this.refreshAiSessions()
     } catch (e) {
+      const partial = this.aiStreamIndex >= 0 ? this.aiMessages[this.aiStreamIndex]?.content : ''
+      // Whatever arrived before the failure is real output, so it is kept and
+      // the error is reported underneath it rather than replacing it.
+      if (partial) this.settleAiStream(partial)
       this.aiMessages = [
         ...this.aiMessages,
         { role: 'assistant', content: `Error: ${describeAiError(e)}` }
@@ -838,6 +1153,36 @@ If the user asks questions about their file, use the above content to answer.`
     } finally {
       this.aiIsLoading = false
     }
+  }
+
+  /**
+   * Add one streamed delta to the reply, creating the placeholder on the first
+   * one so an empty bubble never appears.
+   */
+  private appendAiDelta(delta: string): void {
+    const i = this.aiStreamIndex
+    if (i === -1 || !this.aiMessages[i]) {
+      this.aiMessages = [...this.aiMessages, { role: 'assistant', content: delta, streaming: true }]
+      this.aiStreamIndex = this.aiMessages.length - 1
+      return
+    }
+    const next = [...this.aiMessages]
+    next[i] = { ...next[i], content: next[i].content + delta }
+    this.aiMessages = next
+  }
+
+  /**
+   * Replace the streaming placeholder with its finished text and stop the reveal.
+   * Returns false when no reply ever started, so the caller can append instead.
+   */
+  private settleAiStream(content: string): boolean {
+    const i = this.aiStreamIndex
+    this.aiStreamIndex = -1
+    if (i === -1 || !this.aiMessages[i]) return false
+    const next = [...this.aiMessages]
+    next[i] = { ...next[i], content, streaming: false }
+    this.aiMessages = next
+    return true
   }
 
   /**
@@ -869,8 +1214,9 @@ If the user asks questions about their file, use the above content to answer.`
   }
 
   private handleAiSubmitEvent(e: Event): void {
-    const text = (e as CustomEvent<{ text: string }>).detail.text
-    void this.handleAiSubmit(text)
+    const { text, attachments } = (e as CustomEvent<{ text: string; attachments?: AttachedFile[] }>)
+      .detail
+    void this.handleAiSubmit(text, attachments ?? [])
   }
 
   /**
@@ -944,6 +1290,34 @@ If the user asks questions about their file, use the above content to answer.`
     } else if (this.secondaryEditorView) {
       this.secondaryEditorView.destroy()
       this.secondaryEditorView = null
+    }
+
+    // Opening the split snaps the left pane to its new width. `flex` shorthand
+    // does not transition, so drive it with WAAPI against the final basis.
+    if (
+      changedProperties.has('splitActive') &&
+      changedProperties.get('splitActive') === false &&
+      this.splitActive &&
+      !window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    ) {
+      const panels = this.shadowRoot?.querySelectorAll<HTMLElement>('writemd-panel.pane')
+      const left = panels?.[0]
+      if (left) {
+        const finalWidth = left.getBoundingClientRect().width
+        const containerWidth =
+          left.parentElement?.getBoundingClientRect().width ?? finalWidth * 2
+        left.animate([{ flexBasis: `${containerWidth}px` }, { flexBasis: `${finalWidth}px` }], {
+          duration: 320,
+          easing: 'cubic-bezier(0.4, 0, 0.2, 1)'
+        })
+      }
+      const right = panels?.[1]
+      if (right) {
+        right.animate(
+          [{ opacity: 0, transform: 'translateX(24px)' }, { opacity: 1, transform: 'translateX(0)' }],
+          { duration: 220, easing: 'cubic-bezier(0.22, 1, 0.36, 1)' }
+        )
+      }
     }
   }
 
@@ -1639,7 +2013,7 @@ If the user asks questions about their file, use the above content to answer.`
                     @mousedown=${this.startResize}
                     @keydown=${this.handleResizerKey}
                   ></div>
-                  <writemd-panel class="pane">
+                  <writemd-panel class="pane pane-in">
                     ${
                       this.mountsSecondaryView && secondaryDoc
                         ? html`
@@ -1895,7 +2269,17 @@ If the user asks questions about their file, use the above content to answer.`
                                     .configured=${this.isAiConfigured}
                                     .messages=${this.aiMessages}
                                     .loading=${this.aiIsLoading}
+                                    .model=${this.aiModel}
+                                    .models=${this.aiModels}
+                                    .modelsLoading=${this.aiModelsLoading}
+                                    .attachments=${this.aiAttachments}
+                                    .attaching=${this.aiAttaching}
                                     @ai-submit=${this.handleAiSubmitEvent}
+                                    @ai-cancel=${this.handleAiCancel}
+                                    @ai-attach-request=${this.handleAiAttachRequest}
+                                    @ai-attach-files=${this.handleAiAttachFiles}
+                                    @ai-attach-remove=${this.handleAiAttachRemove}
+                                    @ai-model-change=${this.handleAiModelChange}
                                     @thought-settle=${this.handleThoughtSettle}
                                   ></writemd-ai-panel>
                                 `

@@ -1,7 +1,7 @@
 import { ipcMain, dialog, shell, net, app, type BrowserWindow } from 'electron'
 import { readFile, writeFile, stat, rename, unlink, open } from 'fs/promises'
 import { watch, existsSync, mkdirSync, type FSWatcher } from 'fs'
-import { dirname, join, resolve } from 'path'
+import { basename, dirname, extname, join, resolve } from 'path'
 import { randomUUID } from 'crypto'
 import log from 'electron-log'
 import {
@@ -29,11 +29,14 @@ import {
   saveSession
 } from './chat-sessions'
 import { getAiProvider } from '../shared/ai-providers'
-import type { ChatMessage, ChatSession } from '../shared/electron-api'
+import { SseParser } from './sse'
+import type { AttachedFile, ChatMessage, ChatSession } from '../shared/electron-api'
 import {
   setVaultRootProvider,
   registerExternalPath,
   registerExternalPaths,
+  registerAttachmentPaths,
+  assertCanReadAttachment,
   canAccessPath,
   canProbePath,
   canRenamePath,
@@ -51,6 +54,19 @@ const watchedPaths = new Map<string, FSWatcher>()
 
 /** Guard against a runaway conversation filling the disk with transcripts. */
 const MAX_SESSION_MESSAGES = 2000
+
+/** Image types a vision-capable provider will accept as an attachment. */
+const IMAGE_MEDIA_TYPES: Record<string, string> = {
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.gif': 'image/gif',
+  '.webp': 'image/webp'
+}
+
+/** Per-file ceilings for the attach dialog, chosen to stay inside a request. */
+const MAX_IMAGE_BYTES = 8 * 1024 * 1024
+const MAX_TEXT_BYTES = 256 * 1024
 
 /** Restore access to documents referenced by our own persisted config. */
 export function registerPersistedPaths(): void {
@@ -158,6 +174,57 @@ export function setupIpc(getWindow: () => BrowserWindow | null): void {
     const result = await dialog.showSaveDialog(w, options)
     registerExternalPath(result.filePath)
     return result
+  })
+
+  /*
+   * Read one file chosen in the attach dialog.
+   *
+   * The dialog registers every path it returns, so `assertCanAccess` is what
+   * stops the renderer from naming any other file on disk. Text is returned
+   * decoded because the prompt inlines it; images are returned as base64 with
+   * no data: prefix, since that is the form every provider's payload wants.
+   *
+   * The size ceiling is what keeps a pasted 40MB video from becoming a 53MB
+   * JSON body the provider will reject with an opaque 400. Text gets a tighter
+   * bound than images because it is inlined into the message itself.
+   */
+  ipcMain.handle('file:read-attachment', async (_, filePath: string): Promise<AttachedFile> => {
+    assertCanReadAttachment(filePath)
+    const stats = await stat(filePath)
+    if (!stats.isFile()) throw new Error(`Not a file: ${filePath}`)
+
+    const ext = extname(filePath).toLowerCase()
+    const name = basename(filePath)
+
+    if (IMAGE_MEDIA_TYPES[ext]) {
+      if (stats.size > MAX_IMAGE_BYTES) {
+        throw new Error(`${name} is larger than ${Math.round(MAX_IMAGE_BYTES / 1024 / 1024)}MB.`)
+      }
+      const buffer = await readFile(filePath)
+      return {
+        path: filePath,
+        name,
+        kind: 'image',
+        size: stats.size,
+        data: buffer.toString('base64'),
+        mediaType: IMAGE_MEDIA_TYPES[ext]
+      }
+    }
+
+    if (stats.size > MAX_TEXT_BYTES) {
+      throw new Error(`${name} is larger than ${Math.round(MAX_TEXT_BYTES / 1024)}KB.`)
+    }
+    return {
+      path: filePath,
+      name,
+      kind: 'text',
+      size: stats.size,
+      text: await readFile(filePath, 'utf-8')
+    }
+  })
+
+  ipcMain.handle('file:register-paths', (_, paths: string[]) => {
+    if (Array.isArray(paths)) registerAttachmentPaths(paths.filter((p) => typeof p === 'string'))
   })
 
   ipcMain.handle('file:exists', async (_, filePath: string) => {
@@ -438,6 +505,105 @@ export function setupIpc(getWindow: () => BrowserWindow | null): void {
         // { cause } keeps the provider's own error on the rethrow, which
         // otherwise flattened a 401 from the API into a bare message.
         throw new Error(e instanceof Error ? e.message : 'Chat failed', { cause: e })
+      }
+    }
+  )
+
+  /*
+   * In-flight stream aborts, keyed by the WebContents that started them.
+   *
+   * The send button becomes a stop square while a reply is arriving, so the
+   * click has to reach the socket rather than only the renderer's flags. Keying
+   * on the sender means a cancel cannot abort a stream belonging to another
+   * window, and the entry is deleted in a finally so the map cannot grow.
+   */
+  const activeStreams = new Map<number, AbortController>()
+
+  ipcMain.handle('net:chat-cancel', (event) => {
+    activeStreams.get(event.sender.id)?.abort()
+  })
+
+  ipcMain.handle(
+    'net:chat-stream',
+    async (
+      event,
+      provider: string,
+      model: string,
+      apiKey: string,
+      messages: ChatMessage[],
+      systemPrompt?: string
+    ): Promise<string> => {
+      const adapter = getAiProvider(provider)
+      if (!adapter) throw new Error(`Unknown AI provider: ${provider}`)
+      const req = adapter.buildStreamRequest({
+        model,
+        apiKey: resolveApiKey(apiKey),
+        messages,
+        systemPrompt
+      })
+      if (!req) throw new Error(`${provider} cannot stream responses`)
+      const send = (delta: string): void => {
+        if (delta && !event.sender.isDestroyed()) event.sender.send('net:chat-chunk', delta)
+      }
+      // One controller per sender: a second send supersedes the first rather
+      // than leaking an unreachable abort handle.
+      activeStreams.get(event.sender.id)?.abort()
+      const controller = new AbortController()
+      activeStreams.set(event.sender.id, controller)
+      let full = ''
+      try {
+        const res = await net.fetch(req.url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', ...req.headers },
+          body: JSON.stringify(req.body),
+          signal: controller.signal
+        })
+        await assertOk(res)
+        const parser = new SseParser()
+        const body = res.body
+        if (!body) {
+          // No readable stream (a provider that ignored `stream: true`, or a
+          // fetch build without streaming). Deliver it as one delta so the
+          // renderer path is identical either way.
+          const text = adapter.extractChatText(await res.json())
+          send(text)
+          return text
+        }
+        const reader = body.getReader()
+        const decoder = new TextDecoder()
+        for (;;) {
+          const { done, value } = await reader.read()
+          if (done) break
+          // `stream: true` on the decoder matters: a multi-byte character can be
+          // split across two reads and would otherwise decode to U+FFFD.
+          for (const payload of parser.feed(decoder.decode(value, { stream: true }))) {
+            const delta = adapter.extractStreamChunk(payload)
+            if (delta) {
+              full += delta
+              send(delta)
+            }
+          }
+        }
+        // A provider that closes without a trailing blank line hides its last
+        // frame until flush.
+        for (const payload of parser.flush()) {
+          const delta = adapter.extractStreamChunk(payload)
+          if (delta) {
+            full += delta
+            send(delta)
+          }
+        }
+        return full
+      } catch (e) {
+        // A user-initiated stop is not a failure and must not be reported as
+        // one: it would put "aborted" in the transcript as an assistant message.
+        if (controller.signal.aborted) return full
+        console.error('Chat stream error:', e)
+        throw new Error(e instanceof Error ? e.message : 'Chat failed', { cause: e })
+      } finally {
+        if (activeStreams.get(event.sender.id) === controller) {
+          activeStreams.delete(event.sender.id)
+        }
       }
     }
   )

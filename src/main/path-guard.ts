@@ -22,6 +22,13 @@ export function setVaultRootProvider(provider: () => string): void {
 
 const registeredPaths = new Set<string>()
 
+/**
+ * Dropped-file paths live apart from `registeredPaths`: they are renderer-
+ * controlled, so they must not widen the general allowlist. They exist only
+ * so `file:read-attachment` can read the exact files the user dropped.
+ */
+const attachmentPaths = new Set<string>()
+
 function isWindows(): boolean {
   return process.platform === 'win32'
 }
@@ -47,6 +54,23 @@ export function registerExternalPath(p: string | null | undefined): void {
 
 export function registerExternalPaths(paths: readonly (string | null | undefined)[]): void {
   for (const p of paths) registerExternalPath(p)
+}
+
+export function registerAttachmentPaths(paths: readonly (string | null | undefined)[]): void {
+  for (const p of paths) {
+    if (typeof p !== 'string' || !p || !isAbsolute(p)) continue
+    attachmentPaths.add(normalizePath(p))
+    const real = realpathBestEffort(p)
+    if (real) attachmentPaths.add(real)
+  }
+}
+
+/** Attachment reads: vault, registered, or explicitly dropped paths only. */
+export function assertCanReadAttachment(p: string): void {
+  if (!p || !isAbsolute(p)) throw new Error(`Access denied for path: ${p}`)
+  if (canAccessPath(p)) return
+  if (attachmentPaths.has(normalizePath(p))) return
+  throw new Error(`Access denied for path: ${p}`)
 }
 
 export function isSubpath(child: string, parent: string): boolean {
@@ -251,4 +275,5 @@ export { isAllowedExternalProtocol } from '../shared/external-url'
 /** Test seam: drop every registered external path. */
 export function resetRegisteredPaths(): void {
   registeredPaths.clear()
+  attachmentPaths.clear()
 }

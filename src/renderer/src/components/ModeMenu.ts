@@ -21,6 +21,21 @@ export class ModeMenu extends LitElement {
       font-family: 'Geist Mono', monospace;
       box-sizing: border-box;
       user-select: none;
+      transform-origin: bottom right;
+      animation: menu-in 140ms cubic-bezier(0.22, 1, 0.36, 1);
+    }
+
+    @keyframes menu-in {
+      from {
+        opacity: 0;
+        transform: translateY(4px) scale(0.97);
+      }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      :host {
+        animation: none;
+      }
     }
 
     .item {

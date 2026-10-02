@@ -123,17 +123,32 @@ export class SettingsModal extends LitElement {
       }
     }
 
-    .modal-dialog {
-      width: min(900px, 94vw);
-      height: min(700px, 90vh);
-      display: flex;
-      background: var(--bg-elevated);
-      border: 1px solid var(--border-subtle);
-      border-radius: 12px;
-      box-shadow: var(--shadow-3);
-      overflow: hidden;
-      color: var(--text);
-    }
+      .modal-dialog {
+        width: min(900px, 94vw);
+        height: min(700px, 90vh);
+        display: flex;
+        background: var(--bg-elevated);
+        border: 1px solid var(--border-subtle);
+        border-radius: 12px;
+        box-shadow: var(--shadow-3);
+        overflow: hidden;
+        color: var(--text);
+        animation: dialog-in 180ms cubic-bezier(0.22, 1, 0.36, 1);
+      }
+
+      @keyframes dialog-in {
+        from {
+          opacity: 0;
+          transform: translateY(8px) scale(0.98);
+        }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        :host,
+        .modal-dialog {
+          animation: none;
+        }
+      }
 
     /* Sidebar Navigation */
     .sidebar {

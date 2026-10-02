@@ -114,6 +114,23 @@ export class TextMenu extends LitElement {
       .has-sub[aria-expanded='true'] > .submenu {
         display: block;
       }
+      .m-panel {
+        transform-origin: top left;
+        animation: menu-in 140ms cubic-bezier(0.22, 1, 0.36, 1);
+      }
+
+      @keyframes menu-in {
+        from {
+          opacity: 0;
+          transform: translateY(-4px) scale(0.97);
+        }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        .m-panel {
+          animation: none;
+        }
+      }
       .m-item[role='menuitem'] {
         cursor: pointer;
       }

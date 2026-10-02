@@ -25,6 +25,7 @@ export class CommandPalette extends LitElement {
         align-items: flex-start;
         padding-top: 12vh;
         background: var(--scrim, rgba(0, 0, 0, 0.5));
+        animation: scrim-in 120ms ease-out;
       }
       .panel {
         width: min(560px, 92vw);
@@ -33,6 +34,27 @@ export class CommandPalette extends LitElement {
         border-radius: 8px;
         box-shadow: var(--shadow-3);
         overflow: hidden;
+        animation: palette-in 160ms cubic-bezier(0.22, 1, 0.36, 1);
+      }
+
+      @keyframes scrim-in {
+        from {
+          opacity: 0;
+        }
+      }
+
+      @keyframes palette-in {
+        from {
+          opacity: 0;
+          transform: translateY(-8px) scale(0.98);
+        }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        :host,
+        .panel {
+          animation: none;
+        }
       }
       input {
         width: 100%;
