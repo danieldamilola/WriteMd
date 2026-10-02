@@ -11,6 +11,12 @@
 const DATA_PREFIX = 'data:'
 const DONE = '[DONE]'
 
+/**
+ * Upper bound on buffered bytes with no complete frame. A provider that
+ * never emits a blank line would otherwise grow the buffer without limit.
+ */
+const MAX_BUFFER_CHARS = 1024 * 1024
+
 export class SseParser {
   private buffer = ''
 
@@ -24,6 +30,10 @@ export class SseParser {
     // Providers disagree on line endings; normalizing to \n makes the blank-line
     // split below the only case that has to work.
     this.buffer += text.replace(/\r\n/g, '\n')
+    if (this.buffer.length > MAX_BUFFER_CHARS && !this.buffer.includes('\n\n')) {
+      this.buffer = ''
+      throw new Error('SSE frame exceeded buffer limit')
+    }
     const payloads: unknown[] = []
     let cut = this.buffer.indexOf('\n\n')
     while (cut !== -1) {

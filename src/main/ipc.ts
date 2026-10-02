@@ -35,6 +35,8 @@ import {
   setVaultRootProvider,
   registerExternalPath,
   registerExternalPaths,
+  registerAttachmentPaths,
+  assertCanReadAttachment,
   canAccessPath,
   canProbePath,
   canRenamePath,
@@ -187,7 +189,7 @@ export function setupIpc(getWindow: () => BrowserWindow | null): void {
    * bound than images because it is inlined into the message itself.
    */
   ipcMain.handle('file:read-attachment', async (_, filePath: string): Promise<AttachedFile> => {
-    assertCanAccess(filePath)
+    assertCanReadAttachment(filePath)
     const stats = await stat(filePath)
     if (!stats.isFile()) throw new Error(`Not a file: ${filePath}`)
 
@@ -222,7 +224,7 @@ export function setupIpc(getWindow: () => BrowserWindow | null): void {
   })
 
   ipcMain.handle('file:register-paths', (_, paths: string[]) => {
-    if (Array.isArray(paths)) registerExternalPaths(paths.filter((p) => typeof p === 'string'))
+    if (Array.isArray(paths)) registerAttachmentPaths(paths.filter((p) => typeof p === 'string'))
   })
 
   ipcMain.handle('file:exists', async (_, filePath: string) => {
@@ -548,6 +550,7 @@ export function setupIpc(getWindow: () => BrowserWindow | null): void {
       activeStreams.get(event.sender.id)?.abort()
       const controller = new AbortController()
       activeStreams.set(event.sender.id, controller)
+      let full = ''
       try {
         const res = await net.fetch(req.url, {
           method: 'POST',
@@ -557,7 +560,6 @@ export function setupIpc(getWindow: () => BrowserWindow | null): void {
         })
         await assertOk(res)
         const parser = new SseParser()
-        let full = ''
         const body = res.body
         if (!body) {
           // No readable stream (a provider that ignored `stream: true`, or a
@@ -595,7 +597,7 @@ export function setupIpc(getWindow: () => BrowserWindow | null): void {
       } catch (e) {
         // A user-initiated stop is not a failure and must not be reported as
         // one: it would put "aborted" in the transcript as an assistant message.
-        if (controller.signal.aborted) return ''
+        if (controller.signal.aborted) return full
         console.error('Chat stream error:', e)
         throw new Error(e instanceof Error ? e.message : 'Chat failed', { cause: e })
       } finally {

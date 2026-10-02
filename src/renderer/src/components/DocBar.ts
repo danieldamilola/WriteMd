@@ -147,6 +147,12 @@ export class DocBar extends LitElement {
         .m-panel.note-menu {
           animation: none;
         }
+        .icon-action {
+          transition: none;
+        }
+        .icon-action:active {
+          transform: none;
+        }
       }
       :host([compact]) .sub-header {
         height: 28px;

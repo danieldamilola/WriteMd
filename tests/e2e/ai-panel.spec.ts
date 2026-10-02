@@ -234,7 +234,7 @@ test.describe('AI panel', () => {
     await expect(panel.locator('textarea.ai-input')).toBeEnabled({ timeout: 15000 })
     await expect(panel.locator('.chat-log')).not.toContainText('Error:')
     // The partial answer is kept, not discarded.
-    await expect(panel.locator('.chat-log')).toContainText('Here is a')
+    await expect(panel.locator('.chat-log .bubble.assistant').last()).toContainText('Here is a')
   })
 })
 
