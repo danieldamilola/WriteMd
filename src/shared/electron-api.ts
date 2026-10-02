@@ -33,10 +33,48 @@ export interface ExportResult {
   reason?: string
 }
 
+/** An image attached to a prompt, base64 with no data: prefix. */
+export interface ChatImage {
+  /** Base64 payload. Prefixed onto a data URL only for OpenAI-shaped APIs. */
+  data: string
+  /** IANA subtype, e.g. `image/png`. Gemini and Anthropic want this verbatim. */
+  mediaType: string
+  /** File name, shown in the transcript so the user can see what they sent. */
+  name: string
+}
+
 /** A single chat message sent to an AI provider. */
 export interface ChatMessage {
   role: 'user' | 'assistant' | 'system'
   content: string
+  /**
+   * Images attached alongside `content`, vision-capable providers only.
+   *
+   * Every provider spells this differently, so the shape stays uniform here and
+   * each adapter translates it. A message with images but empty content is
+   * legitimate (a bare screenshot with no prompt), which is why `content`
+   * cannot be folded into the images themselves.
+   */
+  images?: ChatImage[]
+}
+
+/**
+ * One file the user attached to a prompt.
+ *
+ * `kind` decides how it reaches the provider: text is inlined into the message
+ * content, images ride along as vision parts.
+ */
+export interface AttachedFile {
+  path: string
+  name: string
+  kind: 'text' | 'image'
+  /** Byte length, for the transcript chip. */
+  size: number
+  /** Populated for `kind: 'text'`; the content inlined into the prompt. */
+  text?: string
+  /** Populated for `kind: 'image'`; base64 with no data: prefix. */
+  data?: string
+  mediaType?: string
 }
 
 /** A stored conversation. `docPath` is null for a scratch chat with no file. */
@@ -56,6 +94,12 @@ export interface ChatSession {
     content: string
     filePath?: string
     elapsed?: number
+    /**
+     * Names of files this prompt carried. Metadata only: the image bytes are
+     * never stored, so a restored session shows what was sent without keeping
+     * megabytes of base64 on disk.
+     */
+    attachments?: Array<{ name: string; kind: 'text' | 'image'; size: number }>
   }>
 }
 
@@ -110,6 +154,15 @@ export interface ElectronAPI {
       filters?: { name: string; extensions: string[] }[]
     }) => Promise<Electron.SaveDialogReturnValue>
     exists: (path: string) => Promise<boolean>
+    /**
+     * Read one file the user picked in the attach dialog, as text or as base64
+     * depending on its extension. Paths must have come from `showOpenDialog`.
+     */
+    readAttachment: (path: string) => Promise<AttachedFile>
+    /** Electron 32+ removed File.path; this is the supported way back. */
+    getPathForFile: (file: File) => string
+    /** Register dropped paths so the guards in read-attachment allow them. */
+    registerDroppedPaths: (paths: string[]) => Promise<void>
     saveImage: (docPath: string, base64Data: string, ext: string) => Promise<SavedImageResult>
     resolveAsset: (docPath: string, relativePath: string) => Promise<string | null>
     watch: (path: string) => Promise<void>
@@ -138,6 +191,25 @@ export interface ElectronAPI {
       messages: ChatMessage[],
       systemPrompt?: string
     ) => Promise<string>
+    /**
+     * Streams an answer token by token. `onChunk` fires per delta as it arrives;
+     * the returned promise resolves with the same full text once the stream
+     * closes, so the caller can post-process it.
+     */
+    chatStream: (
+      provider: string,
+      model: string,
+      apiKey: string,
+      messages: ChatMessage[],
+      onChunk: (delta: string) => void,
+      systemPrompt?: string
+    ) => Promise<string>
+    /**
+     * Abort the in-flight stream. The promise from `chatStream` then resolves
+     * with whatever text had already arrived instead of rejecting, so a stopped
+     * reply keeps its partial answer.
+     */
+    cancelChat: () => Promise<void>
   }
   chat: {
     /** Create an empty session bound to a document, or null for a scratch chat. */

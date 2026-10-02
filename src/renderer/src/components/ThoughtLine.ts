@@ -6,15 +6,16 @@ import { icon } from './icons'
  * A working→settled status line, replacing the plain italic "Thinking..."
  * bubble.
  *
+ * Static by design. The first version breathed the glyph, swept a highlight
+ * across the label and crossfaded into the settled sentence, which read as
+ * animation for its own sake in a panel the user is trying to read. What earns
+ * its place is the elapsed time: the line counts while the model works and
+ * keeps the number, so a slow reply is legible afterwards.
+ *
  * Written from scratch rather than ported: react-bits' Thought Line is
  * MIT + Commons Clause, whose restriction forbids redistributing the component
  * "whether alone, in a bundle, or as a ported version". WriteMd is MIT and
- * ships as an installer, so a copy would be a redistribution. The behaviour
- * here is ordinary CSS: an opacity cycle, a swept highlight, and a crossfade.
- *
- * Everything is expressed as CSS custom properties so a caller can retune it,
- * and every animation is disabled under prefers-reduced-motion rather than
- * merely shortened.
+ * ships as an installer, so a copy would be a redistribution.
  */
 @customElement('writemd-thought-line')
 export class ThoughtLine extends LitElement {
@@ -27,12 +28,12 @@ export class ThoughtLine extends LitElement {
       font-family: inherit;
       font-size: 13px;
       line-height: 1.5;
-      /* The bubble used to be a block with its own background; the line owns
-         that so it can be dropped anywhere without extra wrapper styling. */
-      padding: 12px 16px;
-      border-radius: 8px;
-      border-bottom-left-radius: 2px;
-      background: var(--bg-elevated);
+      /* No bubble chrome: the line sits flat in the transcript like the
+         assistant answer beside it, so a "Thought for Xs" row reads as prose,
+         not as a chip. */
+      padding: 0;
+      border-radius: 0;
+      background: none;
     }
 
     :host([hidden]) {
@@ -42,10 +43,9 @@ export class ThoughtLine extends LitElement {
     .glyph {
       display: inline-flex;
       flex: none;
-      width: 1.05em;
-      height: 1.05em;
+      width: 0.95em;
+      height: 0.95em;
       color: var(--text-muted);
-      animation: breathe var(--breath-period, 1.6s) cubic-bezier(0.77, 0, 0.175, 1) infinite;
     }
 
     .glyph svg {
@@ -53,122 +53,40 @@ export class ThoughtLine extends LitElement {
       height: 100%;
     }
 
+
     .stack {
-      position: relative;
       display: inline-block;
-      min-width: 8ch;
       text-align: left;
     }
 
     /*
-     * Both labels occupy the same origin so the swap cannot reflow the row. The
-     * settled one is absolutely positioned and only becomes static once active,
-     * which is what stops the container jumping as the words differ in length.
+     * Plain swap, no crossfade: a working line that breathes, shimmers and then
+     * blurs into its settled form was animation for its own sake. display keeps
+     * the inactive label out of layout entirely, so nothing reflows and nothing
+     * animates.
+     *
+     * Both labels are toggled. Only hiding the settled one left the working label
+     * in the tree forever, so a restored entry read "Thinking Thought for 0.3s".
      */
     .label {
+      display: none;
       white-space: nowrap;
     }
 
-    .label.working {
-      animation: settle var(--settle-duration, 350ms) ease both;
-    }
-
-    .label.settled {
-      position: absolute;
-      top: 0;
-      left: 0;
-      opacity: 0;
-      filter: blur(var(--settle-blur, 2px));
-      transition:
-        opacity var(--settle-duration, 350ms) ease,
-        filter var(--settle-duration, 350ms) ease;
+    .label.working[data-active] {
+      display: inline;
     }
 
     .label.settled[data-active] {
-      position: static;
-      opacity: 1;
-      filter: blur(0);
-    }
-
-    /* A band of ink sweeps the working label. Opacity only, so it never causes
-       layout or paint of the text itself. */
-    .label.working[data-shimmer] .text {
-      background-image: linear-gradient(
-        100deg,
-        transparent 20%,
-        var(--shimmer-tint, rgba(255, 255, 255, 0.55)) 45%,
-        transparent 70%
-      );
-      background-repeat: no-repeat;
-      background-size: 260% 100%;
-      animation: shimmer var(--shimmer-duration, 1.8s) ease-in-out infinite;
-      -webkit-background-clip: text;
-      background-clip: text;
-      -webkit-text-fill-color: transparent;
-    }
-
-    .text {
-      display: inline-block;
+      display: inline;
     }
 
     .timer {
-      font-family: ui-monospace, 'Geist Mono', monospace;
+      font-family: var(--font-mono, ui-monospace, monospace);
       font-variant-numeric: tabular-nums;
       /* Tabular stops the digits changing width as the tenths tick. */
       letter-spacing: 0.01em;
       opacity: 0.75;
-    }
-
-    @keyframes breathe {
-      0%,
-      100% {
-        opacity: 1;
-      }
-      50% {
-        opacity: calc(1 - var(--breath-depth, 0.45));
-      }
-    }
-
-    @keyframes shimmer {
-      0% {
-        background-position: 180% 0;
-      }
-      100% {
-        background-position: -80% 0;
-      }
-    }
-
-    @keyframes settle {
-      from {
-        opacity: 1;
-        filter: blur(0);
-      }
-      to {
-        opacity: 1;
-        filter: blur(0);
-      }
-    }
-
-    /*
-     * Reduced motion: stop the loops entirely rather than shortening them, and
-     * drop the blur so the crossfade stays legible. The timer still runs, since
-     * elapsed time is information rather than decoration.
-     */
-    @media (prefers-reduced-motion: reduce) {
-      .glyph {
-        animation: none;
-        opacity: 0.8;
-      }
-
-      .label.working[data-shimmer] .text {
-        animation: none;
-        -webkit-text-fill-color: currentColor;
-        background-image: none;
-      }
-
-      .label.settled {
-        filter: none;
-      }
     }
   `
 
@@ -178,7 +96,6 @@ export class ThoughtLine extends LitElement {
   @property({ type: String }) label = 'Thinking'
   @property({ type: String }) doneLabel = 'Thought for'
   @property({ type: Boolean }) showTimer = true
-  @property({ type: Boolean }) shimmer = true
 
   /** Internally managed clock. Ignored once settled. */
   @state() private tenths = 0
@@ -224,10 +141,15 @@ export class ThoughtLine extends LitElement {
 
   protected override willUpdate(changed: PropertyValues<this>): void {
     if (!changed.has('working')) return
-    if (this.working) {
+    // Only a real working -> settled transition reports. A line restored from a
+    // saved transcript mounts with `working` already false, and treating that
+    // initial value as a transition made it emit `thought-settle` on mount: the
+    // owner appended another entry, which rendered another line, which settled
+    // again, and the session save looped until the renderer died.
+    if (this.working || changed.get('working') !== true) {
       // Working again starts a fresh clock; reusing the old one would report
       // the previous attempt's elapsed time.
-      this.startClock()
+      if (this.working) this.startClock()
       return
     }
     // Freeze on the value actually shown, not a fresh reading, so the number
@@ -265,7 +187,7 @@ export class ThoughtLine extends LitElement {
     return html`
       <span class="glyph" aria-hidden="true">${icon('sparkle')}</span>
       <span class="stack">
-        <span class="label working" ?data-shimmer=${working && this.shimmer}>${this.label}</span>
+        <span class="label working" ?data-active=${working}>${this.label}</span>
         <span class="label settled" ?data-active=${settledActive}
           >${this.doneLabel}${
             this.showTimer

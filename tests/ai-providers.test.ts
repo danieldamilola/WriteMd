@@ -168,3 +168,114 @@ describe('AI provider adapters', () => {
     expect(AI_PROVIDERS.Anthropic.buildModelsRequest('k')).toBeNull()
   })
 })
+
+/**
+ * Vision payloads.
+ *
+ * Every provider spells an attached image differently, and each of these shapes
+ * is wrong in a way that fails at the API with a 400 rather than in the app. They
+ * are pinned per provider because the spellings are the whole point.
+ */
+describe('image attachments', () => {
+  const image = { data: 'AAAA', mediaType: 'image/png', name: 'shot.png' }
+  const withImage = {
+    messages: [
+      {
+        role: 'user' as const,
+        content: 'what is wrong here',
+        images: [image]
+      }
+    ]
+  }
+
+  it('sends an OpenAI-shaped message as text plus image_url parts', () => {
+    const req = AI_PROVIDERS.OpenAI.buildChatRequest(ctx(withImage))
+    const body = req.body as { messages: Record<string, unknown>[] }
+    const parts = body.messages[0].content as Record<string, unknown>[]
+    expect(parts[0]).toEqual({ type: 'text', text: 'what is wrong here' })
+    expect(parts[1]).toEqual({
+      type: 'image_url',
+      image_url: { url: 'data:image/png;base64,AAAA' }
+    })
+  })
+
+  it('sends a Gemini message as inlineData before the text', () => {
+    const req = AI_PROVIDERS.GoogleGemini.buildChatRequest(ctx(withImage))
+    const body = req.body as { contents: { parts: Record<string, unknown>[] }[] }
+    // Order matters to Gemini's payload shape: inlineData carries no `text`,
+    // which is exactly why the system prompt below has to find it by shape.
+    expect(body.contents[0].parts[0]).toEqual({
+      inlineData: { mimeType: 'image/png', data: 'AAAA' }
+    })
+    expect(body.contents[0].parts[1]).toEqual({ text: 'what is wrong here' })
+  })
+
+  it('sends an Anthropic message as image blocks then a text block', () => {
+    const req = AI_PROVIDERS.Anthropic.buildChatRequest(ctx(withImage))
+    const body = req.body as { messages: { content: Record<string, unknown>[] }[] }
+    expect(body.messages[0].content[0]).toEqual({
+      type: 'image',
+      source: { type: 'base64', media_type: 'image/png', data: 'AAAA' }
+    })
+    expect(body.messages[0].content[1]).toEqual({
+      type: 'text',
+      text: 'what is wrong here'
+    })
+  })
+
+  it('does not reshape a text-only message on the OpenAI-shaped providers', () => {
+    // Sending a one-part array where a string is expected is accepted by some
+    // gateways and rejected by others, so a prompt with no image stays a string.
+    for (const id of ['OpenAI', 'Anthropic', 'Ollama']) {
+      const body = AI_PROVIDERS[id].buildChatRequest(ctx()).body as {
+        messages: Record<string, unknown>[]
+      }
+      expect(body.messages[0].content).toBe('hi')
+      expect(body.messages[0].images).toBeUndefined()
+    }
+  })
+
+  it('leaves a text-only Gemini message as a single text part', () => {
+    // Gemini's payload shape always uses `parts`; that is pre-existing and not
+    // something the image support should change.
+    const body = AI_PROVIDERS.GoogleGemini.buildChatRequest(ctx()).body as {
+      contents: { parts: Record<string, unknown>[] }[]
+    }
+    expect(body.contents[0].parts).toEqual([{ text: 'hi' }])
+  })
+
+  it('never puts an image on an assistant turn', () => {
+    // A model echoing an image back is not a shape any of these APIs accept.
+    const body = AI_PROVIDERS.OpenAI.buildChatRequest(
+      ctx({
+        messages: [{ role: 'assistant', content: 'here it is', images: [image] }]
+      })
+    ).body as { messages: Record<string, unknown>[] }
+    expect(body.messages[0].content).toBe('here it is')
+    expect(body.messages[0].images).toBeUndefined()
+  })
+
+  it('prepends the Gemini system prompt to the text part, not the image', () => {
+    // The index-0 assumption held only while every message was text. With an
+    // image attached, parts[0] is inlineData and overwriting it would have
+    // replaced the picture with prose.
+    const body = AI_PROVIDERS.GoogleGemini.buildChatRequest(
+      ctx({ ...withImage, systemPrompt: 'be brief' })
+    ).body as { contents: { parts: Record<string, unknown>[] }[] }
+    const parts = body.contents[0].parts
+    expect(parts[0]).toEqual({ inlineData: { mimeType: 'image/png', data: 'AAAA' } })
+    expect(parts[1].text).toContain('[SYSTEM INSTRUCTION]')
+    expect(parts[1].text).toContain('what is wrong here')
+  })
+
+  it('keeps images on a streamed request too', () => {
+    const req = AI_PROVIDERS.OpenAI.buildStreamRequest(ctx(withImage))
+    expect(req).not.toBeNull()
+    const body = req?.body as {
+      stream: boolean
+      messages: Record<string, unknown>[]
+    }
+    expect(body.stream).toBe(true)
+    expect(Array.isArray(body.messages[0].content)).toBe(true)
+  })
+})

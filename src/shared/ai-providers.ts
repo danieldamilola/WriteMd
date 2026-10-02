@@ -22,6 +22,13 @@ export interface AiProviderAdapter {
   id: string
   buildChatRequest(ctx: AiRequestContext): AiRequest
   extractChatText(data: unknown): string
+  /**
+   * The same request, asking for a stream. Returns null when the provider has no
+   * streaming endpoint, and the caller falls back to the one-shot path.
+   */
+  buildStreamRequest(ctx: AiRequestContext): AiRequest | null
+  /** Delta text carried by one streamed payload. '' for control frames. */
+  extractStreamChunk(data: unknown): string
   /** Returns null when the provider has no discoverable model list. */
   buildModelsRequest(apiKey: string): AiRequest | null
   extractModelIds(data: unknown): string[]
@@ -42,6 +49,24 @@ interface ContentPart {
   type?: string
   text?: string
 }
+
+/**
+ * The OpenAI-shaped multimodal message body: text first, then each image as a
+ * data URL. Shared by every provider built on `openaiCompatible`, which is all
+ * of them except Gemini and Anthropic.
+ */
+function openaiContent(m: ChatMessage): unknown {
+  const images = m.images ?? []
+  if (images.length === 0) return m.content
+  return [
+    { type: 'text', text: m.content },
+    ...images.map((img) => ({
+      type: 'image_url',
+      image_url: { url: `data:${img.mediaType};base64,${img.data}` }
+    }))
+  ]
+}
+
 interface OpenAIChoice {
   message?: {
     content?: string | ContentPart[] | null
@@ -54,6 +79,25 @@ interface OpenAIChatResponse {
   choices?: OpenAIChoice[]
   /** OpenRouter and friends answer 200 with an error object on some failures. */
   error?: { message?: string; code?: number | string }
+}
+
+interface OpenAIStreamChunk {
+  choices?: { delta?: { content?: string | ContentPart[] | null }; finish_reason?: string | null }[]
+  error?: { message?: string; code?: number | string }
+}
+
+/** Text carried by one streamed OpenAI-shaped delta, '' when it carries none. */
+function deltaText(chunk: unknown): string {
+  const choice = (chunk as OpenAIStreamChunk)?.choices?.[0]
+  const content = choice?.delta?.content
+  if (typeof content === 'string') return content
+  if (Array.isArray(content)) {
+    return content
+      .filter((p) => p?.type === 'text' || typeof p?.text === 'string')
+      .map((p) => p.text ?? '')
+      .join('')
+  }
+  return ''
 }
 
 const FINISH_REASONS: Record<string, string> = {
@@ -127,7 +171,20 @@ function openaiCompatible(
       return {
         url: chatUrl,
         headers,
-        body: { model, messages: finalMessages }
+        body: {
+          model,
+          // Each message is mapped rather than spread: a message carrying images
+          // has to become a parts array, and only the user role may carry one.
+          messages: finalMessages.map((m) => {
+            // `images` is dropped rather than spread through: only the user role
+            // may carry one, and a leftover key on an assistant turn is a field
+            // no provider's schema expects.
+            if (m.role === 'assistant' || !m.images?.length) {
+              return { role: m.role, content: m.content }
+            }
+            return { role: m.role, content: openaiContent(m) }
+          })
+        }
       }
     },
     extractChatText(data: unknown): string {
@@ -141,6 +198,18 @@ function openaiCompatible(
         throw new AiResponseError(`The model returned no answer: ${FINISH_REASONS[finish]}.`)
       }
       return expectText(text, 'choices[0].message.content')
+    },
+    buildStreamRequest(ctx: AiRequestContext): AiRequest {
+      const req = this.buildChatRequest(ctx)
+      const body = req.body as { stream?: boolean }
+      return { ...req, body: { ...body, stream: true } }
+    },
+    extractStreamChunk(data: unknown): string {
+      const err = providerError(data)
+      // Mid-stream errors arrive as a normal 200 frame, so this has to be an
+      // exception rather than an empty delta the caller would never notice.
+      if (err) throw new AiResponseError(`Provider error: ${err}`)
+      return deltaText(data)
     },
     buildModelsRequest(apiKey: string): AiRequest {
       const headers: Record<string, string> = {}
@@ -164,30 +233,52 @@ function openaiCompatible(
 interface GeminiChatResponse {
   candidates?: { content?: { parts?: { text?: string }[] } }[]
 }
+interface GeminiStreamChunk {
+  candidates?: { content?: { parts?: { text?: string }[] } }[]
+}
 interface GeminiModelsResponse {
   models?: { name?: string }[]
 }
 interface AnthropicChatResponse {
   content?: { text?: string }[]
 }
+interface AnthropicStreamEvent {
+  type?: string
+  delta?: { type?: string; text?: string }
+  error?: { message?: string }
+}
 interface OllamaModelsResponse {
   models?: { name?: string }[]
 }
+
+const GEMINI_BASE = 'https://generativelanguage.googleapis.com/v1beta'
 
 const gemini: AiProviderAdapter = {
   id: 'GoogleGemini',
   buildChatRequest({ model, apiKey, messages, systemPrompt }) {
     const contents = messages.map((m) => ({
       role: m.role === 'assistant' ? 'model' : 'user',
-      parts: [{ text: m.content }]
+      // Gemini names an inline image `inlineData` with a camelCase mediaType,
+      // and it goes before the text so the model reads the picture first.
+      parts: [
+        ...(m.images ?? []).map((img) => ({
+          inlineData: { mimeType: img.mediaType, data: img.data }
+        })),
+        { text: m.content }
+      ]
     }))
-    // Gemini has no top-level system role in this payload shape, so prepend it
-    // to the first user message (pre-existing behavior, kept for parity).
-    if (systemPrompt && contents.length > 0 && contents[0].parts[0]) {
-      contents[0].parts[0].text = `[SYSTEM INSTRUCTION]\n${systemPrompt}\n\n[USER MESSAGE]\n${contents[0].parts[0].text}`
+    // Gemini has no top-level system role in this payload shape, so prepend it to
+    // the first user message (pre-existing behavior, kept for parity). It has
+    // to find the text part rather than assume index 0: an image arrives first,
+    // and overwriting `inlineData` with prose would corrupt the attachment.
+    if (systemPrompt && contents.length > 0) {
+      const first = contents[0].parts.find((p) => 'text' in p)
+      if (first && 'text' in first) {
+        first.text = `[SYSTEM INSTRUCTION]\n${systemPrompt}\n\n[USER MESSAGE]\n${first.text}`
+      }
     }
     return {
-      url: `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,
+      url: `${GEMINI_BASE}/models/${model}:generateContent`,
       // Key goes in a header, never in the URL query string.
       headers: { 'x-goog-api-key': apiKey },
       body: { contents }
@@ -196,6 +287,22 @@ const gemini: AiProviderAdapter = {
   extractChatText(data: unknown): string {
     const res = data as GeminiChatResponse
     return expectText(res.candidates?.[0]?.content?.parts?.[0]?.text, 'candidates[0].content')
+  },
+  buildStreamRequest(ctx: AiRequestContext): AiRequest {
+    const req = this.buildChatRequest(ctx)
+    // alt=sse is what switches the endpoint from a JSON array to one event per
+    // chunk; without it the stream arrives as a single comma-joined body.
+    return {
+      ...req,
+      url: `${req.url.replace(':generateContent', ':streamGenerateContent')}?alt=sse`
+    }
+  },
+  extractStreamChunk(data: unknown): string {
+    const res = data as GeminiStreamChunk
+    // Gemini repeats the whole prefix in some chunks; the caller keeps the text
+    // it has already forwarded, so a delta is what is wanted here, not a
+    // reassembly of the accumulated candidates.
+    return res.candidates?.[0]?.content?.parts?.[0]?.text ?? ''
   },
   buildModelsRequest(apiKey: string): AiRequest {
     return {
@@ -227,13 +334,44 @@ const anthropic: AiProviderAdapter = {
         model,
         max_tokens: 1024,
         ...(systemPrompt && { system: systemPrompt }),
-        messages
+        // Anthropic wants `content` as a blocks array once a message carries an
+        // image, with image blocks first and text last.
+        messages: messages.map((m) => {
+          if (m.role === 'assistant' || !m.images?.length) {
+            return { role: m.role, content: m.content }
+          }
+          return {
+            role: m.role,
+            content: [
+              ...m.images.map((img) => ({
+                type: 'image',
+                source: { type: 'base64', media_type: img.mediaType, data: img.data }
+              })),
+              { type: 'text', text: m.content }
+            ]
+          }
+        })
       }
     }
   },
   extractChatText(data: unknown): string {
     const res = data as AnthropicChatResponse
     return expectText(res.content?.[0]?.text, 'content[0].text')
+  },
+  buildStreamRequest(ctx: AiRequestContext): AiRequest {
+    const req = this.buildChatRequest(ctx)
+    const body = req.body as { stream?: boolean }
+    return { ...req, body: { ...body, stream: true } }
+  },
+  extractStreamChunk(data: unknown): string {
+    const ev = data as AnthropicStreamEvent
+    if (ev.type === 'error') {
+      throw new AiResponseError(`Provider error: ${ev.error?.message ?? 'unknown stream error'}`)
+    }
+    // Anthropic sends text as content_block_delta frames; everything else
+    // (message_start, ping, message_stop) carries no answer text.
+    if (ev.type !== 'content_block_delta' || ev.delta?.type !== 'text_delta') return ''
+    return ev.delta.text ?? ''
   },
   buildModelsRequest(): null {
     return null

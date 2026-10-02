@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron'
+import { contextBridge, ipcRenderer, webUtils, type IpcRendererEvent } from 'electron'
 import type { ChatMessage, ChatSession, UpdateInfo, UpdateProgress } from '../shared/electron-api'
 
 function onChannel(channel: string, callback: (...args: unknown[]) => void): () => void {
@@ -40,6 +40,16 @@ const writemdAPI = {
     exists: (path: string) => ipcRenderer.invoke('file:exists', path),
     saveImage: (docPath: string, base64Data: string, ext: string) =>
       ipcRenderer.invoke('file:save-image', docPath, base64Data, ext),
+    /**
+     * Read one file the user picked in the attach dialog. Text comes back
+     * decoded, images as bare base64, which is what the provider payloads want.
+     */
+    readAttachment: (path: string) => ipcRenderer.invoke('file:read-attachment', path),
+    /** Electron 32+ removed File.path; this is the supported way back. */
+    getPathForFile: (file: File) => webUtils.getPathForFile(file),
+    /** Dropped files are not dialog results, so nothing registered them yet. */
+    registerDroppedPaths: (paths: string[]) =>
+      ipcRenderer.invoke('file:register-paths', paths),
     resolveAsset: (docPath: string, relativePath: string) =>
       ipcRenderer.invoke('file:resolve-asset', docPath, relativePath),
     watch: (path: string) => ipcRenderer.invoke('file:watch', path),
@@ -70,7 +80,28 @@ const writemdAPI = {
       apiKey: string,
       messages: ChatMessage[],
       systemPrompt?: string
-    ) => ipcRenderer.invoke('net:chat', provider, model, apiKey, messages, systemPrompt)
+    ) => ipcRenderer.invoke('net:chat', provider, model, apiKey, messages, systemPrompt),
+    chatStream: (
+      provider: string,
+      model: string,
+      apiKey: string,
+      messages: ChatMessage[],
+      onChunk: (delta: string) => void,
+      systemPrompt?: string
+    ): Promise<string> => {
+      // The channel is live only for the duration of this call. Leaving it
+      // attached would hand every later stream's deltas to this callback too.
+      const listener = (_e: Electron.IpcRendererEvent, delta: string): void => onChunk(delta)
+      ipcRenderer.on('net:chat-chunk', listener)
+      return ipcRenderer
+        .invoke('net:chat-stream', provider, model, apiKey, messages, systemPrompt)
+        .finally(() => ipcRenderer.removeListener('net:chat-chunk', listener))
+    },
+    /**
+     * Abort the stream this renderer started. Resolves with the text that had
+     * already arrived, so the partial answer is kept rather than lost.
+     */
+    cancelChat: () => ipcRenderer.invoke('net:chat-cancel')
   },
   chat: {
     createSession: (docPath: string | null) => ipcRenderer.invoke('chat:create', docPath),
