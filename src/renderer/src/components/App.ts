@@ -242,6 +242,9 @@ export class WriteMdApp extends LitElement {
     })
     this.showWelcome = true
     await this.fileState.restoreTabs().catch(() => false)
+
+    const { maybeShowWhatsNew } = await import('../services/whats-new')
+    void maybeShowWhatsNew()
   }
 
   disconnectedCallback(): void {

@@ -1,6 +1,7 @@
 import { html, css, LitElement } from 'lit'
 import { customElement, property } from 'lit/decorators.js'
 import './IconButton'
+import './UpdateButton'
 import { api } from '../api'
 
 @customElement('writemd-top-bar')
@@ -86,6 +87,8 @@ export class WriteMdTopBar extends LitElement {
             />
           </svg>
         </writemd-icon-button>
+
+        <writemd-update-button></writemd-update-button>
 
         <writemd-icon-button title="Settings" @click=${() => this.emit('open-settings')}>
           <svg width="18" height="18" viewBox="0 0 18 18" fill="none">

@@ -126,6 +126,14 @@ export interface UpdateProgress {
   total?: number
 }
 
+/** Point-in-time snapshot so a late-subscribing renderer can sync up. */
+export interface UpdaterState {
+  status: 'idle' | 'checking' | 'available' | 'downloading' | 'downloaded' | 'error'
+  version: string
+  percent: number
+  error: string
+}
+
 export interface ElectronAPI {
   app: {
     getVersion: () => Promise<string>
@@ -234,9 +242,10 @@ export interface ElectronAPI {
     docx: (markdown: string, docPath: string | null) => Promise<ExportResult>
   }
   updater: {
-    check: () => Promise<{ updateInfo: UpdateInfo } | null>
+    check: () => Promise<{ updateInfo: UpdateInfo } | { error: string } | null>
     download: () => Promise<string[]>
     install: () => void
+    getState: () => Promise<UpdaterState>
     onUpdateAvailable: (callback: (info: UpdateInfo) => void) => () => void
     onUpdateNotAvailable: (callback: (info: UpdateInfo) => void) => () => void
     onUpdateDownloaded: (callback: (info: UpdateInfo) => void) => () => void
