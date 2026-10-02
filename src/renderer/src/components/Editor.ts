@@ -791,15 +791,20 @@ If the user asks questions about their file, use the above content to answer.`
           role: 'assistant',
           content: 'Understood.'
         },
-        ...this.aiMessages.map((m): ChatMessage => {
-          if (m.role === 'user') {
-            return {
-              role: m.role,
-              content: `[Context: The user is currently in file: ${m.filePath}]\n\n${m.content}`
+        // `thinking` lines are a local record of elapsed time, not conversation,
+        // so they must not reach the provider as messages. The predicate is
+        // needed because filter() alone does not narrow the union.
+        ...this.aiMessages
+          .filter((m): m is AiMessage & { role: 'user' | 'assistant' } => m.role !== 'thinking')
+          .map((m): ChatMessage => {
+            if (m.role === 'user') {
+              return {
+                role: m.role,
+                content: `[Context: The user is currently in file: ${m.filePath}]\n\n${m.content}`
+              }
             }
-          }
-          return { role: m.role, content: m.content }
-        })
+            return { role: m.role, content: m.content }
+          })
       ]
 
       // Send chat request
@@ -866,6 +871,20 @@ If the user asks questions about their file, use the above content to answer.`
   private handleAiSubmitEvent(e: Event): void {
     const text = (e as CustomEvent<{ text: string }>).detail.text
     void this.handleAiSubmit(text)
+  }
+
+  /**
+   * The live thought line froze. Keep it as a transcript entry, otherwise the
+   * elapsed time only exists while the bubble is mounted and is lost the moment
+   * the reply lands.
+   */
+  private handleThoughtSettle = (e: Event): void => {
+    const { tenths } = (e as CustomEvent<{ tenths: number }>).detail ?? { tenths: 0 }
+    this.aiMessages = [
+      ...this.aiMessages,
+      { role: 'thinking', content: 'Thinking', elapsed: tenths }
+    ]
+    void this.persistAiSession()
   }
 
   /**
@@ -1877,6 +1896,7 @@ If the user asks questions about their file, use the above content to answer.`
                                     .messages=${this.aiMessages}
                                     .loading=${this.aiIsLoading}
                                     @ai-submit=${this.handleAiSubmitEvent}
+                                    @thought-settle=${this.handleThoughtSettle}
                                   ></writemd-ai-panel>
                                 `
                               : html`

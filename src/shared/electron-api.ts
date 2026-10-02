@@ -47,7 +47,16 @@ export interface ChatSession {
   docPath: string | null
   createdAt: number
   updatedAt: number
-  messages: Array<ChatMessage & { filePath?: string }>
+  /**
+   * `thinking` entries are a local record of elapsed time, rendered by the
+   * panel and filtered out before any provider sees them.
+   */
+  messages: Array<{
+    role: 'user' | 'assistant' | 'thinking'
+    content: string
+    filePath?: string
+    elapsed?: number
+  }>
 }
 
 /** What the history list needs, without shipping every message. */

@@ -457,9 +457,12 @@ export function setupIpc(getWindow: () => BrowserWindow | null): void {
       throw new Error(`Chat session exceeds ${MAX_SESSION_MESSAGES} messages`)
     }
     for (const m of session.messages) {
-      if (typeof m?.content !== 'string' || (m.role !== 'user' && m.role !== 'assistant')) {
-        throw new Error('Invalid chat session message')
-      }
+      // `thinking` is a local elapsed-time record the panel renders, so it is
+      // accepted here and filtered out before the payload reaches a provider.
+      const valid =
+        typeof m?.content === 'string' &&
+        (m.role === 'user' || m.role === 'assistant' || m.role === 'thinking')
+      if (!valid) throw new Error('Invalid chat session message')
     }
     await saveSession(await ensureTitle({ ...session, updatedAt: Date.now() }))
   })

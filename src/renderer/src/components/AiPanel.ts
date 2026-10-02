@@ -1,6 +1,7 @@
-import { html, css, LitElement } from 'lit'
-import { customElement, property } from 'lit/decorators.js'
+import { html, css, LitElement, type PropertyValues } from 'lit'
+import { customElement, property, state } from 'lit/decorators.js'
 import { unsafeHTML } from 'lit/directives/unsafe-html.js'
+import './ThoughtLine'
 import { createChatMarkdownIt } from '../utils/markdown'
 import { emit } from '../events/bus'
 import { icon } from './icons'
@@ -12,10 +13,18 @@ import { createLinkInterceptor } from './extensions/safe-links'
 // ftp/mailto, and clicks are intercepted, so none of it can navigate.
 const md = createChatMarkdownIt()
 
+/** How long the live line stays mounted after work finishes. Matches the CSS. */
+const SETTLE_HOLD_MS = 420
+
 export interface AiMessage {
-  role: 'user' | 'assistant'
+  role: 'user' | 'assistant' | 'thinking'
   content: string
   filePath?: string
+  /**
+   * Tenths of a second, for `role: 'thinking'`. The settled line is kept in the
+   * scrollback so the elapsed time is still there after the live bubble goes.
+   */
+  elapsed?: number
 }
 
 /**
@@ -235,6 +244,24 @@ export class AiPanel extends LitElement {
   @property({ type: Array }) messages: AiMessage[] = []
   @property({ type: Boolean }) loading = false
 
+  /**
+   * The live line stays mounted briefly after `loading` goes false, otherwise it
+   * is unmounted in the same cycle that `working` flips: it never re-renders, so
+   * the crossfade does not play and the settle event never fires.
+   */
+  @state() private settling = false
+  private settleTimer: number | null = null
+
+  protected override willUpdate(changed: PropertyValues<this>): void {
+    if (!changed.has('loading') || this.loading) return
+    if (this.settleTimer !== null) window.clearTimeout(this.settleTimer)
+    this.settling = true
+    this.settleTimer = window.setTimeout(() => {
+      this.settling = false
+      this.settleTimer = null
+    }, SETTLE_HOLD_MS)
+  }
+
   private submit(e: KeyboardEvent): void {
     if (e.key !== 'Enter') return
     const input = e.target as HTMLInputElement
@@ -259,8 +286,11 @@ export class AiPanel extends LitElement {
 
   disconnectedCallback(): void {
     this.removeEventListener('click', this.interceptLinks, true)
+    if (this.settleTimer !== null) window.clearTimeout(this.settleTimer)
+    this.settleTimer = null
     super.disconnectedCallback()
   }
+
   /** Keep the latest message visible above the pinned input. */
   updated(): void {
     const log = this.shadowRoot?.querySelector('.chat-log')
@@ -308,36 +338,42 @@ export class AiPanel extends LitElement {
             </div>
           </div>
 
-          ${this.messages.map(
-            (m) => html`
-              <div
-                style="display: flex; gap: 8px; justify-content: ${
-                  m.role === 'user' ? 'flex-end' : 'flex-start'
-                }"
-              >
-                <div
-                  style="background: var(${m.role === 'user' ? '--accent' : '--bg-elevated'}); color: var(${
-                    m.role === 'user' ? '--accent-text' : '--text'
-                  }); padding: 12px 16px; border-radius: 8px; border-bottom-${
-                    m.role === 'user' ? 'right' : 'left'
-                  }-radius: 2px; max-width: 85%; ${
-                    m.role === 'user' ? 'white-space: pre-wrap;' : ''
-                  } overflow-wrap: break-word;"
-                >
-                  ${m.role === 'assistant' ? unsafeHTML(md.render(m.content)) : m.content}
-                </div>
-              </div>
-            `
-          )}
-          ${
-            this.loading
+          ${this.messages.map((m) =>
+            m.role === 'thinking'
               ? html`
                   <div style="display: flex; gap: 8px;">
+                    <writemd-thought-line
+                      ?working=${false}
+                      .elapsed=${m.elapsed ?? 0}
+                      label=${m.content || 'Thinking'}
+                    ></writemd-thought-line>
+                  </div>
+                `
+              : html`
+                  <div
+                    style="display: flex; gap: 8px; justify-content: ${
+                      m.role === 'user' ? 'flex-end' : 'flex-start'
+                    }"
+                  >
                     <div
-                      style="background: var(--bg-elevated); padding: 12px 16px; border-radius: 8px; border-bottom-left-radius: 2px; color: var(--text-secondary); font-style: italic;"
+                      style="background: var(${m.role === 'user' ? '--accent' : '--bg-elevated'}); color: var(${
+                        m.role === 'user' ? '--accent-text' : '--text'
+                      }); padding: 12px 16px; border-radius: 8px; border-bottom-${
+                        m.role === 'user' ? 'right' : 'left'
+                      }-radius: 2px; max-width: 85%; ${
+                        m.role === 'user' ? 'white-space: pre-wrap;' : ''
+                      } overflow-wrap: break-word;"
                     >
-                      Thinking...
+                      ${m.role === 'assistant' ? unsafeHTML(md.render(m.content)) : m.content}
                     </div>
+                  </div>
+                `
+          )}
+          ${
+            this.loading || this.settling
+              ? html`
+                  <div style="display: flex; gap: 8px;">
+                    <writemd-thought-line ?working=${this.loading}></writemd-thought-line>
                   </div>
                 `
               : ''
