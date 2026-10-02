@@ -39,6 +39,27 @@ export interface ChatMessage {
   content: string
 }
 
+/** A stored conversation. `docPath` is null for a scratch chat with no file. */
+export interface ChatSession {
+  id: string
+  /** Derived from the first user message; empty until there is one. */
+  title: string
+  docPath: string | null
+  createdAt: number
+  updatedAt: number
+  messages: Array<ChatMessage & { filePath?: string }>
+}
+
+/** What the history list needs, without shipping every message. */
+export interface ChatSessionSummary {
+  id: string
+  title: string
+  docPath: string | null
+  createdAt: number
+  updatedAt: number
+  messageCount: number
+}
+
 /** Update info pushed by electron-updater. Only version is contractual. */
 export interface UpdateInfo {
   version?: string
@@ -108,6 +129,15 @@ export interface ElectronAPI {
       messages: ChatMessage[],
       systemPrompt?: string
     ) => Promise<string>
+  }
+  chat: {
+    /** Create an empty session bound to a document, or null for a scratch chat. */
+    createSession: (docPath: string | null) => Promise<ChatSession>
+    loadSession: (id: string) => Promise<ChatSession | null>
+    saveSession: (session: ChatSession) => Promise<void>
+    deleteSession: (id: string) => Promise<void>
+    /** Summaries for one document, newest first. */
+    listSessions: (docPath: string | null) => Promise<ChatSessionSummary[]>
   }
   dialog: {
     showOpenDialog: (options: Electron.OpenDialogOptions) => Promise<Electron.OpenDialogReturnValue>

@@ -5,7 +5,7 @@ import { findNext, findPrevious, getSearchQuery } from '@codemirror/search'
 import { scrollbarStyles } from './scrollbars'
 import { SettingsStore } from '../state/settings'
 import { type AiMessage } from './AiPanel'
-import type { ChatMessage } from '../../../shared/electron-api'
+import type { ChatMessage, ChatSessionSummary } from '../../../shared/electron-api'
 import './FindPanel'
 import './AiPanel'
 import './BacklinksPanel'
@@ -408,6 +408,9 @@ export class Editor extends LitElement {
   @state() private isAiConfigured = false
   @state() private aiMessages: AiMessage[] = []
   @state() private aiIsLoading = false
+  /** Persisted chat for the open document. Null until one exists on disk. */
+  @state() private aiSessionId: string | null = null
+  @state() private aiSessions: ChatSessionSummary[] = []
 
   private settingsStore: SettingsStore | null = null
   private settingsUnsubs: Array<() => void> = []
@@ -442,6 +445,10 @@ export class Editor extends LitElement {
     this.splitActive = current.splitActive
     this.splitSurface = current.splitSurface
     this.secondaryDoc = current.secondaryDoc
+    // Restores the chat for the document restored at launch. The subscription
+    // below only fires on a *change*, and filePath is already assigned here, so
+    // without this the first session is never loaded.
+    void this.loadAiSession()
 
     this.unsubscribe = this.fileState.subscribe((s) => {
       const normalizedMode = s.viewMode === 'wysiwyg' ? 'live' : s.viewMode
@@ -458,6 +465,12 @@ export class Editor extends LitElement {
       this.splitActive = s.splitActive
       this.splitSurface = s.splitSurface
       this.secondaryDoc = s.secondaryDoc
+
+      // Chat is per document, so switching tabs swaps the transcript. The
+      // initial document is handled at setup, above; this is the change case.
+      if (pathChanged) {
+        void this.loadAiSession()
+      }
 
       // While a conflict merge is open the secondary view owns the document
       // text. `setSecondaryContent` writes the merged result into top-level
@@ -542,6 +555,89 @@ export class Editor extends LitElement {
     this.isAiConfigured = provider === 'Ollama' || keySet
   }
 
+  /**
+   * Persist the live session. Called after every exchange rather than on a
+   * timer, so a quit mid-conversation does not lose the last reply.
+   */
+  private async persistAiSession(): Promise<void> {
+    const chat = api()?.chat
+    if (!chat || !this.aiSessionId || this.aiMessages.length === 0) return
+    try {
+      await chat.saveSession({
+        id: this.aiSessionId,
+        // Main derives the title from the first user message; empty is fine.
+        title: '',
+        docPath: this.filePath,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        messages: this.aiMessages
+      })
+    } catch (e) {
+      console.error('Failed to save chat session:', e)
+    }
+  }
+
+  /** Newest session for this document, so reopening a file restores its chat. */
+  private async loadAiSession(): Promise<void> {
+    const chat = api()?.chat
+    if (!chat) return
+    try {
+      const existing = await chat.listSessions(this.filePath)
+      this.aiSessions = existing
+      if (existing.length === 0) {
+        this.aiSessionId = null
+        this.aiMessages = []
+        return
+      }
+      const full = await chat.loadSession(existing[0].id)
+      this.aiSessionId = existing[0].id
+      this.aiMessages = full ? (full.messages as AiMessage[]) : []
+    } catch (e) {
+      console.error('Failed to load chat session:', e)
+    }
+  }
+
+  private async refreshAiSessions(): Promise<void> {
+    const chat = api()?.chat
+    if (!chat) return
+    try {
+      this.aiSessions = await chat.listSessions(this.filePath)
+    } catch (e) {
+      console.error('Failed to list chat sessions:', e)
+    }
+  }
+
+  private handleAiNewSession = (): void => {
+    const chat = api()?.chat
+    if (!chat) return
+    void (async () => {
+      try {
+        const session = await chat.createSession(this.filePath)
+        this.aiSessionId = session.id
+        this.aiMessages = []
+        await this.refreshAiSessions()
+      } catch (e) {
+        console.error('Failed to create chat session:', e)
+      }
+    })()
+  }
+
+  private handleAiSelectSession = (e: Event): void => {
+    const id = (e as CustomEvent<{ id: string }>).detail?.id
+    const chat = api()?.chat
+    if (!id || !chat) return
+    void (async () => {
+      try {
+        const session = await chat.loadSession(id)
+        if (!session) return
+        this.aiSessionId = session.id
+        this.aiMessages = session.messages as AiMessage[]
+      } catch (err) {
+        console.error('Failed to switch chat session:', err)
+      }
+    })()
+  }
+
   private async handleAiSubmit(input: string): Promise<void> {
     if (!input.trim() || this.aiIsLoading || !this.settingsStore) return
 
@@ -553,6 +649,17 @@ export class Editor extends LitElement {
     if (!electron) {
       this.aiIsLoading = false
       return
+    }
+
+    // The first message in a document creates the session, so an untouched
+    // document leaves no empty transcript behind.
+    if (electron.chat && !this.aiSessionId) {
+      try {
+        const session = await electron.chat.createSession(this.filePath)
+        this.aiSessionId = session.id
+      } catch (e) {
+        console.error('Failed to create chat session:', e)
+      }
     }
 
     try {
@@ -611,11 +718,16 @@ If the user asks questions about their file, use the above content to answer.`
       } else {
         this.aiMessages = [...this.aiMessages, { role: 'assistant', content: response }]
       }
+      await this.persistAiSession()
+      await this.refreshAiSessions()
     } catch (e) {
       this.aiMessages = [
         ...this.aiMessages,
         { role: 'assistant', content: `Error: ${describeAiError(e)}` }
       ]
+      // The error is part of the transcript the user is looking at, so persist
+      // it too rather than silently dropping it from the stored session.
+      await this.persistAiSession()
     } finally {
       this.aiIsLoading = false
     }
@@ -1586,7 +1698,13 @@ If the user asks questions about their file, use the above content to answer.`
                                     .configured=${this.isAiConfigured}
                                     .messages=${this.aiMessages}
                                     .loading=${this.aiIsLoading}
+                                    .docPath=${this.filePath}
+                                    .sessionId=${this.aiSessionId}
+                                    .sessions=${this.aiSessions}
                                     @ai-submit=${this.handleAiSubmitEvent}
+                                    @ai-new-session=${this.handleAiNewSession}
+                                    @ai-select-session=${this.handleAiSelectSession}
+                                    @ai-list-sessions=${() => void this.refreshAiSessions()}
                                   ></writemd-ai-panel>
                                 `
                               : html`

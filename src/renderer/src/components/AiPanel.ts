@@ -1,11 +1,25 @@
 import { html, css, LitElement } from 'lit'
-import { customElement, property } from 'lit/decorators.js'
+import { customElement, property, state } from 'lit/decorators.js'
 import { unsafeHTML } from 'lit/directives/unsafe-html.js'
+import type { ChatSessionSummary } from '../../../shared/electron-api'
 import { createChatMarkdownIt } from '../utils/markdown'
 import { emit } from '../events/bus'
 import { icon } from './icons'
 import { scrollbarStyles } from './scrollbars'
 import { createLinkInterceptor } from './extensions/safe-links'
+
+/** Relative for anything recent, absolute beyond a week. */
+function formatWhen(ts: number): string {
+  const diff = Date.now() - ts
+  const mins = Math.floor(diff / 60000)
+  if (mins < 1) return 'just now'
+  if (mins < 60) return `${mins}m ago`
+  const hours = Math.floor(mins / 60)
+  if (hours < 24) return `${hours}h ago`
+  const days = Math.floor(hours / 24)
+  if (days < 7) return `${days}d ago`
+  return new Date(ts).toLocaleDateString()
+}
 
 // `html: false` is what makes the unsafeHTML below safe: raw markup in a model
 // response is escaped rather than parsed. linkify only ever emits http/https/
@@ -118,11 +132,169 @@ export class AiPanel extends LitElement {
        arrow buttons and all, which is what the panel showed. Shadow DOM blocks
        global rules, so each scrollable element opts in. */
     ${scrollbarStyles}
+
+    .ai-bar {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex-shrink: 0;
+    }
+
+    .ai-bar-spacer {
+      flex: 1;
+      min-width: 0;
+    }
+
+    .ai-btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 24px;
+      height: 24px;
+      border-radius: 5px;
+      border: 1px solid transparent;
+      background: none;
+      padding: 0;
+      color: var(--text-muted);
+      cursor: pointer;
+      transition:
+        background 120ms ease,
+        color 120ms ease;
+    }
+
+    .ai-btn:hover {
+      background: var(--bg-hover);
+      color: var(--text);
+    }
+
+    .ai-btn:focus-visible {
+      outline: 1px solid var(--border-focus);
+      outline-offset: 1px;
+    }
+
+    .ai-btn[aria-expanded='true'] {
+      background: var(--bg-hover);
+      color: var(--text);
+    }
+
+    .ai-btn svg {
+      width: 13px;
+      height: 13px;
+      flex-shrink: 0;
+    }
+
+    .ai-history {
+      position: absolute;
+      top: 30px;
+      right: 0;
+      z-index: 20;
+      width: 240px;
+      max-height: 280px;
+      overflow-y: auto;
+      background: var(--bg-elevated);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      box-shadow: var(--shadow-3);
+      padding: 4px;
+    }
+
+    .ai-history-empty {
+      padding: 12px;
+      text-align: center;
+      font-family: var(--font-mono);
+      font-size: 11px;
+      color: var(--text-muted);
+    }
+
+    .ai-history-item {
+      display: block;
+      width: 100%;
+      text-align: left;
+      border: none;
+      background: none;
+      border-radius: 5px;
+      padding: 7px 9px;
+      cursor: pointer;
+      color: var(--text-secondary);
+      font-family: var(--font-mono);
+      font-size: 12px;
+      line-height: 1.4;
+    }
+
+    .ai-history-item:hover {
+      background: var(--bg-hover);
+      color: var(--text);
+    }
+
+    .ai-history-item.current {
+      color: var(--text);
+    }
+
+    .ai-history-title {
+      display: block;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .ai-history-meta {
+      display: block;
+      margin-top: 2px;
+      font-size: 10px;
+      color: var(--text-muted);
+    }
   `
 
   @property({ type: Boolean }) configured = false
   @property({ type: Array }) messages: AiMessage[] = []
   @property({ type: Boolean }) loading = false
+  /** Document these sessions belong to; the list is scoped to it. */
+  @property({ type: String }) docPath: string | null = null
+  @property({ type: String }) sessionId: string | null = null
+  @property({ type: Array }) sessions: ChatSessionSummary[] = []
+
+  @state() private historyOpen = false
+
+  /** Escape closes the list; a click outside does too. */
+  private readonly onDocPointerDown = (e: Event): void => {
+    if (!this.historyOpen) return
+    const path = e.composedPath()
+    if (!path.includes(this)) this.historyOpen = false
+  }
+
+  connectedCallback(): void {
+    super.connectedCallback()
+    // Model output can contain links, and the whole file under edit is pasted
+    // into the prompt, so a URL from a malicious note can come back as a chat
+    // link. Route clicks to the main process instead of navigating the window.
+    this.addEventListener('click', this.interceptLinks, true)
+    document.addEventListener('pointerdown', this.onDocPointerDown, true)
+  }
+
+  disconnectedCallback(): void {
+    this.removeEventListener('click', this.interceptLinks, true)
+    document.removeEventListener('pointerdown', this.onDocPointerDown, true)
+    super.disconnectedCallback()
+  }
+
+  private toggleHistory = (): void => {
+    this.historyOpen = !this.historyOpen
+    if (this.historyOpen) {
+      this.dispatchEvent(new CustomEvent('ai-list-sessions', { bubbles: true, composed: true }))
+    }
+  }
+
+  private newSession = (): void => {
+    this.historyOpen = false
+    this.dispatchEvent(new CustomEvent('ai-new-session', { bubbles: true, composed: true }))
+  }
+
+  private selectSession = (id: string): void => {
+    this.historyOpen = false
+    this.dispatchEvent(
+      new CustomEvent('ai-select-session', { detail: { id }, bubbles: true, composed: true })
+    )
+  }
 
   private submit(e: KeyboardEvent): void {
     if (e.key !== 'Enter') return
@@ -134,23 +306,9 @@ export class AiPanel extends LitElement {
     )
   }
 
-  connectedCallback(): void {
-    super.connectedCallback()
-    // Model output can contain links, and the whole file under edit is pasted
-    // into the prompt, so a URL from a malicious note can come back as a chat
-    // link. Route clicks to the main process instead of navigating the window.
-    this.addEventListener('click', this.interceptLinks, true)
-  }
-
-  disconnectedCallback(): void {
-    this.removeEventListener('click', this.interceptLinks, true)
-    super.disconnectedCallback()
-  }
-
   // Capture phase: the rendered message markup lives in this element's shadow
   // root, and a bubble-phase handler could be pre-empted from below.
   private readonly interceptLinks = createLinkInterceptor(() => this.shadowRoot) as EventListener
-
   /** Keep the latest message visible above the pinned input. */
   updated(): void {
     const log = this.shadowRoot?.querySelector('.chat-log')
@@ -180,8 +338,60 @@ export class AiPanel extends LitElement {
     }
     return html`
       <div
-        style="padding: 16px; display: flex; flex-direction: column; flex: 1; min-height: 0; box-sizing: border-box; overflow: hidden; gap: 16px;"
+        style="position: relative; display: flex; flex-direction: column; flex: 1; min-height: 0; box-sizing: border-box; overflow: hidden; padding: 12px 12px 12px; gap: 12px;"
       >
+        <div class="ai-bar">
+          <button
+            class="ai-btn"
+            type="button"
+            title="Chat history"
+            aria-label="Chat history"
+            aria-haspopup="listbox"
+            aria-expanded=${this.historyOpen ? 'true' : 'false'}
+            @click=${this.toggleHistory}
+          >
+            ${icon('clock', 13)}
+          </button>
+          <button
+            class="ai-btn"
+            type="button"
+            title="New chat"
+            aria-label="New chat"
+            @click=${this.newSession}
+          >
+            ${icon('plus', 13)}
+          </button>
+          <span class="ai-bar-spacer"></span>
+        </div>
+        ${
+          this.historyOpen
+            ? html`
+                <div class="ai-history" role="listbox" aria-label="Chat history">
+                  ${
+                    this.sessions.length === 0
+                      ? html`<div class="ai-history-empty">No saved chats for this file yet.</div>`
+                      : this.sessions.map(
+                          (s) => html`
+                            <button
+                              class="ai-history-item ${s.id === this.sessionId ? 'current' : ''}"
+                              type="button"
+                              role="option"
+                              aria-selected=${s.id === this.sessionId ? 'true' : 'false'}
+                              @click=${() => this.selectSession(s.id)}
+                            >
+                              <span class="ai-history-title">${s.title}</span>
+                              <span class="ai-history-meta"
+                                >${s.messageCount} message${s.messageCount === 1 ? '' : 's'} -
+                                ${formatWhen(s.updatedAt)}</span
+                              >
+                            </button>
+                          `
+                        )
+                  }
+                </div>
+              `
+            : ''
+        }
         <div
           class="chat-log"
           role="log"

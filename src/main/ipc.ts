@@ -20,8 +20,16 @@ import {
   type WriteMdSettingsPatch
 } from './settings'
 import { exportDocx, exportHtml, exportPdf } from './export'
+import {
+  createSession,
+  deleteSession,
+  ensureTitle,
+  listSessions,
+  loadSession,
+  saveSession
+} from './chat-sessions'
 import { getAiProvider } from '../shared/ai-providers'
-import type { ChatMessage } from '../shared/electron-api'
+import type { ChatMessage, ChatSession } from '../shared/electron-api'
 import {
   setVaultRootProvider,
   registerExternalPath,
@@ -40,6 +48,9 @@ import {
 } from './path-guard'
 
 const watchedPaths = new Map<string, FSWatcher>()
+
+/** Guard against a runaway conversation filling the disk with transcripts. */
+const MAX_SESSION_MESSAGES = 2000
 
 /** Restore access to documents referenced by our own persisted config. */
 export function registerPersistedPaths(): void {
@@ -430,4 +441,30 @@ export function setupIpc(getWindow: () => BrowserWindow | null): void {
       }
     }
   )
+
+  // Chat sessions. The id arrives from the renderer, so chat-sessions.ts
+  // validates it against a bare-id pattern before touching the filesystem.
+  ipcMain.handle('chat:create', async (_e, docPath: string | null) => createSession(docPath))
+
+  ipcMain.handle('chat:load', async (_e, id: string) => loadSession(id))
+
+  ipcMain.handle('chat:save', async (_e, session: ChatSession) => {
+    if (!session || typeof session.id !== 'string') throw new Error('Invalid chat session')
+    // A session is a transcript, not a document. Cap it so a runaway loop cannot
+    // fill the disk, and reject the shape rather than writing whatever arrived.
+    if (!Array.isArray(session.messages)) throw new Error('Invalid chat session messages')
+    if (session.messages.length > MAX_SESSION_MESSAGES) {
+      throw new Error(`Chat session exceeds ${MAX_SESSION_MESSAGES} messages`)
+    }
+    for (const m of session.messages) {
+      if (typeof m?.content !== 'string' || (m.role !== 'user' && m.role !== 'assistant')) {
+        throw new Error('Invalid chat session message')
+      }
+    }
+    await saveSession(await ensureTitle({ ...session, updatedAt: Date.now() }))
+  })
+
+  ipcMain.handle('chat:delete', async (_e, id: string) => deleteSession(id))
+
+  ipcMain.handle('chat:list', async (_e, docPath: string | null) => listSessions(docPath))
 }

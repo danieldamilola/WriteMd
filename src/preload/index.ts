@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron'
-import type { ChatMessage, UpdateInfo, UpdateProgress } from '../shared/electron-api'
+import type { ChatMessage, ChatSession, UpdateInfo, UpdateProgress } from '../shared/electron-api'
 
 function onChannel(channel: string, callback: (...args: unknown[]) => void): () => void {
   const handler = (_: IpcRendererEvent, ...args: unknown[]): void => callback(...args)
@@ -71,6 +71,13 @@ const writemdAPI = {
       messages: ChatMessage[],
       systemPrompt?: string
     ) => ipcRenderer.invoke('net:chat', provider, model, apiKey, messages, systemPrompt)
+  },
+  chat: {
+    createSession: (docPath: string | null) => ipcRenderer.invoke('chat:create', docPath),
+    loadSession: (id: string) => ipcRenderer.invoke('chat:load', id),
+    saveSession: (session: ChatSession) => ipcRenderer.invoke('chat:save', session),
+    deleteSession: (id: string) => ipcRenderer.invoke('chat:delete', id),
+    listSessions: (docPath: string | null) => ipcRenderer.invoke('chat:list', docPath)
   },
   dialog: {
     showOpenDialog: (options: Electron.OpenDialogOptions) =>
