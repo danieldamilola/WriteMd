@@ -1,7 +1,7 @@
 import { api } from '../api'
 import { SettingsStore } from '../state/settings'
 
-const notesModules = import.meta.glob('../../../../RELEASE_NOTES_*.md', {
+const notesModules = import.meta.glob('../../../../docs/release-notes/RELEASE_NOTES_*.md', {
   query: '?raw',
   import: 'default',
   eager: true

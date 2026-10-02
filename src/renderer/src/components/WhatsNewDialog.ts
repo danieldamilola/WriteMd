@@ -2,10 +2,13 @@ import { html, css, LitElement } from 'lit'
 import { customElement, property } from 'lit/decorators.js'
 import { unsafeHTML } from 'lit/directives/unsafe-html.js'
 import { createDocumentMarkdownIt } from '../utils/markdown'
+import { scrollbarStyles } from './scrollbars'
 
 @customElement('writemd-whats-new')
 export class WriteMdWhatsNew extends LitElement {
   static styles = css`
+    ${scrollbarStyles}
+
     .overlay {
       position: fixed;
       inset: 0;
@@ -65,17 +68,17 @@ export class WriteMdWhatsNew extends LitElement {
       flex-shrink: 0;
     }
     button {
-      background: var(--accent);
-      border: 1px solid var(--accent);
-      color: var(--accent-text);
-      padding: 6px 16px;
-      border-radius: 4px;
+      background: var(--bg-hover);
+      border: 1px solid var(--border);
+      color: var(--text);
+      padding: 6px 12px;
+      border-radius: 6px;
       cursor: pointer;
       font-size: 13px;
       font-weight: 500;
     }
     button:hover {
-      filter: brightness(1.1);
+      background: var(--bg-active);
     }
   `
 
