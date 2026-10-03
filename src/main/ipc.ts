@@ -30,6 +30,20 @@ import {
 } from './chat-sessions'
 import { getAiProvider } from '../shared/ai-providers'
 import { SseParser } from './sse'
+import {
+  getOpencodeAuthStatus,
+  listOpencodeModels,
+  opencodeLoginCommand,
+  opencodeSearchHints,
+  resolveOpencodeBinary
+} from './opencode'
+import {
+  isManagedServerUp,
+  managedServerUrl,
+  opencodeChat,
+  opencodeChatStream
+} from './opencode-server'
+import { formatSearchContext, webSearch } from './web-search'
 import type { AttachedFile, ChatMessage, ChatSession } from '../shared/electron-api'
 import {
   setVaultRootProvider,
@@ -456,7 +470,24 @@ export function setupIpc(getWindow: () => BrowserWindow | null): void {
   const resolveApiKey = (provided: string | undefined): string =>
     provided && provided.length > 0 ? provided : getStoredApiKey()
 
+  /** One-line per probe, newest last, for the Settings diagnostics box. */
+  function formatAttempts(
+    attempts: Array<{ path: string; ok: boolean; detail: string }>
+  ): string[] {
+    return attempts.map((a) => `${a.ok ? 'OK' : '--'} ${a.path} - ${a.detail}`)
+  }
+
   ipcMain.handle('net:fetch-models', async (_, provider: string, apiKey: string) => {
+    if (provider === 'OpenCode') {
+      const customPath = getSettings().ai.opencodeCliPath || undefined
+      const { found } = await resolveOpencodeBinary(customPath)
+      if (!found)
+        throw new Error('opencode CLI not found. Set its path in Settings → AI Assistant.')
+      const models = await listOpencodeModels(found.path, getVaultPath())
+      // Empty when the CLI has no models subcommand output: the model field
+      // stays free-text (provider/model) rather than blocking the user.
+      return models ?? []
+    }
     const adapter = getAiProvider(provider)
     if (!adapter) throw new Error(`Unknown AI provider: ${provider}`)
     if (adapter.staticModels) return [...adapter.staticModels]
@@ -472,6 +503,83 @@ export function setupIpc(getWindow: () => BrowserWindow | null): void {
     }
   })
 
+  /** Flatten chat messages for the OpenCode prompt (single text part). */
+  function opencodePromptFrom(
+    messages: Array<ChatMessage | { role: string; content: string }>,
+    systemPrompt?: string
+  ): string {
+    const parts: string[] = []
+    if (systemPrompt) parts.push(systemPrompt)
+    for (const m of messages) {
+      if (m.role === 'thinking') continue
+      parts.push(`${m.role === 'assistant' ? 'Assistant' : 'User'}: ${m.content}`)
+    }
+    // Sessions run deny-all permissions, so tools can never execute - but the
+    // model does not know that and still emits tool-call markup into its
+    // answer. Forbid it in prose too; stripToolArtifacts is the backstop.
+    parts.push(
+      '[WriteMd: answer directly in markdown. You have no tools available - ' +
+        'never emit tool calls, invoke blocks, or XML-like markup, just the answer.]'
+    )
+    return parts.join('\n\n')
+  }
+
+  async function resolveOpencodeOrThrow(): Promise<{ path: string; version: string | null }> {
+    const customPath = getSettings().ai.opencodeCliPath || undefined
+    const { found } = await resolveOpencodeBinary(customPath)
+    if (!found) {
+      throw new Error(
+        'opencode CLI not found. Set its path in Settings → AI Assistant (e.g. %APPDATA%\\npm\\opencode.cmd).'
+      )
+    }
+    return found
+  }
+
+  /**
+   * The free-tier gate answers 403 to anything it does not recognize as the
+   * official client with a completed login (proxies hit it too). A raw
+   * "within OpenCode" dump sends the user nowhere, so translate it into the
+   * three things that actually fix it.
+   */
+  function opencodeFriendlyError(e: unknown): string {
+    const msg = e instanceof Error ? e.message : 'Chat failed'
+    if (/within OpenCode|free tier/i.test(msg)) {
+      return (
+        'OpenCode refused the free model. Complete `opencode console login` in a terminal ' +
+        'and confirm with `opencode auth list`, then Recheck in Settings → AI Assistant. ' +
+        'If login is done, the free IP quota may be spent - wait or pick a connected/paid model.'
+      )
+    }
+    return msg
+  }
+
+  async function runOpencodeChat(
+    model: string,
+    messages: ChatMessage[],
+    systemPrompt: string | undefined,
+    cwd: string,
+    onDelta?: (delta: string) => void,
+    signal?: AbortSignal
+  ): Promise<string> {
+    const found = await resolveOpencodeOrThrow()
+    const prompt = opencodePromptFrom(messages, systemPrompt)
+    const input = {
+      bin: found.path,
+      version: found.version,
+      directory: cwd,
+      model: model?.trim() || undefined,
+      prompt,
+      signal
+    }
+    // One-shot and streaming share the managed `serve` backend: blocking
+    // message for chat, prompt_async + /event SSE for stream.
+    const text = onDelta
+      ? await opencodeChatStream({ ...input, onDelta })
+      : await opencodeChat(input)
+    if (!text) throw new Error('opencode returned no output')
+    return text
+  }
+
   ipcMain.handle(
     'net:chat',
     async (
@@ -482,6 +590,14 @@ export function setupIpc(getWindow: () => BrowserWindow | null): void {
       messages: ChatMessage[],
       systemPrompt?: string
     ) => {
+      if (provider === 'OpenCode') {
+        try {
+          return await runOpencodeChat(model, messages, systemPrompt, getVaultPath())
+        } catch (e) {
+          console.error('OpenCode chat error:', e)
+          throw new Error(opencodeFriendlyError(e), { cause: e })
+        }
+      }
       const adapter = getAiProvider(provider)
       if (!adapter) throw new Error(`Unknown AI provider: ${provider}`)
       try {
@@ -531,6 +647,31 @@ export function setupIpc(getWindow: () => BrowserWindow | null): void {
       messages: ChatMessage[],
       systemPrompt?: string
     ): Promise<string> => {
+      if (provider === 'OpenCode') {
+        const send = (delta: string): void => {
+          if (delta && !event.sender.isDestroyed()) event.sender.send('net:chat-chunk', delta)
+        }
+        const controller = new AbortController()
+        activeStreams.set(event.sender.id, controller)
+        try {
+          return await runOpencodeChat(
+            model,
+            messages,
+            systemPrompt,
+            getVaultPath(),
+            send,
+            controller.signal
+          )
+        } catch (e) {
+          if (controller.signal.aborted) return ''
+          console.error('OpenCode stream error:', e)
+          throw new Error(opencodeFriendlyError(e), { cause: e })
+        } finally {
+          if (activeStreams.get(event.sender.id) === controller) {
+            activeStreams.delete(event.sender.id)
+          }
+        }
+      }
       const adapter = getAiProvider(provider)
       if (!adapter) throw new Error(`Unknown AI provider: ${provider}`)
       const req = adapter.buildStreamRequest({
@@ -634,4 +775,68 @@ export function setupIpc(getWindow: () => BrowserWindow | null): void {
   ipcMain.handle('chat:delete', async (_e, id: string) => deleteSession(id))
 
   ipcMain.handle('chat:list', async (_e, docPath: string | null) => listSessions(docPath))
+
+  /*
+   * Local opencode detection. Handles the Windows npm shim (%APPDATA%\npm\
+   * opencode.cmd) and prefers runnable extensions when `where` lists the
+   * extensionless script first. Accepts an explicit path so Settings can
+   * verify a user-picked binary.
+   */
+  ipcMain.handle('opencode:get-status', async (_, customPath?: string) => {
+    const stored = typeof customPath === 'string' && customPath ? customPath : undefined
+    const { found, attempts } = await resolveOpencodeBinary(
+      stored ?? getSettings().ai.opencodeCliPath ?? ''
+    )
+    const debug = formatAttempts(attempts)
+    if (!found) {
+      return {
+        cliFound: false,
+        cliPath: null as string | null,
+        cliVersion: null as string | null,
+        cliMajor: null as number | null,
+        loginCommand: 'opencode auth login opencode',
+        auth: { loggedIn: false, detail: 'CLI not found' },
+        managedServerUp: isManagedServerUp(),
+        managedServerUrl: managedServerUrl(),
+        searchHints: opencodeSearchHints(),
+        debug
+      }
+    }
+    const loginCommand = opencodeLoginCommand(found.major)
+    let auth = { loggedIn: false, detail: 'login status unknown' }
+    try {
+      auth = await getOpencodeAuthStatus(found.path, getVaultPath())
+    } catch {
+      // Status is advisory; chat still attempts the run and surfaces real errors.
+    }
+    return {
+      cliFound: true,
+      cliPath: found.path,
+      cliVersion: found.version,
+      cliMajor: found.major,
+      loginCommand,
+      auth,
+      managedServerUp: isManagedServerUp(),
+      managedServerUrl: managedServerUrl(),
+      searchHints: opencodeSearchHints(),
+      debug
+    }
+  })
+
+  ipcMain.handle('opencode:get-models', async () => {
+    const { found } = await resolveOpencodeBinary(getSettings().ai.opencodeCliPath || undefined)
+    if (!found) throw new Error('opencode CLI not found')
+    return (await listOpencodeModels(found.path, getVaultPath())) ?? []
+  })
+
+  ipcMain.handle('web:search', async (_, query: string, maxResults?: number) => {
+    if (typeof query !== 'string' || !query.trim()) throw new Error('Empty search query')
+    return webSearch(query, typeof maxResults === 'number' ? maxResults : 6)
+  })
+
+  ipcMain.handle('web:search-context', async (_, query: string) => {
+    if (typeof query !== 'string' || !query.trim()) throw new Error('Empty search query')
+    const results = await webSearch(query, 6)
+    return formatSearchContext(query, results)
+  })
 }

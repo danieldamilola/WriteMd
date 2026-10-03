@@ -624,15 +624,22 @@ export class Editor extends LitElement {
     const electron = api()
     if (!electron?.net) return
     this.aiModelsLoading = true
+    const configuredModel = this.aiModel
     try {
       const provider = this.settingsStore?.get('ai.provider', 'OpenAI') ?? 'OpenAI'
       const models = await electron.net.fetchModels(provider, '')
-      this.aiModels = models
+      // A selected model stays usable even if a provider omits it from its
+      // discoverable list. The chat request is the authority on whether it is
+      // actually available to this key.
+      this.aiModels = configuredModel
+        ? [configuredModel, ...models.filter((model) => model !== configuredModel)]
+        : models
     } catch (e) {
-      // A provider with no discoverable list is normal (Anthropic), and a failed
-      // list must not take the panel down with it. The chip still opens settings.
+      // A failed discovery request must not make an already selected model look
+      // unavailable. Sending remains possible and surfaces the provider's real
+      // error if the key, model, or network is the underlying problem.
       console.error('Failed to fetch AI models:', e)
-      this.aiModels = []
+      this.aiModels = configuredModel ? [configuredModel] : []
     } finally {
       this.aiModelsLoading = false
     }
@@ -752,6 +759,11 @@ export class Editor extends LitElement {
     document.addEventListener('pointerdown', this.onAiHistoryPointerDown, true)
     this.busUnsubs.push(on('find:open', this.handleGlobalFind))
     this.busUnsubs.push(on('wiki:open', this.handleOpenWikiLink))
+    this.busUnsubs.push(
+      on('ai:models-updated', ({ models }) => {
+        this.aiModels = models
+      })
+    )
     this.settingsStore = SettingsStore.getInstance()
     this.panelOrientation = this.settingsStore.get('appearance.panelOrientation', 'horizontal') as
       'horizontal' | 'vertical'
@@ -772,6 +784,9 @@ export class Editor extends LitElement {
     // The chip reads the model through a getter, so nothing re-renders when it
     // changes unless this asks for one.
     this.settingsUnsubs.push(this.settingsStore.subscribe('ai.model', () => this.requestUpdate()))
+    this.settingsUnsubs.push(
+      this.settingsStore.subscribe('ai.webSearchEnabled', () => this.requestUpdate())
+    )
     void this.refreshAiModels()
     this.settingsUnsubs.push(
       this.settingsStore.subscribe('appearance.panelOrientation', (v) => {
@@ -895,7 +910,14 @@ export class Editor extends LitElement {
     // The plaintext key never reaches the renderer; the main process reports
     // whether one is stored.
     const keySet = this.settingsStore.get<boolean>('ai.apiKeySet', false)
-    this.isAiConfigured = provider === 'Ollama' || keySet
+    this.isAiConfigured = provider === 'Ollama' || provider === 'OpenCode' || keySet
+  }
+
+  /** Toggle keyless web-search grounding from the composer globe button. */
+  private handleAiWebSearchToggle = (): void => {
+    if (!this.settingsStore) return
+    const current = this.settingsStore.get<boolean>('ai.webSearchEnabled', false)
+    void this.settingsStore.set('ai.webSearchEnabled', !current)
   }
 
   /**
@@ -1038,6 +1060,20 @@ export class Editor extends LitElement {
       const provider = this.settingsStore.get('ai.provider', 'OpenAI')
       const model = this.settingsStore.get('ai.model', '')
 
+      // Ground the answer when web search is on: run a keyless search for the
+      // user's question and append the cited results to the file context.
+      // Silent by design: this used to post a `thinking` transcript entry,
+      // which rendered as a second "Thought for 0.0s" line under every prompt.
+      let searchContext = ''
+      const webSearchOn = this.settingsStore.get('ai.webSearchEnabled', false)
+      if (webSearchOn && input.trim()) {
+        try {
+          searchContext = (await electron.web.searchContext(input.trim())) || ''
+        } catch (e) {
+          console.error('Web search failed:', e)
+        }
+      }
+
       // Custom instructions from Settings → AI Assistant, with live file context appended
       const customPrompt =
         this.settingsStore.get('ai.systemPrompt', DEFAULT_AI_SYSTEM_PROMPT) ||
@@ -1051,7 +1087,8 @@ Here is the current content of the active file:
 ${this.content}
 \`\`\`
 
-If the user asks questions about their file, use the above content to answer.`
+If the user asks questions about their file, use the above content to answer.
+${searchContext}`
 
       // We bypass the ipc.ts system prompt handling completely to avoid needing an app restart.
       // We inject the system context as a 'user' message at the very beginning of the payload.
@@ -1304,8 +1341,7 @@ If the user asks questions about their file, use the above content to answer.`
       const left = panels?.[0]
       if (left) {
         const finalWidth = left.getBoundingClientRect().width
-        const containerWidth =
-          left.parentElement?.getBoundingClientRect().width ?? finalWidth * 2
+        const containerWidth = left.parentElement?.getBoundingClientRect().width ?? finalWidth * 2
         left.animate([{ flexBasis: `${containerWidth}px` }, { flexBasis: `${finalWidth}px` }], {
           duration: 320,
           easing: 'cubic-bezier(0.4, 0, 0.2, 1)'
@@ -1314,7 +1350,10 @@ If the user asks questions about their file, use the above content to answer.`
       const right = panels?.[1]
       if (right) {
         right.animate(
-          [{ opacity: 0, transform: 'translateX(24px)' }, { opacity: 1, transform: 'translateX(0)' }],
+          [
+            { opacity: 0, transform: 'translateX(24px)' },
+            { opacity: 1, transform: 'translateX(0)' }
+          ],
           { duration: 220, easing: 'cubic-bezier(0.22, 1, 0.36, 1)' }
         )
       }
@@ -2274,8 +2313,15 @@ If the user asks questions about their file, use the above content to answer.`
                                     .modelsLoading=${this.aiModelsLoading}
                                     .attachments=${this.aiAttachments}
                                     .attaching=${this.aiAttaching}
+                                    .webSearch=${
+                                      this.settingsStore?.get<boolean>(
+                                        'ai.webSearchEnabled',
+                                        false
+                                      ) ?? false
+                                    }
                                     @ai-submit=${this.handleAiSubmitEvent}
                                     @ai-cancel=${this.handleAiCancel}
+                                    @ai-websearch-toggle=${this.handleAiWebSearchToggle}
                                     @ai-attach-request=${this.handleAiAttachRequest}
                                     @ai-attach-files=${this.handleAiAttachFiles}
                                     @ai-attach-remove=${this.handleAiAttachRemove}

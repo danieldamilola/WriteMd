@@ -228,6 +228,28 @@ export interface ElectronAPI {
     /** Summaries for one document, newest first. */
     listSessions: (docPath: string | null) => Promise<ChatSessionSummary[]>
   }
+  opencode: {
+    getStatus: (customPath?: string) => Promise<{
+      cliFound: boolean
+      cliPath: string | null
+      cliVersion: string | null
+      cliMajor: number | null
+      loginCommand: string
+      auth: { loggedIn: boolean; detail: string }
+      managedServerUp: boolean
+      managedServerUrl: string | null
+      searchHints: string[]
+      debug: string[]
+    }>
+    getModels: () => Promise<string[]>
+  }
+  web: {
+    search: (
+      query: string,
+      maxResults?: number
+    ) => Promise<Array<{ title: string; url: string; snippet: string }>>
+    searchContext: (query: string) => Promise<string>
+  }
   dialog: {
     showOpenDialog: (options: Electron.OpenDialogOptions) => Promise<Electron.OpenDialogReturnValue>
   }

@@ -1,7 +1,7 @@
 # AI Panel Work Log
 
 Changelog for the AI assistant panel and its supporting infrastructure. Not the
-release notes — this is the running record of what changed and why, in the same
+release notes - this is the running record of what changed and why, in the same
 voice.
 
 Scope note: this covers only work on the AI panel, its provider layer, and the
@@ -42,7 +42,7 @@ work from earlier in the cycle are covered separately.
 - **Text Resolves Rather Than Appearing.** Each word sits in a span that goes
   from `opacity: 0` plus a 1px blur to fully visible, one word at a time on a
   60ms cadence, resolving over 350ms on a decelerating curve. Pattern taken from
-  transitions.dev (`detail?t=streaming-text`) and written from scratch — the
+  transitions.dev (`detail?t=streaming-text`) and written from scratch - the
   reference is a ~400-line Alpine component with an unclear licence, and the
   effect is four CSS rules and a timer.
 - **It Never Replays.** The reference wipes every word and re-animates on demand.
@@ -65,8 +65,8 @@ work from earlier in the cycle are covered separately.
   six, capped so a pasted document cannot take over the panel, and scrolls
   beyond that. `resize` is off: the box follows its content rather than the other
   way round.
-- **Enter Sends, Shift+Enter Does Not.** A prompt is frequently multi-line — a
-  diff, a list, a block of markdown — and there was no way to write one.
+- **Enter Sends, Shift+Enter Does Not.** A prompt is frequently multi-line - a
+  diff, a list, a block of markdown - and there was no way to write one.
 - **The Composer Locks During a Request.** A second send would interleave two
   transcripts in the same session.
 - **An Open IME Candidate Is Not a Send.** Enter confirms a candidate, so
@@ -131,34 +131,34 @@ work from earlier in the cycle are covered separately.
   DeepSeek R1 and OpenAI's o-series can return `content: null` with the text in a
   `reasoning` field, which produced "missing `choices[0].message.content`" for a
   correctly working key. Some gateways return `content` as an array of typed
-  parts, and the field can be an empty string when a reply was cut off — all
+  parts, and the field can be an empty string when a reply was cut off - all
   three are handled, and a genuine no-answer is reported with the finish reason
   to hand.
 
 ## Tooling and Tests
 
-- **`tests/ai-stream.test.ts`** — 22 tests over the frame parser and the
+- **`tests/ai-stream.test.ts`** - 22 tests over the frame parser and the
   streaming adapters: frames split across chunk boundaries mid-JSON, CRLF
   endings, comment and keep-alive lines, the `[DONE]` terminator, non-JSON
   payloads, a trailing frame with no blank line, `event:`/`id:` fields, Gemini's
   SSE endpoint, Anthropic's non-text frames, a mid-stream error object, and a
   whole answer reassembled from a realistic OpenAI wire.
-- **`tests/thought-line.test.ts`** — 7 tests over the settle contract: silent on
+- **`tests/thought-line.test.ts`** - 7 tests over the settle contract: silent on
   mount when already settled, silent across re-renders, reporting once per
   working cycle (not on the flip back), elapsed time rendered rather than
   counted, and the clock freezing on settle.
-- **`tests/ai-panel.test.ts`** — 24 tests over the composer and the reveal under
+- **`tests/ai-panel.test.ts`** - 24 tests over the composer and the reveal under
   jsdom: send behaviour including IME and whitespace, the draft-driven send
   control, the model hint, the unconfigured state, span idempotence across
   re-renders, the transcript not growing when a settled entry mounts, and the
   reveal draining a long backlog.
-- **`tests/e2e/ai-panel.spec.ts`** — 5 specs driving the real app. The provider is
+- **`tests/e2e/ai-panel.spec.ts`** - 5 specs driving the real app. The provider is
   a fake Ollama on `127.0.0.1:11434` speaking real SSE, which is the URL the
   adapter already points at for Ollama, so the composer, `net:chat-stream`, the
   parser, the adapter, the streaming message and the reveal are all exercised
   with no API key and no network. The bridge itself cannot be stubbed from the
-  page — `contextBridge` hands the renderer a proxy, and assigning to one of its
-  properties silently does nothing — so a server on the port the adapter already
+  page - `contextBridge` hands the renderer a proxy, and assigning to one of its
+  properties silently does nothing - so a server on the port the adapter already
   uses is the seam that holds.
 - **Suite totals:** 342 unit tests across 33 files, 15 e2e. `pnpm typecheck` and
   `pnpm lint` clean.

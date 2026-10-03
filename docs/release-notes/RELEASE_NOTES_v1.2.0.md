@@ -11,7 +11,7 @@
 **Bug Fixes**
 
 - **The AI Assistant Panel**: Reasoning-model answers no longer come back empty (`content: null` with text in a `reasoning` field is read too), and gateway error objects in an SSE frame now surface as errors instead of a silent empty delta.
-- **Outside Click Closes Popovers**: The model dropdown and the chat history list no longer require clicking their icon again to dismiss — a click anywhere outside the popover closes it.
+- **Outside Click Closes Popovers**: The model dropdown and the chat history list no longer require clicking their icon again to dismiss - a click anywhere outside the popover closes it.
 - **Attachments Actually Read Now**: Picking a file in the attach dialog used to fail with "No handler registered for 'file:read-attachment'" because the running build was stale. The handler ships in the installer now.
 - **Drag & Drop Attachments**: Dropped files on the composer ring the accent border and attach like picked ones, through the same size/type guards.
 

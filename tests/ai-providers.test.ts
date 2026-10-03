@@ -24,6 +24,7 @@ describe('AI provider adapters', () => {
       'DeepSeek',
       'xAI',
       'OpenRouter',
+      'Nvidia',
       'GoogleGemini',
       'Anthropic',
       'Ollama'
@@ -31,6 +32,14 @@ describe('AI provider adapters', () => {
       expect(getAiProvider(id)).toBeDefined()
     }
     expect(getAiProvider('Nope')).toBeUndefined()
+  })
+
+  it('points Nvidia at the NIM OpenAI-compatible endpoints', () => {
+    const req = AI_PROVIDERS.Nvidia.buildChatRequest(ctx())
+    expect(req.url).toBe('https://integrate.api.nvidia.com/v1/chat/completions')
+    expect(req.headers.Authorization).toBe('Bearer sk-key')
+    const models = AI_PROVIDERS.Nvidia.buildModelsRequest('sk-key')
+    expect(models?.url).toBe('https://integrate.api.nvidia.com/v1/models')
   })
 
   it('builds OpenAI-compatible chat requests with a bearer token', () => {

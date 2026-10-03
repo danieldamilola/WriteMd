@@ -109,6 +109,15 @@ const writemdAPI = {
     deleteSession: (id: string) => ipcRenderer.invoke('chat:delete', id),
     listSessions: (docPath: string | null) => ipcRenderer.invoke('chat:list', docPath)
   },
+  opencode: {
+    getStatus: (customPath?: string) => ipcRenderer.invoke('opencode:get-status', customPath),
+    getModels: () => ipcRenderer.invoke('opencode:get-models')
+  },
+  web: {
+    search: (query: string, maxResults?: number) =>
+      ipcRenderer.invoke('web:search', query, maxResults),
+    searchContext: (query: string) => ipcRenderer.invoke('web:search-context', query)
+  },
   dialog: {
     showOpenDialog: (options: Electron.OpenDialogOptions) =>
       ipcRenderer.invoke('dialog:show-open-dialog', options)

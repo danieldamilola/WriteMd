@@ -3,7 +3,7 @@ import { DEFAULT_SETTINGS, type WriteMdSettings } from '../../../shared/settings
 
 export function applySettingsToDOM(store: SettingsStore): void {
   if (typeof document === 'undefined') return
-  const theme = store.get('appearance.theme', 'dark')
+  const theme = store.get('appearance.theme', 'graphite')
   document.documentElement.setAttribute('data-theme', theme)
   const orientation = store.get('appearance.panelOrientation', 'horizontal')
   document.documentElement.setAttribute('data-panel-orientation', orientation as string)
@@ -11,7 +11,7 @@ export function applySettingsToDOM(store: SettingsStore): void {
   const fontSize = store.get('editor.fontSize', 15)
   const lineHeight = store.get('editor.lineHeight', 1.7)
   const fontFamily = store.get('editor.fontFamily', 'JetBrains Mono')
-  const accentColor = store.get('appearance.accentColor', '') as string
+  const accentColor = store.get('appearance.accentColor', '#f24e1e') as string
 
   const root = document.documentElement
   root.style.setProperty('--editor-font-size', `${fontSize}px`)

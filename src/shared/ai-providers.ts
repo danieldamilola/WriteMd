@@ -432,6 +432,12 @@ export const AI_PROVIDERS: Record<string, AiProviderAdapter> = {
     'https://openrouter.ai/api/v1/models',
     true
   ),
+  Nvidia: openaiCompatible(
+    'Nvidia',
+    'https://integrate.api.nvidia.com/v1/chat/completions',
+    'https://integrate.api.nvidia.com/v1/models',
+    true
+  ),
   GoogleGemini: gemini,
   Anthropic: anthropic,
   Ollama: ollama

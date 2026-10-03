@@ -918,6 +918,9 @@ export class AiPanel extends LitElement {
    */
   @property({ type: Boolean }) attaching = false
 
+  /** Ground answers with a keyless web search before sending to the model. */
+  @property({ type: Boolean }) webSearch = false
+
   /**
    * Owns the word-by-word reveal for the one message that is still arriving.
    * A controller rather than a directive: a directive's update runs before its
@@ -1258,7 +1261,7 @@ export class AiPanel extends LitElement {
           <span class="ai-empty-mark">${icon('sparkle', 36)}</span>
           <p class="ai-empty-title">No assistant selected</p>
           <p class="ai-empty-body">
-            Add an API key and pick a model, or point WriteMd at a local Ollama instance.
+            Add an API key and pick a model, use local Ollama, or select the opencode CLI.
           </p>
           <button
             class="ai-empty-action"
@@ -1345,6 +1348,22 @@ export class AiPanel extends LitElement {
               @click=${() => this.requestAttach()}
             >
               ${icon(this.attaching ? 'clock' : 'plus', 15)}
+            </button>
+
+            <button
+              class="ai-tool"
+              type="button"
+              aria-label="Search the web"
+              aria-pressed=${this.webSearch}
+              title=${this.webSearch ? 'Web search on' : 'Web search off'}
+              style=${this.webSearch ? 'color: var(--accent);' : ''}
+              @click=${() => {
+                this.dispatchEvent(
+                  new CustomEvent('ai-websearch-toggle', { bubbles: true, composed: true })
+                )
+              }}
+            >
+              ${icon('globe', 15)}
             </button>
 
             <button

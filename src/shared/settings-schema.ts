@@ -57,6 +57,10 @@ export interface WriteMdSettings {
     /** A key is stored but this install cannot decrypt it; the user must retype. */
     apiKeyUndecryptable: boolean
     systemPrompt: string
+    /** Explicit opencode CLI path (e.g. %APPDATA%\npm\opencode.cmd); empty = autodetect. */
+    opencodeCliPath: string
+    /** Ground answers with a keyless web search before sending to the model. */
+    webSearchEnabled: boolean
   }
 }
 
@@ -74,7 +78,9 @@ CRITICAL INSTRUCTION FOR FILE EDITS: If the user asks you to modify, rewrite, or
 \`\`\`
 The application will intercept this block and automatically apply the changes to the user's document.
 
-CRITICAL INSTRUCTION FOR FILE TRACKING: You MUST check which file you started the conversation from and keep that in mind. Each user message will specify the active file at the time they sent the message. Before taking action or making any edits on a request, CHECK if the active file is still the same file. If the user changed files and you notice they are now in a new file compared to the previous context, you MUST immediately inform the user that they are in a new file, and ask them if they want to continue the request in this new file before making any edits.`
+CRITICAL INSTRUCTION FOR FILE TRACKING: You MUST check which file you started the conversation from and keep that in mind. Each user message will specify the active file at the time they sent the message. Before taking action or making any edits on a request, CHECK if the active file is still the same file. If the user changed files and you notice they are now in a new file compared to the previous context, you MUST immediately inform the user that they are in a new file, and ask them if they want to continue the request in this new file before making any edits.
+
+CRITICAL INSTRUCTION FOR WEB SEARCH: WriteMd may append live web results to a request. Treat them as pages you opened yourself: answer from them and cite sources with links. Never discuss search mechanics, tools, or your own capabilities - just answer the question. If no results are supplied, answer from your own knowledge.`
 
 export const DEFAULT_SETTINGS: WriteMdSettings = {
   editor: {
@@ -89,8 +95,8 @@ export const DEFAULT_SETTINGS: WriteMdSettings = {
     highlightActiveLine: true
   },
   appearance: {
-    theme: 'dark',
-    accentColor: '',
+    theme: 'graphite',
+    accentColor: '#f24e1e',
     panelOrientation: 'horizontal'
   },
   files: {
@@ -123,7 +129,9 @@ export const DEFAULT_SETTINGS: WriteMdSettings = {
     apiKey: '',
     apiKeySet: false,
     apiKeyUndecryptable: false,
-    systemPrompt: DEFAULT_AI_SYSTEM_PROMPT
+    systemPrompt: DEFAULT_AI_SYSTEM_PROMPT,
+    opencodeCliPath: '',
+    webSearchEnabled: false
   }
 }
 

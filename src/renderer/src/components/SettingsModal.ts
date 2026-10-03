@@ -4,6 +4,7 @@ import { api } from '../api'
 import { deepActiveElement } from '../utils/links'
 import { DEFAULT_AI_SYSTEM_PROMPT } from '../../../shared/settings-schema'
 import { SettingsStore } from '../state/settings'
+import { emit } from '../events/bus'
 import { showConfirm } from './ConfirmDialog'
 import { icon } from './icons'
 import { scrollbarStyles } from './scrollbars'
@@ -16,9 +17,7 @@ import {
   normalizeBinding,
   parseBinding
 } from '../state/shortcuts'
-
-type SettingsTab =
-  'general' | 'appearance' | 'editor' | 'files' | 'shortcuts' | 'advanced' | 'ai' | 'about'
+import { TAB_LABELS, searchSettingsTabs, type SettingsTab } from '../state/settings-search'
 
 /**
  * The element that actually holds focus, descending through open shadow roots.
@@ -28,20 +27,6 @@ type SettingsTab =
  * and focus falls back to body. The settings button that opens this modal lives
  * inside `writemd-top-bar`'s shadow root, so the real target is two levels down.
  */
-
-/** Human labels used both by the nav buttons and by search filtering. */ const TAB_LABELS: Record<
-  SettingsTab,
-  string
-> = {
-  general: 'General',
-  appearance: 'Appearance',
-  editor: 'Editor',
-  files: 'Files',
-  shortcuts: 'Shortcuts',
-  advanced: 'Advanced',
-  ai: 'AI Assistant',
-  about: 'About'
-}
 
 interface ThemeDefinition {
   id: string
@@ -95,6 +80,15 @@ const PROVIDER_MODEL_DEFAULTS: Record<string, string[]> = {
   DeepSeek: ['deepseek-chat', 'deepseek-coder'],
   xAI: ['grok-2', 'grok-2-mini'],
   OpenRouter: ['openai/gpt-4o', 'anthropic/claude-3.5-sonnet', 'google/gemini-1.5-pro'],
+  // Local CLI: model is free-text provider/model (or empty for CLI default).
+  OpenCode: [],
+  Nvidia: [
+    'meta/llama-3.3-70b-instruct',
+    'deepseek-ai/deepseek-r1',
+    'qwen/qwen2.5-coder-32b-instruct',
+    'nvidia/llama-3.1-nemotron-70b-instruct',
+    'mistralai/mixtral-8x22b-instruct-v0.1'
+  ],
   Ollama: ['llama3', 'mistral', 'phi3']
 }
 
@@ -105,57 +99,27 @@ export class SettingsModal extends LitElement {
       position: fixed;
       inset: 0;
       z-index: 300;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      background: rgba(0, 0, 0, 0.5);
-      backdrop-filter: blur(4px);
-      -webkit-backdrop-filter: blur(4px);
-      animation: fadeIn 120ms ease-out;
-    }
-
-    @keyframes fadeIn {
-      from {
-        opacity: 0;
-      }
-      to {
-        opacity: 1;
-      }
+      background: var(--bg-frame);
     }
 
     .modal-dialog {
-      width: min(900px, 94vw);
-      height: min(700px, 90vh);
+      width: 100%;
+      height: 100%;
       display: flex;
       background: var(--bg-elevated);
-      border: 1px solid var(--border-subtle);
-      border-radius: 12px;
-      box-shadow: var(--shadow-3);
+      border: none;
+      border-radius: 0;
+      box-shadow: none;
       overflow: hidden;
       color: var(--text);
-      animation: dialog-in 180ms cubic-bezier(0.22, 1, 0.36, 1);
-    }
-
-    @keyframes dialog-in {
-      from {
-        opacity: 0;
-        transform: translateY(8px);
-      }
-    }
-
-    @media (prefers-reduced-motion: reduce) {
-      :host,
-      .modal-dialog {
-        animation: none;
-      }
     }
 
     /* Sidebar Navigation */
     .sidebar {
-      width: 230px;
+      width: 250px;
       flex-shrink: 0;
       background: var(--bg-elevated);
-      border-right: none;
+      border-right: 1px solid var(--border-subtle);
       display: flex;
       flex-direction: column;
     }
@@ -232,6 +196,11 @@ export class SettingsModal extends LitElement {
       opacity: 1;
     }
 
+    /* The hidden attribute loses to the class display rule without this. */
+    .nav-btn[hidden] {
+      display: none;
+    }
+
     /* Main Area */
     .main-area {
       flex: 1;
@@ -245,8 +214,9 @@ export class SettingsModal extends LitElement {
       align-items: center;
       justify-content: space-between;
       height: 56px;
-      padding: 0 24px;
+      padding: 0 8px 0 24px;
       flex-shrink: 0;
+      -webkit-app-region: drag;
     }
 
     .main-header h2 {
@@ -256,20 +226,53 @@ export class SettingsModal extends LitElement {
       color: var(--text);
     }
 
-    .close-btn {
-      width: 32px;
-      height: 32px;
+    /* Window controls mirror the top bar: no new visual language. */
+    .win-controls {
+      display: flex;
+      align-items: stretch;
+      align-self: stretch;
+      -webkit-app-region: no-drag;
+    }
+    .win-btn {
+      width: 46px;
       display: flex;
       align-items: center;
       justify-content: center;
       background: transparent;
       border: none;
       color: var(--text-secondary);
-      border-radius: 6px;
       cursor: pointer;
-      transition: all 0.15s ease;
     }
-    .close-btn:hover {
+    .win-btn:hover {
+      background: var(--bg-hover);
+      color: var(--text);
+    }
+    .win-btn.close:hover {
+      background: #e81123;
+      color: #fff;
+    }
+
+    /* Back lives in the sidebar footer, beside the window chrome of the app. */
+    .sidebar-footer {
+      padding: 12px;
+      border-top: 1px solid var(--border-subtle);
+    }
+    .back-btn {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      width: 100%;
+      padding: 8px 12px;
+      border-radius: 6px;
+      font-size: 13px;
+      font-weight: 500;
+      color: var(--text-secondary);
+      background: transparent;
+      border: none;
+      cursor: pointer;
+      text-align: left;
+    }
+    .back-btn:hover {
       background: var(--bg-hover);
       color: var(--text);
     }
@@ -578,8 +581,8 @@ export class SettingsModal extends LitElement {
 
   // Settings State
   @state() private vaultPath = ''
-  @state() private theme = 'dark'
-  @state() private accentColor = '#ffffff'
+  @state() private theme = 'graphite'
+  @state() private accentColor = '#f24e1e'
   @state() private fontFamily = 'Inter'
   @state() private fontSize = 15
   @state() private wordWrap = true
@@ -614,6 +617,18 @@ export class SettingsModal extends LitElement {
   @state() private availableModels: string[] = []
   @state() private isFetchingModels = false
   @state() private fetchError = ''
+  @state() private opencodeCliFound: boolean | null = null
+  @state() private opencodeCliPath: string | null = null
+  @state() private opencodeCliVersion: string | null = null
+  @state() private opencodeLoginCommand = 'opencode auth login opencode'
+  @state() private opencodeAuthLoggedIn: boolean | null = null
+  @state() private opencodeAuthDetail = ''
+  @state() private opencodeCopied = false
+  @state() private opencodeCustomPath = ''
+  @state() private opencodeManagedUp: boolean | null = null
+  @state() private opencodeDebug: string[] = []
+  @state() private opencodeChecking = false
+  @state() private webSearchEnabled = false
 
   private settingsStore = SettingsStore.getInstance()
 
@@ -622,11 +637,11 @@ export class SettingsModal extends LitElement {
     this.loadCurrentSettings()
     this.previouslyFocused = deepActiveElement() as HTMLElement | null
     window.addEventListener('keydown', this.handleKeyDown, true)
-    this.addEventListener('click', this.handleBackdropClick)
     void api()
       ?.app?.getVersion?.()
       .then((v) => (this.appVersion = v))
       .catch(() => undefined)
+    void this.checkOpencodeStatus()
 
     const updater = api()?.updater
     if (updater) {
@@ -672,7 +687,6 @@ export class SettingsModal extends LitElement {
 
   disconnectedCallback(): void {
     window.removeEventListener('keydown', this.handleKeyDown, true)
-    this.removeEventListener('click', this.handleBackdropClick)
     this.updaterUnsubs.forEach((fn) => fn())
     this.updaterUnsubs = []
     const target = this.previouslyFocused
@@ -685,8 +699,8 @@ export class SettingsModal extends LitElement {
 
   private loadCurrentSettings(): void {
     const s = this.settingsStore
-    this.theme = s.get('appearance.theme', 'dark')
-    this.accentColor = s.get('appearance.accentColor', '#ffffff')
+    this.theme = s.get('appearance.theme', 'graphite')
+    this.accentColor = s.get('appearance.accentColor', '#f24e1e')
     this.fontFamily = s.get('editor.fontFamily', 'Inter')
     this.fontSize = s.get('editor.fontSize', 15)
     this.wordWrap = s.get('editor.wordWrap', true)
@@ -706,6 +720,8 @@ export class SettingsModal extends LitElement {
     this.aiKeyStored = s.get<boolean>('ai.apiKeySet', false)
     this.aiKeyUndecryptable = s.get<boolean>('ai.apiKeyUndecryptable', false)
     this.aiSystemPrompt = s.get('ai.systemPrompt', DEFAULT_AI_SYSTEM_PROMPT)
+    this.opencodeCustomPath = s.get('ai.opencodeCliPath', '')
+    this.webSearchEnabled = s.get<boolean>('ai.webSearchEnabled', false)
     this.autoCheckForUpdates = s.get('updates.autoCheckForUpdates', true)
 
     if (this.availableModels.length === 0) {
@@ -768,10 +784,12 @@ export class SettingsModal extends LitElement {
     ;(e.currentTarget as HTMLElement).click()
   }
 
+  /**
+   * Jump to the first surviving section so the panel never shows a section
+   * the nav has just hidden.
+   */
   private handleSearchInput = (e: InputEvent): void => {
     this.searchQuery = (e.target as HTMLInputElement).value
-    // Jump to the first surviving section so the panel never shows a section
-    // the nav has just hidden.
     const matches = this.matchingTabs()
     if (matches.length > 0 && !matches.includes(this.tab)) this.tab = matches[0]
   }
@@ -783,29 +801,14 @@ export class SettingsModal extends LitElement {
     if (first) this.tab = first
   }
 
-  /**
-   * The search box was rendered but nothing read its value, so typing did
-   * nothing at all. Match on the section label, and on the setting names inside
-   * the section's own rendered text once that section has been visited.
-   */
+  /** Tabs matching the search box, used both by the nav filter and tab jump. */
   private matchingTabs(): SettingsTab[] {
-    const all = Object.keys(TAB_LABELS) as SettingsTab[]
-    const q = this.searchQuery.trim().toLowerCase()
-    if (!q) return all
-    return all.filter((t) => {
-      if (TAB_LABELS[t].toLowerCase().includes(q)) return true
-      return this.sectionText(t)?.toLowerCase().includes(q) ?? false
-    })
+    return searchSettingsTabs(this.searchQuery)
   }
 
   /** Sections the search box has not filtered out. */
   private get visibleTabs(): SettingsTab[] {
     return this.matchingTabs()
-  }
-
-  /** Text content of a tab's panel, used only for search matching. */
-  private sectionText(tab: SettingsTab): string | null {
-    return this.renderRoot?.querySelector(`[data-tab="${tab}"]`)?.textContent ?? null
   }
 
   firstUpdated(): void {
@@ -856,10 +859,6 @@ export class SettingsModal extends LitElement {
     this.settingsStore.set('shortcuts.bindings', {})
     this.capturingId = null
     this.conflictMsg = ''
-  }
-
-  private handleBackdropClick = (e: MouseEvent): void => {
-    if (e.target === this) this.close()
   }
 
   private close(): void {
@@ -919,7 +918,12 @@ export class SettingsModal extends LitElement {
 
   private async fetchModels(): Promise<void> {
     this.fetchError = ''
-    if (!this.aiApiKey && !this.aiKeyStored && this.aiProvider !== 'Ollama') {
+    if (
+      !this.aiApiKey &&
+      !this.aiKeyStored &&
+      this.aiProvider !== 'Ollama' &&
+      this.aiProvider !== 'OpenCode'
+    ) {
       this.fetchError = 'API Key required'
       return
     }
@@ -932,10 +936,16 @@ export class SettingsModal extends LitElement {
       const models = await electron.net.fetchModels(this.aiProvider, this.aiApiKey)
       if (models && models.length > 0) {
         this.availableModels = models
+        emit('ai:models-updated', { models })
         if (!this.availableModels.includes(this.aiModel)) {
           this.aiModel = this.availableModels[0]
           this.updateSetting('ai.model', this.aiModel)
         }
+      } else if (this.aiProvider === 'OpenCode') {
+        // The CLI model field is free-text (provider/model, or empty for the
+        // CLI default); an empty list is not a failure.
+        this.availableModels = this.aiModel ? [this.aiModel] : []
+        this.fetchError = ''
       } else {
         throw new Error('No models returned')
       }
@@ -944,6 +954,70 @@ export class SettingsModal extends LitElement {
       this.fetchError = e instanceof Error ? e.message : 'Failed to fetch'
     } finally {
       this.isFetchingModels = false
+    }
+  }
+
+  private async checkOpencodeStatus(customPath?: string): Promise<void> {
+    const electron = api()
+    const getStatus = electron?.opencode?.getStatus
+    if (!getStatus) return
+    this.opencodeChecking = true
+    try {
+      const s = await getStatus(customPath ?? this.opencodeCustomPath ?? '')
+      this.opencodeCliFound = s.cliFound
+      this.opencodeCliPath = s.cliPath
+      this.opencodeCliVersion = s.cliVersion
+      this.opencodeLoginCommand = s.loginCommand ?? this.opencodeLoginCommand
+      this.opencodeAuthLoggedIn = s.auth?.loggedIn ?? null
+      this.opencodeAuthDetail = s.auth?.detail ?? ''
+      this.opencodeManagedUp = s.managedServerUp ?? null
+      this.opencodeDebug = Array.isArray(s.debug) ? s.debug : []
+    } catch {
+      this.opencodeCliFound = false
+      this.opencodeCliPath = null
+      this.opencodeAuthLoggedIn = null
+    } finally {
+      this.opencodeChecking = false
+    }
+  }
+
+  /** Copy the Console login command; runs in the user's own terminal (browser flow). */
+  private async handleOpencodeCopyLogin(): Promise<void> {
+    try {
+      await navigator.clipboard.writeText(this.opencodeLoginCommand)
+      this.opencodeCopied = true
+      window.setTimeout(() => (this.opencodeCopied = false), 2000)
+    } catch {
+      // Clipboard unavailable (permissions); the command is still visible to type.
+      this.opencodeCopied = false
+    }
+  }
+
+  /** Open the Console (opencode.ai) where the login session starts. */
+  private handleOpencodeOpenConsole(): void {
+    void api()?.shell?.openExternal?.('https://opencode.ai')
+  }
+
+  /** Let the user point at opencode.cmd directly (npm global bin not on PATH). */
+  private async handleOpencodeBrowse(): Promise<void> {
+    const electron = api()
+    const dialog = electron?.dialog?.showOpenDialog
+    if (!dialog) return
+    try {
+      const result = await dialog({
+        properties: ['openFile'],
+        filters: [
+          { name: 'Executables', extensions: ['cmd', 'exe', 'bat', '*'] },
+          { name: 'All files', extensions: ['*'] }
+        ]
+      })
+      if (!result.canceled && result.filePaths[0]) {
+        this.opencodeCustomPath = result.filePaths[0]
+        this.updateSetting('ai.opencodeCliPath', result.filePaths[0])
+        await this.checkOpencodeStatus(result.filePaths[0])
+      }
+    } catch (e) {
+      console.error('Failed to pick opencode binary:', e)
     }
   }
 
@@ -1092,25 +1166,71 @@ export class SettingsModal extends LitElement {
                 ${icon('info')} About
               </button>
             </div>
+            <div class="sidebar-footer">
+              <button class="back-btn" @click=${this.close} aria-label="Back to editor">
+                <svg
+                  viewBox="0 0 24 24"
+                  width="16"
+                  height="16"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                >
+                  <line x1="19" y1="12" x2="5" y2="12" />
+                  <polyline points="12 19 5 12 12 5" />
+                </svg>
+                Back
+              </button>
+            </div>
           </div>
 
           <!-- Main Area -->
           <div class="main-area">
             <div class="main-header">
               <h2>${this.tab === 'files' ? 'Files & Vault' : TAB_LABELS[this.tab]}</h2>
-              <button class="close-btn" aria-label="Close settings" @click=${this.close}>
-                <svg
-                  viewBox="0 0 24 24"
-                  width="18"
-                  height="18"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="2"
+              <div class="win-controls">
+                <button
+                  class="win-btn"
+                  aria-label="Minimize"
+                  title="Minimize"
+                  @click=${() => void api()?.window?.minimize?.()}
                 >
-                  <line x1="18" y1="6" x2="6" y2="18" />
-                  <line x1="6" y1="6" x2="18" y2="18" />
-                </svg>
-              </button>
+                  <svg viewBox="0 0 10 10" width="10" height="10" fill="none">
+                    <path d="M0 5H10" stroke="currentColor" stroke-width="1" />
+                  </svg>
+                </button>
+                <button
+                  class="win-btn"
+                  aria-label="Maximize"
+                  title="Maximize"
+                  @click=${() => void api()?.window?.maximize?.()}
+                >
+                  <svg viewBox="0 0 10 10" width="10" height="10" fill="none">
+                    <rect
+                      x="0.5"
+                      y="0.5"
+                      width="9"
+                      height="9"
+                      stroke="currentColor"
+                      stroke-width="1"
+                    />
+                  </svg>
+                </button>
+                <button
+                  class="win-btn close"
+                  aria-label="Close window"
+                  title="Close"
+                  @click=${() => void api()?.window?.close?.()}
+                >
+                  <svg viewBox="0 0 10 10" width="10" height="10" fill="none">
+                    <path
+                      d="M0.5 0.5L9.5 9.5M9.5 0.5L0.5 9.5"
+                      stroke="currentColor"
+                      stroke-width="1"
+                    />
+                  </svg>
+                </button>
+              </div>
             </div>
 
             <div class="content-panel" data-tab=${this.tab}>
@@ -1501,6 +1621,8 @@ export class SettingsModal extends LitElement {
             <option value="Mistral">Mistral</option>
             <option value="Groq">Groq</option>
             <option value="OpenRouter">OpenRouter</option>
+            <option value="OpenCode">OpenCode (Console login)</option>
+            <option value="Nvidia">Nvidia</option>
             <option value="DeepSeek">DeepSeek</option>
             <option value="xAI">xAI (Grok)</option>
             <option value="Ollama">Ollama (Local)</option>
@@ -1509,27 +1631,71 @@ export class SettingsModal extends LitElement {
 
         <div class="setting-row">
           <div>
+            <div class="setting-label">Web search</div>
+            <div class="setting-desc">
+              Ground answers with a keyless web search before sending. Works with any provider.
+            </div>
+          </div>
+          <button
+            class="toggle-switch"
+            role="switch"
+            aria-checked="${this.webSearchEnabled}"
+            aria-label="Web search"
+            @click=${() => this.updateSetting('ai.webSearchEnabled', !this.webSearchEnabled)}
+          ></button>
+        </div>
+
+        <div class="setting-row">
+          <div>
             <div class="setting-label">Model</div>
             <div class="setting-desc">
-              Specify the model to use (e.g. gpt-4o, claude-3.5-sonnet, gemini-1.5-pro, llama3)
+              ${
+                this.aiProvider === 'OpenCode'
+                  ? 'provider/model from your CLI (e.g. opencode/big-pickle), or empty for its default. Fetch lists `opencode models` when available.'
+                  : 'Specify the model to use (e.g. gpt-4o, claude-3.5-sonnet, gemini-1.5-pro, llama3)'
+              }
             </div>
           </div>
           <div style="display: flex; gap: 8px; flex-direction: column; align-items: flex-end;">
             <div style="display: flex; gap: 8px;">
-              <select
-                class="select-input"
-                .value=${this.aiModel}
-                @change=${(e: Event) => this.updateSetting('ai.model', (e.target as HTMLSelectElement).value)}
-              >
-                ${
-                  this.availableModels.length > 0
-                    ? this.availableModels.map(
-                        (m) =>
-                          html`<option value=${m} ?selected=${this.aiModel === m}>${m}</option>`
-                      )
-                    : html`<option value=${this.aiModel}>${this.aiModel}</option>`
-                }
-              </select>
+              ${
+                this.aiProvider === 'OpenCode'
+                  ? html`
+                      <input
+                        type="text"
+                        class="text-input"
+                        list="ai-model-suggestions"
+                        placeholder="opencode/big-pickle or empty"
+                        .value=${this.aiModel}
+                        @change=${(e: Event) => {
+                          const v = (e.target as HTMLInputElement).value.trim()
+                          this.aiModel = v
+                          this.updateSetting('ai.model', v)
+                        }}
+                      />
+                      <datalist id="ai-model-suggestions">
+                        ${this.availableModels.map((m) => html`<option value=${m}></option>`)}
+                      </datalist>
+                    `
+                  : html`
+                      <select
+                        class="select-input"
+                        .value=${this.aiModel}
+                        @change=${(e: Event) => this.updateSetting('ai.model', (e.target as HTMLSelectElement).value)}
+                      >
+                        ${
+                          this.availableModels.length > 0
+                            ? this.availableModels.map(
+                                (m) =>
+                                  html`<option value=${m} ?selected=${this.aiModel === m}>
+                                    ${m}
+                                  </option>`
+                              )
+                            : html`<option value=${this.aiModel}>${this.aiModel}</option>`
+                        }
+                      </select>
+                    `
+              }
               <button
                 class="control-btn"
                 @click=${this.fetchModels}
@@ -1567,6 +1733,81 @@ export class SettingsModal extends LitElement {
             @change=${this.handleApiKeyInput}
           />
         </div>
+        ${
+          this.aiProvider === 'OpenCode'
+            ? html`<div class="setting-row">
+                  <div>
+                    <div class="setting-label">Connect via Console</div>
+                    <div class="setting-desc">
+                      ${
+                        this.opencodeAuthLoggedIn
+                          ? `Logged in - ${this.opencodeAuthDetail}.`
+                          : this.opencodeAuthDetail
+                            ? `${this.opencodeAuthDetail}.`
+                            : 'Login happens in your browser: open the Console, sign in, then run the command in a terminal.'
+                      }
+                      1) Open console.opencode.ai and sign in. 2) Run the command, complete the
+                      browser login. 3) Back here, Recheck, then /models in the CLI to pick a model.
+                    </div>
+                  </div>
+                  <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
+                    <code
+                      class="text-input"
+                      style="padding: 8px 12px; font-size: 12px; user-select: all;"
+                      >${this.opencodeLoginCommand}</code
+                    >
+                    <button class="control-btn" @click=${this.handleOpencodeCopyLogin}>
+                      ${this.opencodeCopied ? 'Copied' : 'Copy'}
+                    </button>
+                    <button class="control-btn" @click=${this.handleOpencodeOpenConsole}>
+                      Open console
+                    </button>
+                  </div>
+                </div>
+                <div class="setting-row">
+                  <div>
+                    <div class="setting-label">CLI path</div>
+                    <div class="setting-desc">
+                      ${
+                        this.opencodeChecking
+                          ? 'Checking…'
+                          : this.opencodeCliFound
+                            ? `Found: ${this.opencodeCliPath ?? 'opencode'}${this.opencodeCliVersion ? ` (${this.opencodeCliVersion})` : ''}. Chat runs through a managed server WriteMd starts itself - no manual serve needed, no API key needed.`
+                            : 'Not found. npm installs land at %APPDATA%\\npm\\opencode.cmd - pick it below if it is not on PATH.'
+                      }
+                      ${this.opencodeManagedUp ? ' Managed server running.' : ''}
+                    </div>
+                  </div>
+                  <div style="display: flex; gap: 8px; align-items: center;">
+                    <button class="control-btn" @click=${this.handleOpencodeBrowse}>
+                      ${this.opencodeCustomPath ? 'Change…' : 'Browse…'}
+                    </button>
+                    <button
+                      class="control-btn"
+                      @click=${() => void this.checkOpencodeStatus()}
+                      ?disabled=${this.opencodeChecking}
+                    >
+                      ${this.opencodeChecking ? 'Checking…' : 'Recheck'}
+                    </button>
+                  </div>
+                </div>
+                ${
+                  !this.opencodeCliFound && this.opencodeDebug.length > 0
+                    ? html`<div class="setting-row">
+                        <div>
+                          <div class="setting-label">Why wasn't it found?</div>
+                          <div
+                            class="setting-desc"
+                            style="font-family: var(--font-mono); font-size: 11px; white-space: pre-wrap;"
+                          >
+                            ${this.opencodeDebug.join('\n')}
+                          </div>
+                        </div>
+                      </div>`
+                    : ''
+                }`
+            : ''
+        }
       </div>
 
       <div class="section-title">System Prompt</div>

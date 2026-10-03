@@ -80,6 +80,6 @@ describe('settings persistence', () => {
     const s = getSettings()
     expect(s.editor.fontSize).toBe(21)
     expect(s.editor.fontFamily).toBe('JetBrains Mono')
-    expect(s.appearance.theme).toBe('dark')
+    expect(s.appearance.theme).toBe('graphite')
   })
 })

@@ -4,6 +4,7 @@ import { pathToFileURL } from 'url'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
 import { setupIpc, closeAllWatchers } from './ipc'
+import { stopOpencodeServer } from './opencode-server'
 import { registerExternalPath } from './path-guard'
 import { hardenWebContents } from './harden'
 import { ensureVaultExists } from './vault'
@@ -159,6 +160,7 @@ app.on('window-all-closed', () => {
 
 app.on('will-quit', () => {
   closeAllWatchers()
+  stopOpencodeServer()
 })
 
 app.on('second-instance', (_event, argv) => {

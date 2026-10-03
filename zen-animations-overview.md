@@ -1,9 +1,9 @@
-# Zen (Nightly) — All Smooth Motion & Animations
+# Zen (Nightly) - All Smooth Motion & Animations
 
 All Zen UI motion runs on two engines:
 
-- `src/zen/vendor/motion.min.mjs` via `src/zen/common/modules/ZenUIManager.mjs:35` — `gZenUIManager.motion` → `motion.animate(el, {x,y,scale,opacity,transform}, {type:spring,bounce:0,duration})`
-- `src/zen/common/modules/ZenUIManager.mjs:95` — `elementAnimate()` → native `Element.animate()` WAAPI wrapper
+- `src/zen/vendor/motion.min.mjs` via `src/zen/common/modules/ZenUIManager.mjs:35` - `gZenUIManager.motion` → `motion.animate(el, {x,y,scale,opacity,transform}, {type:spring,bounce:0,duration})`
+- `src/zen/common/modules/ZenUIManager.mjs:95` - `elementAnimate()` → native `Element.animate()` WAAPI wrapper
 
 Guarded by `gReduceMotion` / `prefers-reduced-motion` (`ZenUIManager.mjs:13,438,1072,1148`).
 
@@ -43,7 +43,7 @@ File: `src/zen/common/styles/zen-animations.css:7-134`
 
 ---
 
-## 2. Workspaces — tab-strip switch (core)
+## 2. Workspaces - tab-strip switch (core)
 
 ### 2.1 JS spring slide
 
@@ -55,7 +55,7 @@ File: `src/zen/spaces/ZenSpaceManager.mjs:1996-2234` `#animateTabs()`
 - `2147-2200` Essentials: `transform translateX(existing% > new%)` same spring. Gated by `shouldAnimateEssentials` at `354-356` (`containerSpecificEssentials || creatingWorkspaceId`).
 - `2206-2215` Safety: `Promise.race([Promise.all(animations), timeout+50ms])`.
 - Interrupt: `1663` `animations.complete()`.
-- Sync follow: `1823-1940` `_organizeWorkspaceStripLocations(workspace, justMove, offsetPixels)` — sets `transform: translateX(diff*100 + offsetPixels/2%)` directly, `background-opacity = 1-abs(offset)/200`, `updateNoise(grain)`. Called from swipe, creation `283,417`, `1391,1457,1723,2405,2591`.
+- Sync follow: `1823-1940` `_organizeWorkspaceStripLocations(workspace, justMove, offsetPixels)` - sets `transform: translateX(diff*100 + offsetPixels/2%)` directly, `background-opacity = 1-abs(offset)/200`, `updateNoise(grain)`. Called from swipe, creation `283,417`, `1391,1457,1723,2405,2591`.
 - `rAF: 201,559-560,1817,2389`, `setTimeout: 767-768,915,1094,1106-1107,2207` (animation timeout).
 
 Linked prefs `105-143`: `zen.workspaces.scroll-modifier-key`, `natural-scroll`, `wrap-around-navigation`, `force-container-workspace`, `open-new-tab-if-last-unpinned-tab-is-closed`, `separate-essentials`, `active`, `debug`, `swipe-actions`, `zen.view.sidebar-expanded`, `zen.view.show-newtab-button-top`.
@@ -64,14 +64,14 @@ Linked prefs `105-143`: `zen.workspaces.scroll-modifier-key`, `natural-scroll`, 
 
 File: `src/zen/spaces/zen-workspaces.css`
 
-- `70-74` `#zen-workspaces-button toolbarbutton`: `transition: filter .2s, opacity .2s, width .1s, transform .2s` — hover/active/reorder fade.
+- `70-74` `#zen-workspaces-button toolbarbutton`: `transition: filter .2s, opacity .2s, width .1s, transform .2s` - hover/active/reorder fade.
 - `102-105` reorder-mode dims to `opacity .2`.
 - `274` `.zen-workspaces-actions`: `transition: opacity .1s` reveal on hover.
 - `333-335` `zen-workspace`: `transition: padding-top .1s` (indicator / pinned collapse), guarded by `prefers-reduced-motion`.
 - `374,387` `arrowscrollbox::before/after`: `transition: opacity .1s` overflow hairlines.
 - `428` `indicator-stack`: `transition: margin-inline-end .1s` slide to reveal chevron.
 - `438,464-466` `indicator-chevron`: `transition: transform .1s, opacity .15s; rotate(90deg>0deg)` when `collapsedpinnedtabs`.
-- `407-410` `:not([animating-background],[swipe-gesture]) zen-workspace:not([active]) { content-visibility:hidden }` — perf gate.
+- `407-410` `:not([animating-background],[swipe-gesture]) zen-workspace:not([active]) { content-visibility:hidden }` - perf gate.
 - `164` `#zen-workspaces-button { scroll-behavior:smooth }`.
 
 `src/zen/spaces/overflow-icons.inc.css:22,27`:
@@ -109,7 +109,7 @@ File: `src/zen/tabs/zen-tabs/vertical-tabs.css`
 
 - `142-145` separator: `transition: height .08s, padding .08s, opacity .06s ease-in-out`; `169-173` + `transform .1s` when `[movingtab]`.
 - `186-188` separator button: `opacity .15s, visibility .15s`; `212` icon `transform .15s translateY(0>2px)` press + `@starting-style`.
-- `320-323` `.tabbrowser-tab`: `transition: scale .1s ease, var(--zen-tabbox-element-indent-transition)` — indent slide on expand/collapse.
+- `320-323` `.tabbrowser-tab`: `transition: scale .1s ease, var(--zen-tabbox-element-indent-transition)` - indent slide on expand/collapse.
 - `341-344` active press `scale:var(--zen-active-tab-scale) + rotate:.01deg` GPU hack; `348-350` icon `scale:.97`.
 - `500-503` sublabel: `opacity/margin/max-height .1s + translateY(-4px)`.
 - `895` splitter: `opacity .2s`.
@@ -124,12 +124,12 @@ File: `src/zen/tabs/zen-tabs/vertical-tabs.css`
 
 `zen-split-group.inc.css:12,15,47,148`: same indent + `scale .1s`.
 
-JS open/close — `src/zen/common/modules/ZenUIManager.mjs:1070-1171` `animateItemOpen/Close`:
+JS open/close - `src/zen/common/modules/ZenUIManager.mjs:1070-1171` `animateItemOpen/Close`:
 
 - open: `motion.animate(item,{opacity:[0,1],transform:[scale(.95),scale(1)],marginBottom:[-h,0]},{duration:.12,easing:easeOut})` + label `filter blur 1px>0 .1s`.
 - close: inverse `.1s easeOut`.
 
-Folders — `src/zen/folders/ZenFolders.mjs:1536-1595,1613-1619,1621-1719`:
+Folders - `src/zen/folders/ZenFolders.mjs:1536-1595,1613-1619,1621-1719`:
 
 - `#animateItem(item,target,{duration:.18,ease})` via `item.animate([from,to],{duration*1000,easing:ease-in-out/ease})`.
 - `#folderAnimationDuration=.18s`, `#folderRevealDuration=.22s`, collapse `{opacity:[1,0],height:[auto,0]}`.
@@ -143,7 +143,7 @@ Live folders promo `src/zen/live-folders/ZenLiveFoldersManager.sys.mjs:320`: `mo
 
 File: `src/zen/compact-mode/sidebar.inc.css`
 
-- `70-73` `#navigator-toolbox:not([animate])`: `transition: left .15s, right .15s, visibility .15s ease` — off-canvas parked `left:calc(-1*width...) :101,121`.
+- `70-73` `#navigator-toolbox:not([animate])`: `transition: left .15s, right .15s, visibility .15s ease` - off-canvas parked `left:calc(-1*width...) :101,121`.
 - `139` `#titlebar`: `visibility .15s`.
 - `263-265` hover/focus `[zen-has-hover],[zen-user-show]`: `transition: left .25s var(--zen-compact-mode-func)` bespoke bounce.
 - `269` `transition:none` on titlebar when shown.
@@ -157,7 +157,7 @@ File: `src/zen/compact-mode/sidebar.inc.css`
 - `713-734` flash: `rAF + setTimeout(duration)` toggling `flash-popup/zen-has-hover`.
 - Prefs `1-80,685-701`: `zen.view.compact.toolbar-flash-popup.duration=800`, `animate-sidebar=true`, `toolbar-hide-after-hover.duration`, `sidebar-keep-hover.duration`, `hide-tabbar/hide-toolbar`, `outside-window-edge-offset`.
 
-`src/zen/browser/zen-browser-container.css:54,57`: `.browserContainer {transition: margin var(--zen-hidden-toolbar-transition); delay:.2s}` — site slides on toolbar hover.
+`src/zen/browser/zen-browser-container.css:54,57`: `.browserContainer {transition: margin var(--zen-hidden-toolbar-transition); delay:.2s}` - site slides on toolbar hover.
 
 `src/zen/browser/zen-browser-ui.css:63,76,87,105,277,296,322-329`: background `grain opacity .2s`, splitter `opacity .1s, background .2s delay .2s`.
 
