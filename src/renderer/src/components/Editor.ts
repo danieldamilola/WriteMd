@@ -552,6 +552,15 @@ export class Editor extends LitElement {
   }
 
   @state() private content = ''
+  /**
+   * The exact text the CodeMirror views currently hold.
+   *
+   * Kept as the same string object the view produced, so the sync check in the
+   * state subscription is a pointer comparison instead of a fresh
+   * `doc.toString()` of the whole document on every keystroke.
+   */
+  private viewContent = ''
+  private secondaryViewContent = ''
   @state() private filePath: string | null = null
   @state() private viewMode: ViewMode = 'live'
   @state() private splitActive = false
@@ -843,8 +852,9 @@ export class Editor extends LitElement {
         this.editorView &&
         docChanged &&
         !mergeActive &&
-        s.content !== this.editorView.state.doc.toString()
+        s.content !== this.viewContent
       ) {
+        this.viewContent = s.content
         this.editorView.dispatch({
           changes: { from: 0, to: this.editorView.state.doc.length, insert: s.content }
         })
@@ -860,8 +870,9 @@ export class Editor extends LitElement {
         this.secondaryEditorView &&
         s.secondaryDoc &&
         secondaryDocChanged &&
-        s.secondaryDoc.content !== this.secondaryEditorView.state.doc.toString()
+        s.secondaryDoc.content !== this.secondaryViewContent
       ) {
+        this.secondaryViewContent = s.secondaryDoc.content
         this.secondaryEditorView.dispatch({
           changes: {
             from: 0,
@@ -1244,6 +1255,7 @@ ${searchContext}`
       })
     }
     this.content = newContent
+    this.viewContent = newContent
     this.fileState.setContent(newContent)
     // Force an immediate save to disk so the 'dirty' flag is cleared.
     // This prevents the OS file watcher from firing while dirty=true and popping the conflict modal.
@@ -1495,10 +1507,16 @@ ${searchContext}`
       EditorView.updateListener.of((update) => {
         if (update.docChanged) {
           const newDoc = update.state.doc.toString()
+          // The string the view itself produced. The subscription below compares
+          // against it instead of re-serializing the document, which on a 6 MB
+          // note meant building a second copy of it on every keystroke just to
+          // discover it was already in sync.
           if (isSecondary) {
+            this.secondaryViewContent = newDoc
             this.fileState.setSecondaryContent(newDoc)
           } else {
             this.content = newDoc
+            this.viewContent = newDoc
             this.fileState.setContent(newDoc)
           }
         } else if (
@@ -1546,6 +1564,7 @@ ${searchContext}`
       doc: this.content,
       extensions: this.getBaseExtensions(false, this.viewMode, this.filePath)
     })
+    this.viewContent = this.content
 
     this.editorView = new EditorView({
       state,
@@ -1567,6 +1586,7 @@ ${searchContext}`
       doc: this.secondaryDoc.content,
       extensions: this.getBaseExtensions(true, this.secondaryDoc.viewMode, this.secondaryDoc.path)
     })
+    this.secondaryViewContent = this.secondaryDoc.content
 
     this.secondaryEditorView = new EditorView({
       state,

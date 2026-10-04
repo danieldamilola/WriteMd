@@ -1,5 +1,5 @@
 import { ensureSyntaxTree, syntaxTree } from '@codemirror/language'
-import type { SyntaxNode } from '@lezer/common'
+import type { SyntaxNode, Tree } from '@lezer/common'
 import type { Range, Text } from '@codemirror/state'
 import {
   Decoration,
@@ -128,15 +128,31 @@ export function buildInlineDecorations(view: EditorView): DecorationSet {
     }
   }
 
-  const tree = ensureSyntaxTree(state, state.doc.length, 200) ?? syntaxTree(state)
+  // Only the rendered range needs decorations, and walking the tree from the
+  // root meant every keystroke in a 6 MB note visited a million nodes calling
+  // lineAt() on each. The parse is capped to the same range: asking for the
+  // whole document spent the full 200ms budget on every viewport update.
+  //
+  // The budget itself shrinks with the document. A megabyte-scale note can no
+  // longer be parsed inside one update no matter how long it is given, so a
+  // large budget only converts every keystroke into a guaranteed stall; the
+  // decorations fill in on the following update instead.
+  const viewport = view.viewport
+  const parseBudget = doc.length > 1_000_000 ? 25 : 200
+  const parsed = ensureSyntaxTree(state, viewport.to, parseBudget)
+  const tree: Tree = parsed
+    ? parsed
+    : // Budget ran out before the viewport: iterate the partially parsed tree,
+      // which still covers the part of the document nearest the viewport.
+      syntaxTree(state)
   const activeLinkStarts = new Set<number>()
 
   let frontmatterEnd = 0
-  const text = doc.toString()
-  if (text.startsWith('---\n')) {
-    let endMatch = text.indexOf('\n---\n', 4)
-    if (endMatch === -1 && text.endsWith('\n---')) {
-      endMatch = text.length - 4
+  const head = doc.sliceString(0, Math.min(doc.length, 64 * 1024))
+  if (head.startsWith('---\n')) {
+    let endMatch = head.indexOf('\n---\n', 4)
+    if (endMatch === -1 && doc.length <= head.length && head.endsWith('\n---')) {
+      endMatch = head.length - 4
     }
     if (endMatch !== -1) {
       frontmatterEnd = endMatch + 5
@@ -144,6 +160,8 @@ export function buildInlineDecorations(view: EditorView): DecorationSet {
   }
 
   tree.iterate({
+    from: viewport.from,
+    to: viewport.to,
     enter: (node) => {
       // Skip everything inside the frontmatter block, as it is managed by frontmatter-plugin
       if (node.to <= frontmatterEnd) return
@@ -423,6 +441,7 @@ export const inlinePreviewPlugin = ViewPlugin.fromClass(
         update.docChanged ||
         update.selectionSet ||
         update.focusChanged ||
+        update.viewportChanged ||
         treeGrew ||
         readOnlyChanged ||
         mermaidChanged

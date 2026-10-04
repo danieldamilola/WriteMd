@@ -1,5 +1,4 @@
 import { WidgetType } from '@codemirror/view'
-import mermaid from 'mermaid'
 import { createLinkInterceptor } from '../extensions/safe-links'
 
 // Mermaid ships two themes, so the app's seven map onto two. Mermaid 11 picked
@@ -9,6 +8,23 @@ import { createLinkInterceptor } from '../extensions/safe-links'
 // diagrams follow an in-app theme switch rather than the OS setting.
 const DARK_THEMES = new Set(['dark', 'graphite', 'midnight', 'dracula', 'nord'])
 
+type MermaidApi = typeof import('mermaid')['default']
+
+/**
+ * Mermaid is loaded on first diagram, not at startup.
+ *
+ * A static import pulled mermaid and its layout engines (dagre, cytoscape, elk,
+ * katex) into the initial bundle and executed them on every launch, for notes
+ * that contain no diagrams at all. Measured on the stress vault: the working set
+ * before this change was ~750 MB at rest.
+ */
+let mermaidPromise: Promise<MermaidApi> | null = null
+
+function loadMermaid(): Promise<MermaidApi> {
+  mermaidPromise ??= import('mermaid').then((m) => m.default)
+  return mermaidPromise
+}
+
 let configuredTheme: 'dark' | 'default' | null = null
 
 function currentMermaidTheme(): 'dark' | 'default' {
@@ -16,7 +32,7 @@ function currentMermaidTheme(): 'dark' | 'default' {
   return current && DARK_THEMES.has(current) ? 'dark' : 'default'
 }
 
-function configureMermaid(): void {
+function configureMermaid(mermaid: MermaidApi): void {
   configuredTheme = currentMermaidTheme()
   mermaid.initialize({
     securityLevel: 'strict',
@@ -30,7 +46,6 @@ function configureMermaid(): void {
 // over mermaid's output, and it is also the only level that does not enable
 // click handlers inside the diagram. Stated here rather than inherited from a
 // library default so the property is greppable and survives a version bump.
-configureMermaid()
 
 export class MermaidWidget extends WidgetType {
   private id: string
@@ -45,11 +60,6 @@ export class MermaidWidget extends WidgetType {
   }
 
   toDOM(): HTMLElement {
-    // Switching theme in Settings re-renders open documents, so each widget is
-    // built against whatever the app's theme is now rather than whatever it was
-    // at module load.
-    if (currentMermaidTheme() !== configuredTheme) configureMermaid()
-
     const container = document.createElement('div')
     container.className = 'cm-mermaid-widget'
     container.style.display = 'flex'
@@ -72,21 +82,22 @@ export class MermaidWidget extends WidgetType {
     renderSpan.id = this.id
     container.appendChild(renderSpan)
 
-    try {
-      mermaid
-        .render(this.id + '-svg', this.codeContent)
-        .then((result) => {
-          renderSpan.innerHTML = result.svg
-        })
-        .catch((err: unknown) => {
-          renderSpan.innerText =
-            'Mermaid Error: ' + (err instanceof Error ? err.message : String(err))
-          renderSpan.style.color = '#ff6b6b'
-        })
-    } catch (err: unknown) {
+    const fail = (err: unknown): void => {
       renderSpan.innerText = 'Mermaid Error: ' + (err instanceof Error ? err.message : String(err))
-      renderSpan.style.color = '#ff6b6b'
+      renderSpan.style.color = 'var(--danger)'
     }
+
+    void loadMermaid()
+      .then((mermaid) => {
+        // Switching theme in Settings re-renders open documents, so each widget
+        // is built against whatever the app's theme is now.
+        if (currentMermaidTheme() !== configuredTheme) configureMermaid(mermaid)
+        return mermaid.render(this.id + '-svg', this.codeContent)
+      })
+      .then((result) => {
+        renderSpan.innerHTML = result.svg
+      })
+      .catch(fail)
 
     return container
   }

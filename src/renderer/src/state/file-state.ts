@@ -212,47 +212,48 @@ export class FileState {
     const vaultPath = await api()
       ?.vault?.getPath?.()
       .catch(() => undefined)
-    let opened = 0
+    const restored: TabDoc[] = []
+    const seen = new Set(this.state.tabs.map((t) => t.path))
     for (const p of paths) {
       if (typeof p !== 'string') continue
-      if (this.state.tabs.some((t) => t.path === p)) continue
+      if (seen.has(p)) continue
       try {
         const exists = await api()?.file?.exists?.(p)
         if (!exists) continue
         const result = await api()?.file?.read?.(p)
         if (!result) continue
-        this.state = {
-          ...this.state,
-          tabs: [
-            ...this.state.tabs,
-            {
-              path: p,
-              content: result.content,
-              originalContent: result.content,
-              mtime: result.mtime,
-              dirty: false,
-              isVaultFile: Boolean(vaultPath && p.startsWith(vaultPath)),
-              lastWritten: null,
-              pendingWrite: null
-            }
-          ]
-        }
-        await api()
+        seen.add(p)
+        restored.push({
+          path: p,
+          content: result.content,
+          originalContent: result.content,
+          mtime: result.mtime,
+          dirty: false,
+          isVaultFile: Boolean(vaultPath && p.startsWith(vaultPath)),
+          lastWritten: null,
+          pendingWrite: null
+        })
+        // Watching is fire-and-forget: awaiting it serially tripled the time to
+        // restore a large session, and a watcher that lands late still guards
+        // everything after the file opens.
+        void api()
           ?.file?.watch?.(p)
           .catch(() => undefined)
-        opened++
       } catch {
         continue
       }
     }
-    if (opened > 0) {
-      const idx = this.state.tabs.findIndex((t) => t.path === activePath)
-      this.state = { ...this.state, activeTab: idx >= 0 ? idx : this.state.tabs.length - 1 }
-      this.syncMirror()
-      this.notify()
-      return true
+    if (restored.length === 0) return false
+    const tabs = [...this.state.tabs, ...restored]
+    const idx = tabs.findIndex((t) => t.path === activePath)
+    this.state = {
+      ...this.state,
+      tabs,
+      activeTab: idx >= 0 ? idx : this.state.tabs.length + restored.length - 1
     }
-    return false
+    this.syncMirror()
+    this.notify()
+    return true
   }
 
   switchTab(index: number): void {

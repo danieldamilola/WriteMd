@@ -228,10 +228,22 @@ class FrontmatterPropertiesWidget extends WidgetType {
   }
 }
 
+/**
+ * How much of the document head is scanned for the frontmatter fence.
+ *
+ * Frontmatter is by definition at the top of the file, but the scan used to
+ * stringify the entire document on every transaction, so opening or typing in
+ * a large note copied megabytes to look at the first four characters. A real
+ * frontmatter block is a few kilobytes; 64 KB is far past anything a person
+ * hand-writes, and a document shorter than this is scanned whole, so the
+ * file-is-only-frontmatter case still resolves.
+ */
+const FRONTMATTER_SCAN = 64 * 1024
+
 function getFrontmatterDecorations(state: EditorState): DecorationSet {
   const builder = new RangeSetBuilder<Decoration>()
   const readOnly = state.facet(readOnlyFacet)
-  const text = state.doc.toString()
+  const text = state.doc.sliceString(0, Math.min(state.doc.length, FRONTMATTER_SCAN))
 
   if (text.startsWith('---\n')) {
     let endMatch = text.indexOf('\n---\n', 4)
