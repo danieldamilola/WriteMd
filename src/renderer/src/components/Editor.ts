@@ -26,6 +26,7 @@ import { GFM } from '@lezer/markdown'
 import { defaultKeymap, history, historyKeymap } from '@codemirror/commands'
 import { search } from '@codemirror/search'
 import { writeMDTheme } from './EditorTheme'
+import { installFocusReportingFix } from '../utils/focus-reporting'
 import { vscodeHighlight } from './CodeHighlight'
 import {
   livePreviewPlugin,
@@ -1582,6 +1583,7 @@ ${searchContext}`
   }
 
   private initEditor(): void {
+    installFocusReportingFix()
     const container = this.shadowRoot?.querySelector('#primary-cm-wrapper')
     // Destroy before the early return, not after it. The container is absent
     // whenever the empty state is rendered, and bailing out first left a live
@@ -1598,7 +1600,8 @@ ${searchContext}`
 
     this.editorView = new EditorView({
       state,
-      parent: container
+      parent: container,
+      root: this.shadowRoot ?? document
     })
 
     requestAnimationFrame(() => {
@@ -1620,7 +1623,14 @@ ${searchContext}`
 
     this.secondaryEditorView = new EditorView({
       state,
-      parent: container
+      parent: container,
+      // The split pane's wrapper is slotted into <writemd-panel>, so
+      // CodeMirror picks that panel's shadow root as the view root and asks it
+      // for `activeElement` before it writes the caret. That shadow root reports
+      // null here, so every DOM-selection write was skipped and keystrokes
+      // landed wherever the caret used to be. The editor's own shadow root does
+      // report the focused view, so it is the root both views are given.
+      root: this.shadowRoot ?? document
     })
 
     requestAnimationFrame(() => {

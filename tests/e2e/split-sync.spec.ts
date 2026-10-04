@@ -32,9 +32,11 @@ test.describe('Split pane sync', () => {
     }
   }
 
+  const LINES = 'line one\nline two\nline three\n'
+
   test.beforeEach(async () => {
     writeFileSync(notePath, 'hello split\n', 'utf-8')
-    writeFileSync(otherPath, 'other file\n', 'utf-8')
+    writeFileSync(otherPath, LINES, 'utf-8')
     writeFileSync(
       join(fixture.userData, 'config.json'),
       JSON.stringify(
@@ -107,6 +109,20 @@ test.describe('Split pane sync', () => {
     await contents.nth(1).click()
     await window.keyboard.type('SECONDARY', { delay: 20 })
     await expect.poll(() => readOther(), { timeout: 15000 }).toContain('SECONDARY')
+  })
+
+  test('a click in the secondary pane puts Enter and the next word where the caret is', async () => {
+    await openInSecondary('other.md')
+    const secondary = window.locator('.cm-content').nth(1)
+    // End of the last line. The split pane used to insert the newline at the
+    // top of the document and then type the next characters one position back,
+    // because the view never wrote the caret into the DOM after the click.
+    const line = secondary.locator('.cm-line', { hasText: 'line three' })
+    const box = await line.boundingBox()
+    await window.mouse.click(box!.x + box!.width - 3, box!.y + box!.height / 2)
+    await window.keyboard.press('Enter')
+    await window.keyboard.type('ENDMARK', { delay: 30 })
+    await expect.poll(() => readOther(), { timeout: 15000 }).toBe(LINES + 'ENDMARK\n')
   })
 
   test('closing a dirty secondary pane writes it with auto-save off', async () => {
