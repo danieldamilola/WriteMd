@@ -407,6 +407,26 @@ async function openSurface(label: string): Promise<void> {
     )
   })
 
+  test('the word count in the info pill stays correct and live', async () => {
+    await openNote('features-tasks.md')
+    const pill = window.locator('writemd-info-pill')
+    await expect(pill).toBeVisible()
+    const words = async (): Promise<number> => {
+      // Inside the pill's shadow root, so read the node rather than innerText.
+      const text = await pill.locator('.count-item').first().innerText()
+      const m = /([\d,]+)\s+words/.exec(text)
+      expect(m, `pill text was ${JSON.stringify(text)}`).not.toBeNull()
+      return Number((m as RegExpExecArray)[1].replace(/,/g, ''))
+    }
+    // Debounced, so give it a moment rather than asserting the stale value.
+    await expect.poll(words, { timeout: 10_000 }).toBeLessThan(50_000)
+    const before = await words()
+    await window.locator('.cm-content').first().click()
+    await window.keyboard.press('Control+End')
+    await window.keyboard.type(' extra words here', { delay: 20 })
+    await expect.poll(words, { timeout: 10_000 }).toBeGreaterThan(before)
+  })
+
   test('typing with 40 tabs open stays responsive', async () => {
     await window.locator('.cm-content').first().click()
     await window.keyboard.press('Control+End')
