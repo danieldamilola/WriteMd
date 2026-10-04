@@ -2,6 +2,7 @@ import { html, css, LitElement, type PropertyValues } from 'lit'
 import { customElement, property, state } from 'lit/decorators.js'
 import { api } from '../api'
 import { deepActiveElement } from '../utils/links'
+import { MOTION_LABELS, MOTION_PREFERENCES, type MotionPreference } from '../utils/motion'
 import { DEFAULT_AI_SYSTEM_PROMPT } from '../../../shared/settings-schema'
 import { SettingsStore } from '../state/settings'
 import { emit } from '../events/bus'
@@ -677,6 +678,7 @@ export class SettingsModal extends LitElement {
   @state() private appVersion = ''
   @state() private autoCheckForUpdates = true
   @state() private panelOrientation: 'horizontal' | 'vertical' = 'horizontal'
+  @state() private motion: MotionPreference = 'system'
   @state() private newSettingsDesign = true
   @state() private updateStatus:
     'idle' | 'checking' | 'available' | 'downloading' | 'downloaded' | 'up-to-date' | 'error' =
@@ -797,6 +799,7 @@ export class SettingsModal extends LitElement {
     this.panelOrientation = s.get('appearance.panelOrientation', 'horizontal') as
       'horizontal' | 'vertical'
     this.newSettingsDesign = s.get<boolean>('appearance.newSettingsDesign', true)
+    this.motion = s.get('appearance.motion', 'system') as MotionPreference
     this.aiProvider = s.get('ai.provider', 'OpenAI')
     this.aiModel = s.get('ai.model', 'gpt-4o')
     this.aiApiKey = s.get('ai.apiKey', '')
@@ -1549,6 +1552,31 @@ private get visibleTabs(): SettingsTab[] {
             aria-checked="${this.panelOrientation === 'vertical'}"
             @click=${() => this.updateSetting('appearance.panelOrientation', this.panelOrientation === 'vertical' ? 'horizontal' : 'vertical')}
           ></button>
+        </div>
+      </div>
+
+      <div class="section-title">Motion</div>
+      <div class="section">
+        <div class="setting-row">
+          <div>
+            <div class="setting-label">Animation</div>
+            <div class="setting-desc">
+              Match system follows the Windows animation setting. Always and never override it.
+            </div>
+          </div>
+          <select
+            class="select-input"
+            aria-label="Animation"
+            .value=${this.motion}
+            @change=${(e: Event) =>
+              this.updateSetting('appearance.motion', (e.target as HTMLSelectElement).value)}
+          >
+            ${MOTION_PREFERENCES.map(
+              (p) => html`<option value=${p} ?selected=${p === this.motion}>
+                ${MOTION_LABELS[p]}
+              </option>`
+            )}
+          </select>
         </div>
       </div>
 

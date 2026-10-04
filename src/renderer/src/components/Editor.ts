@@ -27,6 +27,7 @@ import { defaultKeymap, history, historyKeymap } from '@codemirror/commands'
 import { search } from '@codemirror/search'
 import { writeMDTheme } from './EditorTheme'
 import { installFocusReportingFix } from '../utils/focus-reporting'
+import { reducedMotionNow } from '../utils/motion'
 import { vscodeHighlight } from './CodeHighlight'
 import {
   livePreviewPlugin,
@@ -214,7 +215,7 @@ export class Editor extends LitElement {
         }
       }
 
-      @media (prefers-reduced-motion: reduce) {
+      :host-context([data-motion='reduced']) {
         .notice {
           animation: none;
         }
@@ -232,7 +233,7 @@ export class Editor extends LitElement {
         transition: flex 200ms cubic-bezier(0.22, 1, 0.36, 1);
       }
 
-      @media (prefers-reduced-motion: reduce) {
+      :host-context([data-motion='reduced']) {
         .pane {
           transition: none;
         }
@@ -317,7 +318,7 @@ export class Editor extends LitElement {
         }
       }
 
-      @media (prefers-reduced-motion: reduce) {
+      :host-context([data-motion='reduced']) {
         .pane-in {
           animation: none;
         }
@@ -339,7 +340,7 @@ export class Editor extends LitElement {
         }
       }
 
-      @media (prefers-reduced-motion: reduce) {
+      :host-context([data-motion='reduced']) {
         writemd-ai-panel,
         writemd-backlinks-panel,
         writemd-vault-explorer,
@@ -440,7 +441,7 @@ export class Editor extends LitElement {
         }
       }
 
-      @media (prefers-reduced-motion: reduce) {
+      :host-context([data-motion='reduced']) {
         .ai-history {
           animation: none;
         }
@@ -1112,7 +1113,7 @@ export class Editor extends LitElement {
         }
       }
 
-      // Custom instructions from Settings → AI Assistant, with live file context appended
+      // Custom instructions from Settings â†’ AI Assistant, with live file context appended
       const customPrompt =
         this.settingsStore.get('ai.systemPrompt', DEFAULT_AI_SYSTEM_PROMPT) ||
         DEFAULT_AI_SYSTEM_PROMPT
@@ -1379,7 +1380,7 @@ ${searchContext}`
       changedProperties.has('splitActive') &&
       changedProperties.get('splitActive') === false &&
       this.splitActive &&
-      !window.matchMedia('(prefers-reduced-motion: reduce)').matches
+      !reducedMotionNow()
     ) {
       const panels = this.shadowRoot?.querySelectorAll<HTMLElement>('writemd-panel.pane')
       const left = panels?.[0]

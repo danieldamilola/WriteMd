@@ -126,7 +126,7 @@ export class TextMenu extends LitElement {
         }
       }
 
-      @media (prefers-reduced-motion: reduce) {
+      :host-context([data-motion='reduced']) {
         .m-panel {
           animation: none;
         }
@@ -283,9 +283,9 @@ export class TextMenu extends LitElement {
   }
 
   /**
-   * Insert a website link `[label](https://…)`:
-   * - clipboard holds a URL → use it (selection becomes the label)
-   * - selection itself is a URL → linkify in place as `[url](url)`
+   * Insert a website link `[label](https://â€¦)`:
+   * - clipboard holds a URL â†’ use it (selection becomes the label)
+   * - selection itself is a URL â†’ linkify in place as `[url](url)`
    * - otherwise insert `[label](https://)` with the URL selected for typing
    */
   private async insertExternalLink(sel: string): Promise<void> {
@@ -473,7 +473,7 @@ export class TextMenu extends LitElement {
         })),
         {
           id: 'link-browse',
-          label: 'Browse for file…',
+          label: 'Browse for fileâ€¦',
           icon: 'folder',
           dividerBefore: this.linkFiles.length > 0
         }
@@ -506,7 +506,7 @@ export class TextMenu extends LitElement {
                     >
                       ${menuIcon(item.icon)}
                       <span>${item.label}</span>
-                      <span class="m-chevron">›</span>
+                      <span class="m-chevron">â€º</span>
                       <div class="submenu ${this.flip ? 'left' : ''}" role="menu">
                         ${item.children.map(
                           (sub) => html`

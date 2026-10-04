@@ -50,7 +50,7 @@ export class CommandPalette extends LitElement {
         }
       }
 
-      @media (prefers-reduced-motion: reduce) {
+      :host-context([data-motion='reduced']) {
         :host,
         .panel {
           animation: none;

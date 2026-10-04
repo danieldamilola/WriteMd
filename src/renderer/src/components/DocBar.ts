@@ -143,7 +143,7 @@ export class DocBar extends LitElement {
         }
       }
 
-      @media (prefers-reduced-motion: reduce) {
+      :host-context([data-motion='reduced']) {
         .m-panel.note-menu {
           animation: none;
         }

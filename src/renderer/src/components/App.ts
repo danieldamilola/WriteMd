@@ -16,6 +16,11 @@ import { SettingsStore } from '../state/settings'
 import { FileState, type ConflictInfo } from '../state/file-state'
 import { COMMANDS, bindingFromEvent, bindingsEqual, effectiveBindings } from '../state/shortcuts'
 import { initAutoHideScrollbars } from '../utils/auto-hide-scrollbars'
+import {
+  applyMotionPreference,
+  watchSystemMotionPreference,
+  type MotionPreference
+} from '../utils/motion'
 
 @customElement('writemd-app')
 export class WriteMdApp extends LitElement {
@@ -141,6 +146,7 @@ export class WriteMdApp extends LitElement {
   private fileState = FileState.getInstance()
   private unsubscribeFileState: (() => void) | null = null
   private unsubscribeOrientation: (() => void) | null = null
+  private unsubscribeMotion: (() => void) | null = null
   private unsubscribeFileOpen: (() => void) | null = null
   private unsubscribeSettingsOpen: (() => void) | null = null
   private teardownAutoHideScrollbars: (() => void) | null = null
@@ -233,6 +239,15 @@ export class WriteMdApp extends LitElement {
       'data-theme',
       this.settingsStore.get('appearance.theme', 'dark')
     )
+    // Motion is decided once, here, and every animated surface in the app tests
+    // the resulting `data-motion` attribute rather than the media query itself.
+    applyMotionPreference(
+      this.settingsStore.get('appearance.motion', 'system') as MotionPreference
+    )
+    watchSystemMotionPreference()
+    this.unsubscribeMotion = this.settingsStore.subscribe('appearance.motion', (v) => {
+      applyMotionPreference((v as MotionPreference) ?? 'system')
+    })
     this.unsubscribeFileState = this.fileState.subscribe((s) => {
       this.splitActive = s.splitActive
       this.tabs = s.tabs
@@ -260,6 +275,7 @@ export class WriteMdApp extends LitElement {
     this.unsubscribeSettingsOpen?.()
     this.unsubscribeFileState?.()
     this.unsubscribeOrientation?.()
+    this.unsubscribeMotion?.()
     this.stripObserver?.disconnect()
     this.stripObserver = null
     this.observedStrip = null

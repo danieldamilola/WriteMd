@@ -18,6 +18,8 @@
  * root cannot reach them.
  */
 
+import { reducedMotionNow } from './motion'
+
 /** One word per tick, matching the reference's `--stream-gap`. */
 const GAP_MS = 60
 
@@ -38,11 +40,14 @@ export interface StreamReveal {
   reset(): void
 }
 
-function reducedMotion(): boolean {
-  return (
-    typeof window.matchMedia === 'function' &&
-    window.matchMedia('(prefers-reduced-motion: reduce)').matches
-  )
+/**
+ * The staged reveal is motion, so it follows the app's motion preference
+ * rather than the media query alone: someone who asked Windows for less motion
+ * can still ask WriteMd for the full effect, and someone who wants none gets
+ * the message immediately.
+ */
+function prefersReducedMotion(): boolean {
+  return reducedMotionNow()
 }
 
 /**
@@ -106,7 +111,7 @@ export function createStreamReveal(): StreamReveal {
       stop()
       return
     }
-    if (reducedMotion()) {
+    if (prefersReducedMotion()) {
       // Nothing to stagger: the message is simply there the moment it exists.
       for (const w of words) w.classList.add(REVEALED_CLASS)
       revealed = words.length

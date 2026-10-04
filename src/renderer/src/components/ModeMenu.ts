@@ -32,7 +32,7 @@ export class ModeMenu extends LitElement {
       }
     }
 
-    @media (prefers-reduced-motion: reduce) {
+    :host-context([data-motion='reduced']) {
       :host {
         animation: none;
       }

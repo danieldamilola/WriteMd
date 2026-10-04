@@ -21,6 +21,12 @@ export interface WriteMdSettings {
     panelOrientation: 'horizontal' | 'vertical'
     /** Full-screen settings shell. Off restores the centered popup dialog. */
     newSettingsDesign: boolean
+    /**
+     * `system` follows the OS animation setting, `full` animates regardless of
+     * it, `reduced` never animates. Written onto `<html>` as `data-motion`, which
+     * is what every animated surface tests.
+     */
+    motion: 'system' | 'full' | 'reduced'
   }
   files: {
     vaultPath: string
@@ -100,7 +106,8 @@ export const DEFAULT_SETTINGS: WriteMdSettings = {
     theme: 'graphite',
     accentColor: '#f24e1e',
     panelOrientation: 'horizontal',
-    newSettingsDesign: true
+    newSettingsDesign: true,
+    motion: 'system'
   },
   files: {
     vaultPath: '',
