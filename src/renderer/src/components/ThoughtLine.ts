@@ -53,7 +53,6 @@ export class ThoughtLine extends LitElement {
       height: 100%;
     }
 
-
     .stack {
       display: inline-block;
       text-align: left;

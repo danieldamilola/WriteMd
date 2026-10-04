@@ -8,21 +8,24 @@ import { createDocumentMarkdownIt } from '../../utils/markdown'
  */
 const md = createDocumentMarkdownIt()
 
-/** Render one cell's inline markdown to safe HTML. */
-export function renderInlineMarkdown(text: string): string {
-  return md.renderInline(text)
-}
-
 /**
- * Characters that can start inline markdown. A cell without any of them renders
- * as its own text, which skips a markdown-it parse per cell.
+ * Characters that can change what a cell displays, so it needs the parser.
+ * A cell without any of them is its own text, which skips a markdown-it parse
+ * per cell.
  *
  * That parse is the bulk of building a large table: 32 000 cells of plain words
  * spent over a second in the parser alone.
+ *
+ * Three entries are there for correctness rather than speed. `\\` is how a
+ * literal pipe is written, and taking the fast path showed the backslash. The
+ * URL alternatives are what `linkify` turns into anchors; without them in the
+ * hint such a cell was drawn as plain text and stopped being a link. Note there
+ * is no `www.`: markdown-it does not linkify a bare `www.` host, so that one
+ * would only buy a parse.
  */
-const INLINE_MARKDOWN_HINT = /[*_`[\]!<&~]/
+const INLINE_MARKDOWN_HINT = /[*_`[\]!<&~\\]|(?:https?:\/\/|mailto:)/
 
-/** Same result as `renderInlineMarkdown`, without the parser when possible. */
+/** Render one cell's source as the safe HTML the preview draws. */
 export function renderCell(text: string): string {
   if (!INLINE_MARKDOWN_HINT.test(text)) return escapeHtml(text)
   return md.renderInline(text)
@@ -34,6 +37,64 @@ function escapeHtml(text: string): string {
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
+}
+
+/** Whether the character at `index` is escaped by the backslashes before it. */
+function isEscapedAt(text: string, index: number): boolean {
+  let backslashes = 0
+  for (let k = index - 1; k >= 0 && text[k] === '\\'; k--) backslashes++
+  return backslashes % 2 === 1
+}
+
+/**
+ * Index of the next pipe that would really split a cell, meaning one that is
+ * not already escaped. Returns -1 when the rest of the line has none.
+ */
+function nextUnescapedPipe(text: string, from: number): number {
+  for (let i = from; i < text.length; i++) {
+    if (text[i] === '|' && !isEscapedAt(text, i)) return i
+  }
+  return -1
+}
+
+/**
+ * `a \| b` is one cell, not two. Splitting on every pipe turned an escaped pipe
+ * into a real column break the moment the cell was edited.
+ */
+export function escapeCellPipes(text: string): string {
+  let out = ''
+  for (let i = 0; i < text.length; i++) {
+    if (text[i] === '|' && !isEscapedAt(text, i)) out += '\\'
+    out += text[i]
+  }
+  return out
+}
+
+/** The inverse of `escapeCellPipes`, for deciding what a cell will display. */
+export function unescapeCellPipes(text: string): string {
+  let out = ''
+  for (let i = 0; i < text.length; i++) {
+    if (text[i] === '\\' && text[i + 1] === '|') {
+      out += '|'
+      i++
+      continue
+    }
+    out += text[i]
+  }
+  return out
+}
+
+/**
+ * Whether a cell's source is its own displayed text, so that editing the
+ * rendered cell and writing it back is a round trip rather than a rewrite.
+ *
+ * This is the guard that stops in-place editing from flattening markup: for
+ * `**bold**` the widget shows `bold`, so committing what the cell displays would
+ * replace the asterisks with nothing and drop the emphasis from the file. A link
+ * loses its URL the same way. Those cells edit their source instead.
+ */
+export function isPlainCellSource(text: string): boolean {
+  return renderCell(text) === escapeHtml(unescapeCellPipes(text))
 }
 
 /**
@@ -54,7 +115,7 @@ export interface TableRow {
 /**
  * Source range of one cell within its line, offsets relative to the line
  * start. Splits with the same semantics as the renderer (strip one outer
- * pipe pair, split on every `|`), so the range the editor replaces is
+ * pipe pair, split on every unescaped `|`), so the range the editor replaces is
  * exactly the segment the preview was drawn from.
  */
 export function cellSourceRange(
@@ -69,10 +130,12 @@ export function cellSourceRange(
     s = s.slice(1)
     base += 1
   }
-  if (s.endsWith('|')) s = s.slice(0, -1)
+  // Only a real pipe closes the row. Stripping an escaped one ate the backslash
+  // and left the cell ending mid-escape.
+  if (s.length > 0 && s.endsWith('|') && !isEscapedAt(s, s.length - 1)) s = s.slice(0, -1)
   let pos = 0
   for (let i = 0; i <= cellIndex; i++) {
-    const idx = s.indexOf('|', pos)
+    const idx = nextUnescapedPipe(s, pos)
     const end = idx === -1 ? s.length : idx
     if (i === cellIndex) return { start: base + pos, end: base + end }
     if (idx === -1) return null
@@ -83,8 +146,22 @@ export function cellSourceRange(
 
 /** Split one table line into trimmed cell texts, renderer semantics. */
 export function parseTableCells(line: string): string[] {
-  const trimmed = line.trim().replace(/^\|/, '').replace(/\|$/, '')
-  return trimmed.split('|').map((c) => c.trim())
+  const trimmed = line.trim().replace(/^\|/, '')
+  const body =
+    trimmed.length > 0 && trimmed.endsWith('|') && !isEscapedAt(trimmed, trimmed.length - 1)
+      ? trimmed.slice(0, -1)
+      : trimmed
+  const cells: string[] = []
+  let pos = 0
+  for (;;) {
+    const idx = nextUnescapedPipe(body, pos)
+    if (idx === -1) {
+      cells.push(body.slice(pos).trim())
+      return cells
+    }
+    cells.push(body.slice(pos, idx).trim())
+    pos = idx + 1
+  }
 }
 
 /** Per-column alignment declared by the separator row. */
@@ -97,6 +174,14 @@ function parseAligns(sepCells: string[]): Array<'left' | 'center' | 'right' | ''
     return ''
   })
 }
+
+/**
+ * Source text each cell was last drawn from. `updateDOM` runs on every document
+ * change, and re-running markdown-it over 400 rows for a keystroke above the
+ * table was the parse cost the patch path was meant to avoid. Comparing the
+ * source first skips the parser, not just the DOM write.
+ */
+const lastRenderedText = new WeakMap<HTMLElement, string>()
 
 /** Fill an existing `<tr>` with one row's cells. */
 function renderRow(
@@ -118,8 +203,14 @@ function renderRow(
       cell = document.createElement(tag)
       tr.appendChild(cell)
     }
-    const html = renderCell(cells[i] ?? '')
-    if (cell.innerHTML !== html) cell.innerHTML = html
+    const text = cells[i] ?? ''
+    // Never redraw the cell being typed into: its content is the user's, not
+    // the document's, and overwriting it would eat what they just wrote.
+    if (lastRenderedText.get(cell) !== text && !cell.classList.contains('cm-live-table-editing')) {
+      const html = renderCell(text)
+      if (cell.innerHTML !== html) cell.innerHTML = html
+      lastRenderedText.set(cell, text)
+    }
     cell.className = 'cm-live-table-cell'
     cell.dataset.line = String(docLine)
     cell.dataset.cell = String(i)
@@ -172,9 +263,7 @@ export class TableWidget extends WidgetType {
 
     const table = document.createElement('table')
     const thead = document.createElement('thead')
-    thead.appendChild(
-      makeRow(headerCells, columns, aligns, this.rows[0].line, 'th')
-    )
+    thead.appendChild(makeRow(headerCells, columns, aligns, this.rows[0].line, 'th'))
     table.appendChild(thead)
 
     const bodyLimit = Math.min(lines.length, 2 + MAX_RENDERED_ROWS)
@@ -189,7 +278,8 @@ export class TableWidget extends WidgetType {
     }
 
     wrap.appendChild(table)
-    if (lines.length > bodyLimit) wrap.appendChild(this.buildTruncationNotice(lines.length, bodyLimit))
+    if (lines.length > bodyLimit)
+      wrap.appendChild(this.buildTruncationNotice(lines.length, bodyLimit))
     return wrap
   }
 
@@ -230,7 +320,14 @@ export class TableWidget extends WidgetType {
     const columns = headerCells.length
     const aligns = parseAligns(parseTableCells(lines[1]))
 
-    renderRow(theadRow as HTMLTableRowElement, headerCells, columns, aligns, this.rows[0].line, 'th')
+    renderRow(
+      theadRow as HTMLTableRowElement,
+      headerCells,
+      columns,
+      aligns,
+      this.rows[0].line,
+      'th'
+    )
 
     const bodyLimit = Math.min(lines.length, 2 + MAX_RENDERED_ROWS)
     const bodyRows = lines.slice(2, bodyLimit)

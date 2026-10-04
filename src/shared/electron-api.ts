@@ -229,6 +229,16 @@ export interface ElectronAPI {
     listSessions: (docPath: string | null) => Promise<ChatSessionSummary[]>
   }
   opencode: {
+    /**
+     * Deliberately reports only whether the managed server is up, never its URL.
+     *
+     * `opencode serve` is unauthenticated: loopback bind plus an ephemeral port
+     * are the only things protecting it. Handing the port to the renderer gave
+     * that away, and a renderer holding the URL can create its own session with
+     * `permission: allow` and run tools as the user, which is exactly what the
+     * `permission: deny` sessions this app creates exist to prevent. The UI
+     * needs the boolean and nothing more.
+     */
     getStatus: (customPath?: string) => Promise<{
       cliFound: boolean
       cliPath: string | null
@@ -237,7 +247,6 @@ export interface ElectronAPI {
       loginCommand: string
       auth: { loggedIn: boolean; detail: string }
       managedServerUp: boolean
-      managedServerUrl: string | null
       searchHints: string[]
       debug: string[]
     }>

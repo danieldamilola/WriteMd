@@ -250,15 +250,20 @@ export async function ensureOpencodeServer(bin: string, version: string | null):
   if (serverUrl && serverChild && !serverChild.killed && serverChild.exitCode === null) {
     return serverUrl
   }
+  // Deliberately not clearing `serverUrl` here. It used to be nulled before the
+  // await below, and then reassigned from `serverStarting` - so a child that died
+  // while that promise was still held had its dead URL written back after the
+  // liveness guard had already run, leaving `isManagedServerUp()` true for a
+  // server that was gone. The exit handler clears it instead.
   serverChild = null
-  serverUrl = null
   if (!serverStarting) {
     serverStarting = startOpencodeServer(bin, version).finally(() => {
       serverStarting = null
     })
   }
-  serverUrl = await serverStarting
-  return serverUrl
+  const url = await serverStarting
+  serverUrl = url
+  return url
 }
 
 /** True while our managed server is alive (user-run :4096 excluded). */
@@ -271,10 +276,6 @@ export function isManagedServerUp(): boolean {
   )
 }
 
-export function managedServerUrl(): string | null {
-  return isManagedServerUp() ? serverUrl : null
-}
-
 /**
  * Kill the managed server; called on app quit. The server is a grandchild
  * (powershell → opencode), so plain kill() would orphan it - take down the
@@ -284,6 +285,9 @@ export function stopOpencodeServer(): void {
   const child = serverChild
   serverChild = null
   serverUrl = null
+  // Cached sessions belong to the server that is going away. Keeping them meant
+  // every turn after a restart paid a 404 plus a retry before succeeding.
+  sessionsByDir.clear()
   if (!child || child.killed) return
   try {
     child.kill()
@@ -296,9 +300,14 @@ export function stopOpencodeServer(): void {
 }
 
 async function startOpencodeServer(bin: string, version: string | null): Promise<string> {
-  if (version && compareSemver(version, MINIMUM_OPENCODE_VERSION) < 0) {
+  // The stored version is whatever `--version` printed, so it can arrive as
+  // `opencode v2.3.1` rather than a bare semver. Comparing that unparsed made
+  // `compareSemver` read `v2` as NaN, score it 0, and refuse to start a current
+  // CLI with "OpenCode vv2.3.1 is too old".
+  const parsed = version ? parseOpenCodeVersion(version) : null
+  if (parsed && compareSemver(parsed, MINIMUM_OPENCODE_VERSION) < 0) {
     throw new Error(
-      `OpenCode v${version} is too old. Upgrade to v${MINIMUM_OPENCODE_VERSION} or newer.`
+      `OpenCode v${parsed} is too old. Upgrade to v${MINIMUM_OPENCODE_VERSION} or newer.`
     )
   }
   const port = await freePort()
@@ -310,8 +319,10 @@ async function startOpencodeServer(bin: string, version: string | null): Promise
   serverChild = child
 
   return new Promise((resolve, reject) => {
+    // Both streams feed the ready-line scan. A shim that prints its banner to
+    // stderr is common enough that reading only stdout turned a clear startup
+    // error into "exited with code 1" with the message discarded.
     let output = ''
-    let stderr = ''
     const timer = setTimeout(() => {
       try {
         child.kill()
@@ -319,6 +330,7 @@ async function startOpencodeServer(bin: string, version: string | null): Promise
         // already exited
       }
       serverChild = null
+      serverUrl = null
       reject(new Error('Timed out waiting for `opencode serve` to listen (30s).'))
     }, SERVER_START_TIMEOUT_MS)
 
@@ -327,27 +339,30 @@ async function startOpencodeServer(bin: string, version: string | null): Promise
       const url = parseServerUrlFromOutput(output)
       if (url) {
         clearTimeout(timer)
+        // Stop accumulating. The buffer used to grow for the whole process
+        // lifetime, and nothing reads it once the server is up.
+        child.stdout?.off('data', onData)
+        child.stderr?.off('data', onData)
         resolve(url)
       }
     }
     child.stdout?.on('data', onData)
-    child.stderr?.on('data', (chunk: Buffer) => {
-      stderr += chunk.toString('utf-8')
-    })
+    child.stderr?.on('data', onData)
     child.on('error', (err) => {
       clearTimeout(timer)
       serverChild = null
+      serverUrl = null
       reject(err)
     })
     child.on('close', (code) => {
       clearTimeout(timer)
-      if (serverUrl) return
+      // The server is gone, so nothing that remembers it can still be true, and
+      // its sessions died with it. This used to bail out early when a URL had
+      // been recorded, which left the dead child's bookkeeping in place.
       serverChild = null
-      reject(
-        new Error(
-          stderr.trim() || output.trim() || `opencode serve exited with code ${code ?? 'unknown'}`
-        )
-      )
+      serverUrl = null
+      sessionsByDir.clear()
+      reject(new Error(output.trim() || `opencode serve exited with code ${code ?? 'unknown'}`))
     })
   })
 }
@@ -570,6 +585,14 @@ export async function opencodeChatStream(input: OpencodeStreamInput): Promise<st
       if (done) return
       timedOut = true
       void reader.cancel().catch(() => undefined)
+      // Stop the turn server-side too. Cancelling only the reader left the
+      // model generating, and billing tokens, for a client that had gone.
+      void serverRequest(
+        client,
+        'POST',
+        `/session/${encodeURIComponent(sessionId)}/abort`,
+        {}
+      ).catch(() => undefined)
     }, CHAT_TIMEOUT_MS)
     try {
       for (;;) {
@@ -590,9 +613,13 @@ export async function opencodeChatStream(input: OpencodeStreamInput): Promise<st
         const delta = assembler.feedEvent(payload)
         if (delta) input.onDelta(delta)
       }
-      if (timedOut && !assembler.fullText) {
+      // Reported whether or not text arrived. Gating this on an empty answer
+      // meant a stream that produced most of a reply and then stalled returned
+      // that partial reply as if it were complete, with nothing on screen to say
+      // it was cut off.
+      if (timedOut) {
         throw new Error(
-          'opencode took over 3 minutes without an answer - the free reasoning model may be queued. Try again, or pick a faster flash model.'
+          'opencode took over 3 minutes without finishing - the free reasoning model may be queued. Try again, or pick a faster flash model.'
         )
       }
       return finish(assembler.fullText)
@@ -623,7 +650,13 @@ export async function opencodeChatStream(input: OpencodeStreamInput): Promise<st
   })
 
   try {
-    await Promise.all([prompt, pump])
+    // allSettled, not all: when the prompt fails (bad model, a 4xx) `all`
+    // rejected the moment the handler was done with this function while `pump`
+    // kept reading /event and pushing deltas at a renderer that had already
+    // torn its listener down, holding the socket open until the timeout.
+    const [promptResult, pumpResult] = await Promise.allSettled([prompt, pump])
+    if (promptResult.status === 'rejected') throw promptResult.reason
+    if (pumpResult.status === 'rejected') throw pumpResult.reason
     const text = finish(assembler.fullText)
     return stripToolArtifacts(text) || text
   } catch (e) {
@@ -634,7 +667,9 @@ export async function opencodeChatStream(input: OpencodeStreamInput): Promise<st
     if (input.signal?.aborted) return finish(assembler.fullText)
     throw e
   } finally {
+    // Anything still running stops here rather than outliving the handler.
     try {
+      controller.abort()
       await reader.cancel()
     } catch {
       // already closed

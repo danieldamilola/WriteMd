@@ -39,11 +39,12 @@ export const writeMDTheme: Extension = EditorView.theme({
     border: '2px solid transparent',
     backgroundClip: 'padding-box'
   },
-  '.cm-scroller.is-scrolling::-webkit-scrollbar-thumb, .cm-scroller:hover::-webkit-scrollbar-thumb': {
-    backgroundColor: 'var(--border)',
-    border: '2px solid transparent',
-    backgroundClip: 'padding-box'
-  },
+  '.cm-scroller.is-scrolling::-webkit-scrollbar-thumb, .cm-scroller:hover::-webkit-scrollbar-thumb':
+    {
+      backgroundColor: 'var(--border)',
+      border: '2px solid transparent',
+      backgroundClip: 'padding-box'
+    },
   '.cm-scroller::-webkit-scrollbar-thumb:hover': {
     background: 'var(--text-muted)',
     border: '2px solid transparent',
@@ -396,8 +397,10 @@ export const writeMDTheme: Extension = EditorView.theme({
     color: 'var(--syntax-h3)',
     fontWeight: '600'
   },
-  /* Table: cells are editable in place; empty ones still need a click target */
-  '.cm-live-table-wrap td[data-editable="true"], .cm-live-table-wrap th[data-editable="true"]': {
+  /* Table: cells are editable in place; empty ones still need a click target.
+     Editability is a property of the table, and it lives on the wrapper, so the
+     cells themselves carry no such attribute to match on. */
+  '.cm-live-table-wrap[data-editable="true"] td, .cm-live-table-wrap[data-editable="true"] th': {
     cursor: 'text'
   },
   '.cm-live-table-wrap td:empty::before, .cm-live-table-wrap th:empty::before': {

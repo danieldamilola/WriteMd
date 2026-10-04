@@ -245,13 +245,11 @@ export class WriteMdApp extends LitElement {
     )
     document.documentElement.setAttribute(
       'data-theme',
-      this.settingsStore.get('appearance.theme', 'dark')
+      this.settingsStore.get('appearance.theme', 'graphite')
     )
     // Motion is decided once, here, and every animated surface in the app tests
     // the resulting `data-motion` attribute rather than the media query itself.
-    applyMotionPreference(
-      this.settingsStore.get('appearance.motion', 'system') as MotionPreference
-    )
+    applyMotionPreference(this.settingsStore.get('appearance.motion', 'system') as MotionPreference)
     watchSystemMotionPreference()
     this.unsubscribeMotion = this.settingsStore.subscribe('appearance.motion', (v) => {
       applyMotionPreference((v as MotionPreference) ?? 'system')
@@ -643,7 +641,7 @@ export class WriteMdApp extends LitElement {
           </div>
         </writemd-top-bar>
 
-<div class="main-area">
+        <div class="main-area">
           ${
             this.panelOrientation === 'vertical' &&
             (!this.verticalPanelCollapsed || this.verticalPanelLeaving)

@@ -79,11 +79,15 @@ test.describe('Vertical tab rail motion', () => {
     await expect(page.locator('writemd-vertical-tab-bar')).toBeAttached()
     await page.waitForTimeout(800)
 
-    const collapse = page.locator('writemd-top-bar').locator('writemd-icon-button[title="Collapse panel"]')
+    const collapse = page
+      .locator('writemd-top-bar')
+      .locator('writemd-icon-button[title="Collapse panel"]')
     await collapse.click()
     await expect(page.locator('writemd-vertical-tab-bar')).toHaveCount(0, { timeout: 5000 })
 
-    const expand = page.locator('writemd-top-bar').locator('writemd-icon-button[title="Expand panel"]')
+    const expand = page
+      .locator('writemd-top-bar')
+      .locator('writemd-icon-button[title="Expand panel"]')
     await expand.click()
     await expect(page.locator('writemd-vertical-tab-bar')).toBeAttached({ timeout: 5000 })
     await expect(page.locator('writemd-vertical-tab-bar')).toBeVisible()

@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest'
-import { renderCell, MAX_RENDERED_ROWS } from '../../src/renderer/src/components/widgets/TableWidget'
+import {
+  renderCell,
+  MAX_RENDERED_ROWS
+} from '../../src/renderer/src/components/widgets/TableWidget'
 import { documentContextFor, AI_DOC_CONTEXT_LIMIT } from '../../src/renderer/src/components/Editor'
 import { MATCH_COUNT_LIMIT } from '../../src/renderer/src/components/FindPanel'
 

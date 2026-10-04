@@ -174,6 +174,18 @@ const ARRAY_ELEMENT_TYPES: Record<string, 'string' | 'number' | 'boolean'> = {
 }
 
 /**
+ * Settings whose value is one of a fixed set of strings.
+ *
+ * A union type is erased at runtime, so `typeof value !== typeof fallback` is
+ * satisfied by any string. These are the ones where an unexpected member is not
+ * harmless: an unknown `motion` resolved to "match the system", so a typo looked
+ * like it had been set.
+ */
+const STRING_UNIONS: Record<string, readonly string[]> = {
+  'appearance.motion': ['system', 'full', 'reduced']
+}
+
+/**
  * Drop anything the schema does not declare, and reject a value whose type
  * disagrees with its default.
  *
@@ -229,6 +241,15 @@ export function validatePatch(patch: unknown): {
       } else if (typeof value !== typeof fallback) {
         problems.push(`${dotted} must be a ${typeof fallback}, got ${typeof value}`)
         continue
+      } else {
+        // A union needs its members named. `typeof` alone let any string through
+        // for `appearance.motion`, which the renderer then cast its way past, so
+        // a typo persisted and silently resolved to "match the system".
+        const allowed = STRING_UNIONS[dotted]
+        if (allowed && !allowed.includes(value as string)) {
+          problems.push(`${dotted} must be one of: ${allowed.join(', ')}`)
+          continue
+        }
       }
       clean[section] ??= {}
       clean[section][key] = value

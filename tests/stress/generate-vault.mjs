@@ -35,13 +35,61 @@ function rng(seed) {
 }
 
 const WORDS = [
-  'alpha','beta','gamma','delta','epsilon','zeta','eta','theta','iota','kappa','lambda','mu',
-  'nu','xi','omicron','pi','rho','sigma','tau','upsilon','phi','chi','psi','omega','render',
-  'parse','viewport','selection','decoration','transaction','listener','subscription','scroll',
-  'measure','layout','paint','composite','raster','shader','buffer','texture','atlas','glyph',
-  'metric','baseline','regression','fixture','harness','threshold','budget','latency','frame'
+  'alpha',
+  'beta',
+  'gamma',
+  'delta',
+  'epsilon',
+  'zeta',
+  'eta',
+  'theta',
+  'iota',
+  'kappa',
+  'lambda',
+  'mu',
+  'nu',
+  'xi',
+  'omicron',
+  'pi',
+  'rho',
+  'sigma',
+  'tau',
+  'upsilon',
+  'phi',
+  'chi',
+  'psi',
+  'omega',
+  'render',
+  'parse',
+  'viewport',
+  'selection',
+  'decoration',
+  'transaction',
+  'listener',
+  'subscription',
+  'scroll',
+  'measure',
+  'layout',
+  'paint',
+  'composite',
+  'raster',
+  'shader',
+  'buffer',
+  'texture',
+  'atlas',
+  'glyph',
+  'metric',
+  'baseline',
+  'regression',
+  'fixture',
+  'harness',
+  'threshold',
+  'budget',
+  'latency',
+  'frame'
 ]
 
+// eslint-disable-next-line @typescript-eslint/explicit-function-return-type
 function sentence(r, words = 12) {
   const out = []
   for (let i = 0; i < words; i++) out.push(WORDS[Math.floor(r() * WORDS.length)])
@@ -49,31 +97,41 @@ function sentence(r, words = 12) {
   return s.charAt(0).toUpperCase() + s.slice(1) + '.'
 }
 
+// eslint-disable-next-line @typescript-eslint/explicit-function-return-type
 function paragraph(r, sentences = 4) {
   const out = []
   for (let i = 0; i < sentences; i++) out.push(sentence(r))
   return out.join(' ')
 }
 
+// eslint-disable-next-line @typescript-eslint/explicit-function-return-type
 function codeBlock(r, lines) {
   const out = ['```ts']
   for (let i = 0; i < lines; i++) {
-    out.push(`export const value${i} = compute(${Math.floor(r() * 1000)}, '${WORDS[Math.floor(r() * WORDS.length)]}')`)
+    out.push(
+      `export const value${i} = compute(${Math.floor(r() * 1000)}, '${WORDS[Math.floor(r() * WORDS.length)]}')`
+    )
   }
   out.push('```')
   return out.join('\n')
 }
 
+// eslint-disable-next-line @typescript-eslint/explicit-function-return-type
 function table(r, rows, cols) {
   const head = ['| ' + Array.from({ length: cols }, (_, c) => `col ${c}`).join(' | ') + ' |']
   const sep = ['|' + Array.from({ length: cols }, () => ' --- ').join('|') + '|']
   const body = []
   for (let i = 0; i < rows; i++) {
-    body.push('| ' + Array.from({ length: cols }, () => WORDS[Math.floor(r() * WORDS.length)]).join(' | ') + ' |')
+    body.push(
+      '| ' +
+        Array.from({ length: cols }, () => WORDS[Math.floor(r() * WORDS.length)]).join(' | ') +
+        ' |'
+    )
   }
   return [...head, ...sep, ...body].join('\n')
 }
 
+// eslint-disable-next-line @typescript-eslint/explicit-function-return-type
 function write(name, content) {
   const path = join(ROOT, name)
   mkdirSync(join(path, '..'), { recursive: true })
@@ -161,7 +219,8 @@ const r = rng(20240607)
   const lines = quick ? 4 : 20
   const width = quick ? 20000 : 200000
   const out = ['# Long lines', '']
-  for (let i = 0; i < lines; i++) out.push(`${i}: ${'lorem ipsum dolor sit amet '.repeat(Math.ceil(width / 27)).slice(0, width)}`)
+  for (let i = 0; i < lines; i++)
+    out.push(`${i}: ${'lorem ipsum dolor sit amet '.repeat(Math.ceil(width / 27)).slice(0, width)}`)
   write('long-lines.md', `${out.join('\n')}\n`)
 }
 
@@ -185,9 +244,7 @@ const r = rng(20240607)
     // Targets have to be real files: a wiki link resolves by name, so a link to
     // a title no file carries would only ever measure the failure path.
     const target = (i * 7) % 900
-    out.push(
-      `[[note-${target}]] and [md link](./many/folder-${target % 20}/note-${target}.md)`
-    )
+    out.push(`[[note-${target}]] and [md link](./many/folder-${target % 20}/note-${target}.md)`)
   }
   write('wiki-links.md', `${out.join('\n')}\n`)
 }
@@ -217,7 +274,9 @@ const r = rng(20240607)
     written += 1
     bytes += Buffer.byteLength(body)
   }
-  console.log(`${'many/* (notes)'.padEnd(28)} ${String(written).padStart(9)} files, ${(bytes / 1024).toFixed(0)} KB`)
+  console.log(
+    `${'many/* (notes)'.padEnd(28)} ${String(written).padStart(9)} files, ${(bytes / 1024).toFixed(0)} KB`
+  )
 
   // One folder deeper than the explorer's row cap, so the summarized branch is
   // exercised rather than assumed.
@@ -234,31 +293,94 @@ const r = rng(20240607)
 // 9. One file per parser extension, so a stress run also covers features.
 write(
   'features-frontmatter.md',
-  ['---', 'title: Stress frontmatter', 'tags: [stress, perf]', 'nested:', '  key: value', '---', '', '# Frontmatter', '', paragraph(r), ''].join('\n')
+  [
+    '---',
+    'title: Stress frontmatter',
+    'tags: [stress, perf]',
+    'nested:',
+    '  key: value',
+    '---',
+    '',
+    '# Frontmatter',
+    '',
+    paragraph(r),
+    ''
+  ].join('\n')
 )
 write(
   'features-math.md',
-  ['# Math', '', '$$', '\\frac{-b \\pm \\sqrt{b^2 - 4ac}}{2a}', '$$', '', 'Inline $E = mc^2$ and $\\sum_{i=1}^n i$.', ''].join('\n')
+  [
+    '# Math',
+    '',
+    '$$',
+    '\\frac{-b \\pm \\sqrt{b^2 - 4ac}}{2a}',
+    '$$',
+    '',
+    'Inline $E = mc^2$ and $\\sum_{i=1}^n i$.',
+    ''
+  ].join('\n')
 )
 write(
   'features-tasks.md',
-  ['# Tasks', '', ...Array.from({ length: quick ? 50 : 500 }, (_, i) => `- [${i % 3 === 0 ? 'x' : ' '}] task ${i}`), ''].join('\n')
+  [
+    '# Tasks',
+    '',
+    ...Array.from(
+      { length: quick ? 50 : 500 },
+      (_, i) => `- [${i % 3 === 0 ? 'x' : ' '}] task ${i}`
+    ),
+    ''
+  ].join('\n')
 )
 write(
   'features-code.md',
-  ['# Code blocks', '', codeBlock(r, quick ? 40 : 400), '', '```python', 'def stress():', '    return 42', '```', ''].join('\n')
+  [
+    '# Code blocks',
+    '',
+    codeBlock(r, quick ? 40 : 400),
+    '',
+    '```python',
+    'def stress():',
+    '    return 42',
+    '```',
+    ''
+  ].join('\n')
 )
 write(
   'features-footnotes.md',
-  ['# Footnotes', '', ...Array.from({ length: quick ? 20 : 200 }, (_, i) => `Claim ${i}[^${i}]`), '', ...Array.from({ length: quick ? 20 : 200 }, (_, i) => `[^${i}]: note ${i}`), ''].join('\n')
+  [
+    '# Footnotes',
+    '',
+    ...Array.from({ length: quick ? 20 : 200 }, (_, i) => `Claim ${i}[^${i}]`),
+    '',
+    ...Array.from({ length: quick ? 20 : 200 }, (_, i) => `[^${i}]: note ${i}`),
+    ''
+  ].join('\n')
 )
 write(
   'features-callouts.md',
-  ['# Callouts', '', ...['note', 'tip', 'warning', 'danger', 'info'].flatMap((k) => [`> [!${k}]`, `> ${sentence(r)}`, '']), ''].join('\n')
+  [
+    '# Callouts',
+    '',
+    ...['note', 'tip', 'warning', 'danger', 'info'].flatMap((k) => [
+      `> [!${k}]`,
+      `> ${sentence(r)}`,
+      ''
+    ]),
+    ''
+  ].join('\n')
 )
 write(
   'features-images.md',
-  ['# Images', '', ...Array.from({ length: quick ? 4 : 40 }, (_, i) => `![alt ${i}](${i % 2 ? '../_assets' : '.'}/image-${i}.png)`), ''].join('\n')
+  [
+    '# Images',
+    '',
+    ...Array.from(
+      { length: quick ? 4 : 40 },
+      (_, i) => `![alt ${i}](${i % 2 ? '../_assets' : '.'}/image-${i}.png)`
+    ),
+    ''
+  ].join('\n')
 )
 
 console.log(`\nroot: ${ROOT}`)

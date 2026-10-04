@@ -1,5 +1,9 @@
 import { describe, it, expect } from 'vitest'
-import { TableWidget, cellSourceRange } from '../src/renderer/src/components/widgets/TableWidget'
+import {
+  TableWidget,
+  cellSourceRange,
+  parseTableCells
+} from '../src/renderer/src/components/widgets/TableWidget'
 
 /**
  * Clicking a table cell in live preview must edit that cell in place, not
@@ -39,20 +43,34 @@ describe('cellSourceRange', () => {
   })
 
   it('round-trips through the preview split', () => {
-    // The range the editor replaces must be the segment the widget rendered.
+    // The range the editor replaces must be the segment the widget rendered, as
+    // the renderer itself splits it.
     const line = '| Feature | Parser |'
+    expect(parseTableCells(line)).toEqual(['Feature', 'Parser'])
     for (const i of [0, 1]) {
       const range = cellSourceRange(line, i)
       expect(range).not.toBeNull()
-      const rendered = line
-        .slice(range!.start, range!.end)
-        .trim()
-        .replace(/^\|/, '')
-        .replace(/\|$/, '')
-        .split('|')
-        .map((c) => c.trim())[0]
-      expect(rendered).toBe(['Feature', 'Parser'][i])
+      expect(line.slice(range!.start, range!.end).trim()).toBe(['Feature', 'Parser'][i])
     }
+  })
+
+  it('treats an escaped pipe as cell text, not as a column break', () => {
+    // "| a \| b | c |" is two cells. Splitting on every pipe made it three, and
+    // editing the first one turned the escape into a real column break.
+    expect(parseTableCells('| a \\| b | c |')).toEqual(['a \\| b', 'c'])
+    // Cell 0 is " a \| b " (offsets 1..9), cell 1 is " c " (offsets 10..13).
+    expect(cellSourceRange('| a \\| b | c |', 0)).toEqual({ start: 1, end: 9 })
+    expect(cellSourceRange('| a \\| b | c |', 1)).toEqual({ start: 10, end: 13 })
+  })
+
+  it('treats a pipe after an escaped backslash as a real break', () => {
+    // `\\` is a literal backslash, so the pipe after it is unescaped.
+    expect(parseTableCells('| a \\\\| b |')).toEqual(['a \\\\', 'b'])
+  })
+
+  it('does not strip an escaped trailing pipe as the row-closing one', () => {
+    // The cell ends in a literal pipe, so the row has no closing pipe to strip.
+    expect(parseTableCells('| a \\|')).toEqual(['a \\|'])
   })
 })
 

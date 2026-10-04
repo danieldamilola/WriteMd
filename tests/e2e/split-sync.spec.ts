@@ -95,9 +95,7 @@ test.describe('Split pane sync', () => {
     await window.keyboard.type('SECONDARY', { delay: 20 })
     // Primary pane mirrors the edit...
     await expect
-      .poll(() =>
-        contents.nth(0).evaluate((el) => (el.textContent ?? '').slice(0, 60))
-      )
+      .poll(() => contents.nth(0).evaluate((el) => (el.textContent ?? '').slice(0, 60)))
       .toContain('SECONDARY')
     // ...and it reaches the file through autosave.
     await expect.poll(() => readNote(), { timeout: 15000 }).toContain('SECONDARY')

@@ -31,8 +31,16 @@ interface MathMatch {
  */
 const RESCAN_MARGIN = 200_000
 
-let cachedDoc: Text | null = null
-let cachedMatches: MathMatch[] = []
+/**
+ * Delimiter scan, keyed by document.
+ *
+ * A module-level slot was wrong the moment split view existed: the two panes
+ * hold separate `Text` objects, so whichever was not scanned last missed the
+ * cache on every arrow key and every click and re-read the whole document - the
+ * exact cost the incremental rescan exists to remove. Keying on the document
+ * also lets an entry go when the document does.
+ */
+const mathCache = new WeakMap<Text, MathMatch[]>()
 
 function scanMath(doc: Text, from: number): MathMatch[] {
   const matches: MathMatch[] = []
@@ -63,35 +71,28 @@ function scanMath(doc: Text, from: number): MathMatch[] {
   return matches
 }
 
-function rescanFrom(state: EditorState, from: number): MathMatch[] {
-  const start = Math.max(0, from - RESCAN_MARGIN)
-  const kept = cachedMatches.filter((m) => m.to <= start)
+function rescanFrom(state: EditorState, prev: { doc: Text; from: number }): MathMatch[] {
+  const before = mathCache.get(prev.doc)
+  if (!before) {
+    const scanned = scanMath(state.doc, 0)
+    mathCache.set(state.doc, scanned)
+    return scanned
+  }
+  const start = Math.max(0, prev.from - RESCAN_MARGIN)
+  const kept = before.filter((m) => m.to <= start)
   const rescanned = scanMath(state.doc, start)
-  cachedDoc = state.doc
-  cachedMatches = [...kept, ...rescanned].sort((a, b) => a.from - b.from)
-  return cachedMatches
+  const merged = [...kept, ...rescanned].sort((a, b) => a.from - b.from)
+  mathCache.set(state.doc, merged)
+  return merged
 }
 
-function matchesFor(state: EditorState, changedFrom?: number): MathMatch[] {
-  // A changed document is always a new object, so the identity check only
-  // decides whether the cache belongs to this document at all. `changedFrom`
-  // means the caller already established that it does.
-  if (changedFrom === undefined) {
-    if (state.doc !== cachedDoc) {
-      cachedDoc = state.doc
-      cachedMatches = scanMath(state.doc, 0)
-    }
-    return cachedMatches
-  }
-  if (!cachedDoc) {
-    cachedDoc = state.doc
-    cachedMatches = scanMath(state.doc, 0)
-    return cachedMatches
-  }
-  return rescanFrom(state, changedFrom)
+function matchesFor(state: EditorState, prev?: { doc: Text; from: number }): MathMatch[] {
+  const cached = mathCache.get(state.doc)
+  if (cached && !prev) return cached
+  return rescanFrom(state, prev ?? { doc: state.doc, from: 0 })
 }
 
-function getMathDecorations(state: EditorState, changedFrom?: number): DecorationSet {
+function getMathDecorations(state: EditorState, prev?: { doc: Text; from: number }): DecorationSet {
   const builder = new RangeSetBuilder<Decoration>()
   const doc = state.doc
   const readOnly = state.facet(readOnlyFacet)
@@ -105,7 +106,7 @@ function getMathDecorations(state: EditorState, changedFrom?: number): Decoratio
     }
   }
 
-  for (const m of matchesFor(state, changedFrom)) {
+  for (const m of matchesFor(state, prev)) {
     if (m.from >= m.to) continue
     let active = false
     const startLine = doc.lineAt(m.from).number
@@ -141,14 +142,18 @@ export const mathPlugin = StateField.define<DecorationSet>({
   },
   update(value, tr) {
     if (tr.docChanged) {
-      // Only an edit of the very document the cache was built from can rescan
-      // partially; anything else (a new file, a restored tab) starts over.
-      if (tr.startState.doc === cachedDoc && cachedMatches.length > 0) {
+      // Only an edit of a document already in the cache can rescan partially;
+      // anything else (a new file, a restored tab, the other split pane) starts
+      // over. `tr.startState.doc` is the document the edit was made to, which is
+      // not the one the result is cached against: a change always produces a new
+      // `Text`.
+      const before = mathCache.get(tr.startState.doc)
+      if (before && before.length > 0) {
         let first = tr.newDoc.length
         tr.changes.iterChangedRanges((fromA) => {
           if (fromA < first) first = fromA
         })
-        return getMathDecorations(tr.state, first)
+        return getMathDecorations(tr.state, { doc: tr.startState.doc, from: first })
       }
       return getMathDecorations(tr.state)
     }

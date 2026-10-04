@@ -37,12 +37,7 @@ import {
   opencodeSearchHints,
   resolveOpencodeBinary
 } from './opencode'
-import {
-  isManagedServerUp,
-  managedServerUrl,
-  opencodeChat,
-  opencodeChatStream
-} from './opencode-server'
+import { isManagedServerUp, opencodeChat, opencodeChatStream } from './opencode-server'
 import { formatSearchContext, webSearch } from './web-search'
 import type { AttachedFile, ChatMessage, ChatSession } from '../shared/electron-api'
 import {
@@ -508,6 +503,19 @@ export function setupIpc(getWindow: () => BrowserWindow | null): void {
     messages: Array<ChatMessage | { role: string; content: string }>,
     systemPrompt?: string
   ): string {
+    // Images are not silently dropped. `opencodePromptFrom` reads only role and
+    // content, so a screenshot attached to the last message used to vanish here
+    // while the panel still showed the attachment chip - and the model answered a
+    // question about an image it had never been sent. Saying so beats a
+    // confident wrong answer.
+    const withImages = messages.filter(
+      (m) => 'images' in m && Array.isArray(m.images) && m.images.length > 0
+    )
+    if (withImages.length > 0) {
+      throw new Error(
+        'OpenCode cannot read image attachments in this build. Remove the image and ask again, or use a provider that accepts images.'
+      )
+    }
     const parts: string[] = []
     if (systemPrompt) parts.push(systemPrompt)
     for (const m of messages) {
@@ -797,7 +805,6 @@ export function setupIpc(getWindow: () => BrowserWindow | null): void {
         loginCommand: 'opencode auth login opencode',
         auth: { loggedIn: false, detail: 'CLI not found' },
         managedServerUp: isManagedServerUp(),
-        managedServerUrl: managedServerUrl(),
         searchHints: opencodeSearchHints(),
         debug
       }
@@ -817,7 +824,6 @@ export function setupIpc(getWindow: () => BrowserWindow | null): void {
       loginCommand,
       auth,
       managedServerUp: isManagedServerUp(),
-      managedServerUrl: managedServerUrl(),
       searchHints: opencodeSearchHints(),
       debug
     }

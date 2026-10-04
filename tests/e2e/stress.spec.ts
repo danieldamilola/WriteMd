@@ -127,7 +127,11 @@ test.describe('Stress sweep', () => {
       }
     })
     await window.reload()
-    await expect(window.locator('writemd-top-bar')).toBeVisible()
+    // Not the 5s default. This boots the app against a synthetic vault holding a
+    // 1500-note tree and a 6 MB note, and the reload has to re-read it before the
+    // first paint. It boots, but on a loaded CI runner it does not boot in five
+    // seconds, and a timeout here reads as "the app failed to start".
+    await expect(window.locator('writemd-top-bar')).toBeVisible({ timeout: 120_000 })
   })
 
   test.afterAll(async () => {
@@ -206,9 +210,9 @@ test.describe('Stress sweep', () => {
     const tab = window.locator('writemd-tab', { hasText: name })
     await tab.first().click()
     await expect(window.locator('writemd-editor .cm-content')).toBeVisible()
-    await expect(
-      window.locator('writemd-doc-bar input[aria-label="Document title"]')
-    ).toHaveValue(name.replace(/\.md$/i, ''))
+    await expect(window.locator('writemd-doc-bar input[aria-label="Document title"]')).toHaveValue(
+      name.replace(/\.md$/i, '')
+    )
   }
 
   test('every fixture opens and paints inside budget', async () => {
@@ -230,9 +234,7 @@ test.describe('Stress sweep', () => {
       await window.keyboard.type('stress typing pass', { delay: 30 })
     })
     expect(m.worstTask, `typing blocked ${m.worstTask}ms`).toBeLessThan(BUDGET.longTaskMs)
-    expect(m.longTasks, `${m.longTasks} long tasks while typing`).toBeLessThan(
-      BUDGET.longTaskCount
-    )
+    expect(m.longTasks, `${m.longTasks} long tasks while typing`).toBeLessThan(BUDGET.longTaskCount)
   })
 
   test('typing in a 4000 row table stays responsive', async () => {
@@ -355,12 +357,12 @@ test.describe('Stress sweep', () => {
   })
 
   /**
- * Open a split-pane surface from a known state.
- *
- * The split button is a switch, not a menu, so a pane left open by an earlier
- * scenario has to be closed before the launcher will appear.
- */
-async function openSurface(label: string): Promise<void> {
+   * Open a split-pane surface from a known state.
+   *
+   * The split button is a switch, not a menu, so a pane left open by an earlier
+   * scenario has to be closed before the launcher will appear.
+   */
+  async function openSurface(label: string): Promise<void> {
     const toggle = window.locator('writemd-icon-button[title="Split view"]')
     const openPanes = window.locator(
       'writemd-surface-launcher, writemd-vault-explorer, writemd-backlinks-panel'
@@ -388,9 +390,7 @@ async function openSurface(label: string): Promise<void> {
       // index walks off the end of a list that grows as folders open, and a
       // `data-path` selector breaks on Windows backslashes.
       for (let round = 0; round < 60; round++) {
-        const next = explorer
-          .locator('.node-row[data-action="dir"][aria-expanded="false"]')
-          .first()
+        const next = explorer.locator('.node-row[data-action="dir"][aria-expanded="false"]').first()
         if ((await next.count()) === 0) break
         const started = Date.now()
         await next.click()
@@ -433,10 +433,10 @@ async function openSurface(label: string): Promise<void> {
   })
 
   /**
- * Reading mode is live preview made read-only, so it renders the same widgets;
- * `contenteditable` is the honest difference between the two.
- */
-async function ensureLiveMode(): Promise<void> {
+   * Reading mode is live preview made read-only, so it renders the same widgets;
+   * `contenteditable` is the honest difference between the two.
+   */
+  async function ensureLiveMode(): Promise<void> {
     const content = window.locator('.cm-content').first()
     if ((await content.getAttribute('contenteditable')) === 'false') {
       await window.locator('writemd-doc-bar [title="Toggle Reading / Live Mode"]').click()
@@ -455,9 +455,7 @@ async function ensureLiveMode(): Promise<void> {
       await toggle.click()
       await expect(content).toHaveAttribute('contenteditable', 'true', { timeout: 15_000 })
     })
-    expect(m.worstTask, `the mode switch blocked ${m.worstTask}ms`).toBeLessThan(
-      BUDGET.longTaskMs
-    )
+    expect(m.worstTask, `the mode switch blocked ${m.worstTask}ms`).toBeLessThan(BUDGET.longTaskMs)
   })
 
   test('a wiki link in a 3000-link note resolves to its target', async () => {
@@ -474,10 +472,7 @@ async function ensureLiveMode(): Promise<void> {
       await link.click()
       await expect
         .poll(
-          () =>
-            window
-              .locator('writemd-doc-bar input[aria-label="Document title"]')
-              .inputValue(),
+          () => window.locator('writemd-doc-bar input[aria-label="Document title"]').inputValue(),
           { timeout: 15_000 }
         )
         .toBe('note-42')
@@ -514,9 +509,7 @@ async function ensureLiveMode(): Promise<void> {
       await modal.locator('.back-btn').click()
       await expect(modal).toHaveCount(0)
     })
-    expect(m.worstTask, `the theme switch blocked ${m.worstTask}ms`).toBeLessThan(
-      BUDGET.longTaskMs
-    )
+    expect(m.worstTask, `the theme switch blocked ${m.worstTask}ms`).toBeLessThan(BUDGET.longTaskMs)
   })
 
   test('auto-save writes the 6 MB note without a false conflict', async () => {
@@ -534,9 +527,7 @@ async function ensureLiveMode(): Promise<void> {
     await window.keyboard.press('Control+End')
     const m = await measure('auto-save a 6 MB note', async () => {
       await window.keyboard.type(' SAVED', { delay: 20 })
-      await expect
-        .poll(() => fileSize(hugePath), { timeout: 60_000 })
-        .toBeGreaterThan(before)
+      await expect.poll(() => fileSize(hugePath), { timeout: 60_000 }).toBeGreaterThan(before)
       // The writer must not hear its own write back as an external change.
       await window.waitForTimeout(3000)
       await expect(window.locator('writemd-conflict-dialog')).toHaveCount(0)
@@ -621,9 +612,7 @@ async function ensureLiveMode(): Promise<void> {
     const typed = await measure('type with 40 tabs', async () => {
       await window.keyboard.type('tab pressure', { delay: 30 })
     })
-    expect(typed.worstTask, `typing blocked ${typed.worstTask}ms`).toBeLessThan(
-      BUDGET.longTaskMs
-    )
+    expect(typed.worstTask, `typing blocked ${typed.worstTask}ms`).toBeLessThan(BUDGET.longTaskMs)
     expect(ms, `restore took ${ms}ms`).toBeLessThan(60_000)
     expect(memMB, `working set ${memMB.toFixed(0)}MB`).toBeLessThan(2500)
   })
