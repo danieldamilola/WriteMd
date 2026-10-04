@@ -26,8 +26,15 @@ class WikiLinkWidget extends WidgetType {
     return other.label === this.label
   }
 
-  ignoreEvent(): boolean {
-    return false
+  ignoreEvent(event: Event): boolean {
+    // Pointer events belong to the widget, not to the editor.
+    //
+    // Returning false let CodeMirror handle mousedown, which put the cursor on
+    // the link's line. That line is then "active", so the decoration holding
+    // this widget is dropped in favour of the raw `[[text]]`, and the click
+    // landed on a node that no longer existed: following a wiki link from live
+    // preview silently did nothing.
+    return event.type === 'mousedown' || event.type === 'click'
   }
 
   toDOM(): HTMLElement {

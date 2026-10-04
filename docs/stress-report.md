@@ -107,8 +107,12 @@ Same machine, same fixtures, before and after:
 | Type 8 chars in a 4000-row table | worst task 1143 ms | worst task 206 ms |
 | Render the whole 1500-file tree | did not finish (click loop timed out) | 3630 ms, no long task |
 | Expand a 600-note folder | 600 rows of DOM | 1 summary row, 57 ms |
-| Type 19 chars in a 6 MB note | 9803 ms, worst task 427 ms | 4524 ms, worst task 261 ms |
-| Find in a 6 MB note, 14 000 matches | worst task 860 ms | worst task 362 ms |
+| Type 19 chars in a 6 MB note | 9803 ms, worst task 427 ms | 5196 ms, worst task 364 ms |
+| Find in a 6 MB note, 14 000 matches | worst task 860 ms | worst task 534 ms |
+| Follow a wiki link | did nothing | 529 ms |
+| Toggle a task in a 500-task note | no coverage | 161 ms |
+| Auto-save a 6 MB note, no false conflict | not measured | 8770 ms, worst task 1048 ms |
+| Switch theme on a 6 MB note | not measured | 1437 ms, worst task 86 ms |
 | Type 19 chars, CPU samples | 14261 | 2927 |
 | Word count share of typing CPU | 30.9% | 3.5% |
 | Whole-document string copies per keystroke | 4 | 1 |
@@ -130,6 +134,19 @@ idle:
 | save-echo check | 2 ms |
 | word count, old way | 115 ms |
 | word count, new way | ~5 ms |
+
+## What the stress run found that was not performance
+
+- **Wiki links could not be clicked in live preview.** The widget returned
+  `ignoreEvent() === false`, so CodeMirror handled the mousedown and put the
+  cursor on the link's line. That made the line "active", which drops the very
+  decoration holding the widget in favour of the raw `[[text]]`, and the click
+  landed on a node that no longer existed. Following a wiki link did nothing,
+  silently, in every live-preview document. `ignoreEvent` now claims mousedown
+  and click, the way the task checkbox already did.
+- **Links and checkboxes had no e2e coverage at all**, which is why the above
+  survived. `phases.md` lists "E2E coverage for links and backlinks" as
+  outstanding; wiki-link following and task toggling are now covered.
 
 ## Where the time goes now
 
@@ -171,13 +188,21 @@ Not fixed, with the numbers so they can be compared later:
 
 ## Harness
 
-- `tests/e2e/stress.spec.ts` - 14 scenarios against the real vault: open cost
+- `tests/e2e/stress.spec.ts` - 21 scenarios against the real vault: open cost
   per fixture shape, typing, clicking, scrolling, find, Mermaid, KaTeX and
-  footnotes, command palette, backlink scan, full tree render, 40-tab typing,
-  40-tab session restore. Measures wall clock, long tasks (via
-  `PerformanceObserver`), and native working set from the main process. Writes
+  footnotes, command palette, backlink scan, full tree render, a 600-note
+  folder, reading mode, following a wiki link, toggling a task, switching theme,
+  auto-save without a false conflict, the word count, 40-tab typing, 40-tab
+  session restore. Measures wall clock, long tasks (via `PerformanceObserver`),
+  and native working set from the main process. Writes
   `test-results/stress-metrics.json`.
-- `tests/stress/perf.test.ts` - 10 micro-benchmarks with budgets. Skips itself
+- `tests/stress/perf.test.ts` - 11 micro-benchmarks with budgets. Skips itself
   when the fixtures are absent, so a fresh clone still passes.
+- `tests/stress/size-guards.test.ts` - pins every cap and guard added here, so a
+  later change cannot quietly remove one.
 - `tests/stress/generate-vault.mjs` - the fixture generator. `--quick` for small
   sizes, `--vault <dir>` to point elsewhere.
+
+Measurements were taken with another WriteMd instance open on the same machine,
+which is why the run-to-run spread on the pathological fixtures is wide. The
+numbers above are from one representative run, not the best of several.

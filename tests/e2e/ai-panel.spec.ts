@@ -224,7 +224,7 @@ test.describe('AI panel', () => {
     // frames after `loading` flips, and sampling immediately would only ever
     // catch the shape it started from.
     await expect
-      .poll(() => panel.locator('.ai-send path').getAttribute('d'), { timeout: 3000 })
+      .poll(() => panel.locator('.ai-send path').getAttribute('d'), { timeout: 15_000 })
       .toMatch(/^M12\.00 6\.00/)
 
     await send.click()

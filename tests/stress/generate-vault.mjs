@@ -182,7 +182,12 @@ const r = rng(20240607)
   const count = quick ? 200 : 3000
   const out = ['# Link farm', '']
   for (let i = 0; i < count; i++) {
-    out.push(`[[Many notes ${String((i % 900) + 1).padStart(4, '0')}]] and [md link](./many/folder-${i % 20}/note-${i}.md)`)
+    // Targets have to be real files: a wiki link resolves by name, so a link to
+    // a title no file carries would only ever measure the failure path.
+    const target = (i * 7) % 900
+    out.push(
+      `[[note-${target}]] and [md link](./many/folder-${target % 20}/note-${target}.md)`
+    )
   }
   write('wiki-links.md', `${out.join('\n')}\n`)
 }
