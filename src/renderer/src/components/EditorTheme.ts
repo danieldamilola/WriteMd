@@ -16,7 +16,12 @@ export const writeMDTheme: Extension = EditorView.theme({
     overflow: 'auto',
     height: '100%',
     display: 'flex',
-    justifyContent: 'center'
+    justifyContent: 'center',
+    scrollbarWidth: 'thin',
+    scrollbarColor: 'transparent transparent'
+  },
+  '.cm-scroller.is-scrolling, .cm-scroller:hover': {
+    scrollbarColor: 'var(--border) transparent'
   },
   '.cm-scroller::-webkit-scrollbar': {
     width: '8px',
@@ -29,8 +34,13 @@ export const writeMDTheme: Extension = EditorView.theme({
     display: 'none'
   },
   '.cm-scroller::-webkit-scrollbar-thumb': {
-    background: 'var(--border)',
+    backgroundColor: 'transparent',
     borderRadius: '4px',
+    border: '2px solid transparent',
+    backgroundClip: 'padding-box'
+  },
+  '.cm-scroller.is-scrolling::-webkit-scrollbar-thumb, .cm-scroller:hover::-webkit-scrollbar-thumb': {
+    backgroundColor: 'var(--border)',
     border: '2px solid transparent',
     backgroundClip: 'padding-box'
   },
@@ -385,6 +395,19 @@ export const writeMDTheme: Extension = EditorView.theme({
   '.cm-live-table-wrap td strong, .cm-live-table-wrap td b': {
     color: 'var(--syntax-h3)',
     fontWeight: '600'
+  },
+  /* Table: cells are editable in place; empty ones still need a click target */
+  '.cm-live-table-wrap td[data-editable="true"], .cm-live-table-wrap th[data-editable="true"]': {
+    cursor: 'text'
+  },
+  '.cm-live-table-wrap td:empty::before, .cm-live-table-wrap th:empty::before': {
+    content: "'\\00a0'"
+  },
+  '.cm-live-table-wrap .cm-live-table-editing': {
+    outline: '2px solid var(--border-focus)',
+    outlineOffset: '-2px',
+    borderRadius: '4px',
+    backgroundColor: 'var(--bg-hover)'
   },
   '.cm-live-table-wrap td code': {
     backgroundColor: 'var(--code-bg)',

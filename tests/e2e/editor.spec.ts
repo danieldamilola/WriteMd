@@ -44,7 +44,7 @@ test.describe('WriteMd Editor', () => {
     await search.fill('shortcut')
     await expect(modal.locator('[data-tab="shortcuts"]')).toBeVisible()
 
-    await modal.locator('button[aria-label="Close settings"]').click()
+    await modal.locator('button.back-btn').click()
     await expect(modal).toHaveCount(0)
   })
 
@@ -74,11 +74,11 @@ test.describe('WriteMd Editor', () => {
     })
 
     expect(box.dialogWidth).toBeGreaterThan(600)
-    expect(box.sidebarWidth).toBe(230)
+    expect(box.sidebarWidth).toBeGreaterThanOrEqual(250)
     expect(box.mainWidth).toBeGreaterThan(400)
     expect(box.sideBySide).toBe(true)
 
-    await window.locator('button[aria-label="Close settings"]').click()
+    await window.locator('button.back-btn').click()
   })
 
   test('the settings modal returns focus to whatever opened it', async () => {
@@ -86,7 +86,7 @@ test.describe('WriteMd Editor', () => {
     const settingsBtn = window.locator('writemd-icon-button[title="Settings"]')
     await settingsBtn.click()
     await expect(window.locator('writemd-settings-modal')).toBeVisible()
-    await window.locator('button[aria-label="Close settings"]').click()
+    await window.locator('button.back-btn').click()
     await expect(window.locator('writemd-settings-modal')).toHaveCount(0)
     // Focus previously landed on document.body, stranding a keyboard user at
     // the top of the document.

@@ -113,7 +113,20 @@ export class FileState {
   }
   private listeners = new Set<(state: FileStateData) => void>()
   private autoSaveTimer: ReturnType<typeof setTimeout> | null = null
+  private secondaryAutoSaveTimer: ReturnType<typeof setTimeout> | null = null
   private settingsStore = SettingsStore.getInstance()
+
+  /**
+   * Same file open twice (e.g. both split panes). Slash-normalized, with a
+   * case-insensitive match on case-insensitive filesystems only.
+   */
+  private sameFilePath(a: string, b: string): boolean {
+    const forward = (p: string): string => p.replace(/\\/g, '/')
+    if (forward(a) === forward(b)) return true
+    const platform = typeof navigator !== 'undefined' ? (navigator.platform ?? '') : ''
+    if (/^win|^mac/i.test(platform)) return forward(a).toLowerCase() === forward(b).toLowerCase()
+    return false
+  }
 
   private constructor() {
     this.setupWatcherListener()
@@ -443,6 +456,9 @@ export class FileState {
           this.addRecentFile(tab.path)
         }
         this.notify()
+        // Manual save also flushes a dirty split-pane document; with autosave
+        // off it would otherwise never reach disk (save is tab-scoped).
+        void this.saveSecondary()
         return true
       }
     } catch (e) {
@@ -633,7 +649,9 @@ export class FileState {
     const splitActive = open !== undefined ? open : !this.state.splitActive
     if (!splitActive) {
       // When closing split view, reset everything so it opens fresh next time
+      void this.saveSecondary()
       this.clearAutoSaveTimer()
+      this.clearSecondaryAutoSaveTimer()
       this.state = {
         ...this.state,
         splitActive: false,
@@ -678,9 +696,13 @@ export class FileState {
   }
 
   closeSecondaryFile(): void {
+    // Flush before dropping the pane: with auto-save off, a pending debounce
+    // would be cleared here and the edit lost.
+    void this.saveSecondary()
     // A pending debounce belongs to whichever tab scheduled it, not to
     // whatever is active when it fires.
     this.clearAutoSaveTimer()
+    this.clearSecondaryAutoSaveTimer()
     this.state = {
       ...this.state,
       splitActive: false,
@@ -701,6 +723,24 @@ export class FileState {
     // when the split closes, and the next save would write the losing version.
     if (secondary.isDiff) {
       this.setContent(content)
+      // Accept and Reject are explicit "keep this" clicks, so they must land on
+      // disk now. Leaving it to the autosave debounce meant a resolve with
+      // auto-save off silently kept the on-disk version.
+      void this.save()
+      return
+    }
+
+    const dirty = content !== secondary.originalContent
+    // Same file open in both panes: the tab owns persistence, so mirror the
+    // edit into it. Otherwise the panes diverge and neither autosave nor save
+    // (both tab-scoped) ever sees the secondary keystrokes.
+    const tab = this.activeTabDoc()
+    if (tab?.path && secondary.path && this.sameFilePath(tab.path, secondary.path)) {
+      this.state = {
+        ...this.state,
+        secondaryDoc: { ...secondary, content, dirty: false, originalContent: content }
+      }
+      this.setContent(content)
       return
     }
 
@@ -709,10 +749,64 @@ export class FileState {
       secondaryDoc: {
         ...secondary,
         content,
-        dirty: content !== secondary.originalContent
+        dirty
       }
     }
     this.notify()
+    this.scheduleSecondaryAutoSave()
+  }
+
+  /**
+   * Secondary pane has its own debounce: the primary autosave only writes the
+   * active tab, so without this, edits to a different file in split view sat
+   * in memory until the pane closed.
+   */
+  private scheduleSecondaryAutoSave(): void {
+    if (this.secondaryAutoSaveTimer !== null) {
+      clearTimeout(this.secondaryAutoSaveTimer)
+      this.secondaryAutoSaveTimer = null
+    }
+    const secondary = this.state.secondaryDoc
+    const autoSave = this.settingsStore.get('editor.autoSave', true)
+    const delay = this.settingsStore.get('editor.autoSaveDelay', 500)
+    if (!autoSave || !secondary || secondary.isDiff || !secondary.dirty || !secondary.path) return
+    const path = secondary.path
+    const content = secondary.content
+    this.secondaryAutoSaveTimer = setTimeout(() => {
+      this.secondaryAutoSaveTimer = null
+      const current = this.state.secondaryDoc
+      if (!current || current.path !== path || current.content !== content || !current.dirty) {
+        return
+      }
+      void this.saveSecondary()
+    }, delay)
+  }
+
+  /** Write a dirty secondary document (different file) back to disk. */
+  async saveSecondary(): Promise<boolean> {
+    const secondary = this.state.secondaryDoc
+    if (!secondary || secondary.isDiff || !secondary.dirty || !secondary.path) return false
+    try {
+      const result = await api()?.file?.write?.(secondary.path, secondary.content)
+      if (!result) return false
+      const current = this.state.secondaryDoc
+      if (current && current.path === secondary.path && current.content === secondary.content) {
+        this.state = {
+          ...this.state,
+          secondaryDoc: {
+            ...current,
+            originalContent: secondary.content,
+            mtime: result.mtime,
+            dirty: false
+          }
+        }
+        this.notify()
+      }
+      return true
+    } catch (e) {
+      console.error('Failed to save secondary file:', e)
+      return false
+    }
   }
 
   /**
@@ -747,6 +841,13 @@ export class FileState {
     if (this.autoSaveTimer !== null) {
       clearTimeout(this.autoSaveTimer)
       this.autoSaveTimer = null
+    }
+  }
+
+  private clearSecondaryAutoSaveTimer(): void {
+    if (this.secondaryAutoSaveTimer !== null) {
+      clearTimeout(this.secondaryAutoSaveTimer)
+      this.secondaryAutoSaveTimer = null
     }
   }
 

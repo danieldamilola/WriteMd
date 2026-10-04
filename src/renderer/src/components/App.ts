@@ -15,6 +15,7 @@ import { showConfirm } from '../services/confirm'
 import { SettingsStore } from '../state/settings'
 import { FileState, type ConflictInfo } from '../state/file-state'
 import { COMMANDS, bindingFromEvent, bindingsEqual, effectiveBindings } from '../state/shortcuts'
+import { initAutoHideScrollbars } from '../utils/auto-hide-scrollbars'
 
 @customElement('writemd-app')
 export class WriteMdApp extends LitElement {
@@ -142,6 +143,7 @@ export class WriteMdApp extends LitElement {
   private unsubscribeOrientation: (() => void) | null = null
   private unsubscribeFileOpen: (() => void) | null = null
   private unsubscribeSettingsOpen: (() => void) | null = null
+  private teardownAutoHideScrollbars: (() => void) | null = null
   private stripObserver: ResizeObserver | null = null
   private observedStrip: HTMLElement | null = null
 
@@ -199,6 +201,7 @@ export class WriteMdApp extends LitElement {
     window.addEventListener('keydown', this.handleGlobalShortcuts)
     window.addEventListener('dragover', this.handleWindowDragOver)
     window.addEventListener('drop', this.handleWindowDrop)
+    this.teardownAutoHideScrollbars = initAutoHideScrollbars()
     this.unsubscribeSettingsOpen = on('settings:open', ({ tab }) => {
       this.settingsTab = tab ?? 'general'
       this.showSettings = true
@@ -251,6 +254,8 @@ export class WriteMdApp extends LitElement {
     window.removeEventListener('keydown', this.handleGlobalShortcuts)
     window.removeEventListener('dragover', this.handleWindowDragOver)
     window.removeEventListener('drop', this.handleWindowDrop)
+    this.teardownAutoHideScrollbars?.()
+    this.teardownAutoHideScrollbars = null
     this.unsubscribeFileOpen?.()
     this.unsubscribeSettingsOpen?.()
     this.unsubscribeFileState?.()

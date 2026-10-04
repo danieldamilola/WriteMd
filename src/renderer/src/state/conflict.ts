@@ -1,4 +1,19 @@
 import type { FileStateData } from './file-state'
+import type { Transaction } from '@codemirror/state'
+import { updateOriginalDoc } from '@codemirror/merge'
+
+/**
+ * Whether a diff-view transaction needs syncing despite changing nothing.
+ *
+ * Accepting a chunk dispatches no document change at all - CodeMirror's
+ * acceptChunk only retargets the original-doc reference, since the merge doc
+ * already holds the accepted content. A docChanged-only listener never fires,
+ * so the merge resolves visually and nothing is ever scheduled for save.
+ * The effect is the only trace Accept leaves behind.
+ */
+export function hasOriginalDocUpdate(tr: Pick<Transaction, 'effects'>): boolean {
+  return tr.effects.some((eff) => eff.is(updateOriginalDoc))
+}
 
 /**
  * Pure conflict-resolution state transitions for FileState.

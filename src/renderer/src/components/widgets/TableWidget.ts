@@ -13,25 +13,68 @@ export function renderInlineMarkdown(text: string): string {
   return md.renderInline(text)
 }
 
+/** One non-blank source line of a table, with its 1-based document line number. */
+export interface TableRow {
+  text: string
+  line: number
+}
+
+/**
+ * Source range of one cell within its line, offsets relative to the line
+ * start. Splits with the same semantics as the renderer (strip one outer
+ * pipe pair, split on every `|`), so the range the editor replaces is
+ * exactly the segment the preview was drawn from.
+ */
+export function cellSourceRange(
+  lineText: string,
+  cellIndex: number
+): { start: number; end: number } | null {
+  if (cellIndex < 0) return null
+  const leadingWs = lineText.length - lineText.trimStart().length
+  let s = lineText.trim()
+  let base = leadingWs
+  if (s.startsWith('|')) {
+    s = s.slice(1)
+    base += 1
+  }
+  if (s.endsWith('|')) s = s.slice(0, -1)
+  let pos = 0
+  for (let i = 0; i <= cellIndex; i++) {
+    const idx = s.indexOf('|', pos)
+    const end = idx === -1 ? s.length : idx
+    if (i === cellIndex) return { start: base + pos, end: base + end }
+    if (idx === -1) return null
+    pos = idx + 1
+  }
+  return null
+}
+
 export class TableWidget extends WidgetType {
-  constructor(readonly tableText: string) {
+  constructor(
+    readonly rows: TableRow[],
+    readonly cellsEditable: boolean
+  ) {
     super()
   }
 
   eq(other: TableWidget): boolean {
-    return other.tableText === this.tableText
+    return (
+      other.cellsEditable === this.cellsEditable &&
+      other.rows.length === this.rows.length &&
+      other.rows.every((r, i) => r.text === this.rows[i].text && r.line === this.rows[i].line)
+    )
   }
 
   toDOM(): HTMLElement {
     const wrap = document.createElement('div')
     wrap.className = 'cm-live-table-wrap'
-    wrap.setAttribute('contenteditable', 'false')
+    wrap.dataset.editable = String(this.cellsEditable)
 
-    const lines = this.tableText.split('\n').filter((l) => l.trim().length > 0)
-    if (lines.length < 2) {
-      wrap.textContent = this.tableText
+    if (this.rows.length < 2) {
+      wrap.textContent = this.rows.map((r) => r.text).join('\n')
       return wrap
     }
+    const lines = this.rows.map((r) => r.text)
 
     const parseCells = (line: string): string[] => {
       const trimmed = line.trim().replace(/^\|/, '').replace(/\|$/, '')
@@ -56,6 +99,9 @@ export class TableWidget extends WidgetType {
     headerCells.forEach((cell, i) => {
       const th = document.createElement('th')
       th.innerHTML = renderInlineMarkdown(cell)
+      th.className = 'cm-live-table-cell'
+      th.dataset.line = String(this.rows[0].line)
+      th.dataset.cell = String(i)
       if (aligns[i]) th.style.textAlign = aligns[i]
       headRow.appendChild(th)
     })
@@ -70,6 +116,9 @@ export class TableWidget extends WidgetType {
         headerCells.forEach((_h, i) => {
           const td = document.createElement('td')
           td.innerHTML = renderInlineMarkdown(cells[i] ?? '')
+          td.className = 'cm-live-table-cell'
+          td.dataset.line = String(this.rows[r].line)
+          td.dataset.cell = String(i)
           if (aligns[i]) td.style.textAlign = aligns[i]
           tr.appendChild(td)
         })

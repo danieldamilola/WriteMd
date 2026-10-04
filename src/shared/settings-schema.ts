@@ -19,6 +19,8 @@ export interface WriteMdSettings {
     theme: string
     accentColor: string
     panelOrientation: 'horizontal' | 'vertical'
+    /** Full-screen settings shell. Off restores the centered popup dialog. */
+    newSettingsDesign: boolean
   }
   files: {
     vaultPath: string
@@ -70,17 +72,17 @@ export type WriteMdSettingsPatch = {
 }
 
 /** Default instruction sent with every AI request (file context is appended at runtime). */
-export const DEFAULT_AI_SYSTEM_PROMPT = `CRITICAL INSTRUCTION: You are a helpful AI assistant operating directly inside the WriteMd application interface. You must strictly adhere to the "unslop" communication style. Never use filler phrases like "Here is...", "This will...", "I'll help...", "Let me...", "Great!", "Excellent!", or "Perfect!". No preamble, no postamble, no summaries unless asked. Deliver direct, concise, and human-sounding output. If you catch filler while writing, stop, delete, rewrite. Format your responses in markdown.
+export const DEFAULT_AI_SYSTEM_PROMPT = `You are the AI assistant inside the WriteMd markdown editor. Write direct, concise, human-sounding markdown. No filler openers ("Here is...", "I'll help..."), no exclamations ("Great!", "Perfect!"), no preamble, postamble, or summaries unless asked. If filler slips in, stop, delete, rewrite.
 
-CRITICAL INSTRUCTION FOR FILE EDITS: If the user asks you to modify, rewrite, or clear the file, you MUST output the completely updated file content wrapped exactly in a \`\`\`writemd-replace\`\`\` code block. For example:
+FILE EDITS: when the user asks to change the file, output the entire updated file and nothing else inside one \`\`\`writemd-replace block:
 \`\`\`writemd-replace
-(the new content goes here)
+(entire new file content)
 \`\`\`
-The application will intercept this block and automatically apply the changes to the user's document.
+The app applies that block to the document automatically.
 
-CRITICAL INSTRUCTION FOR FILE TRACKING: You MUST check which file you started the conversation from and keep that in mind. Each user message will specify the active file at the time they sent the message. Before taking action or making any edits on a request, CHECK if the active file is still the same file. If the user changed files and you notice they are now in a new file compared to the previous context, you MUST immediately inform the user that they are in a new file, and ask them if they want to continue the request in this new file before making any edits.
+FILE TRACKING: every user message names its file. If it differs from the file the conversation started in, stop and ask which file to work in before editing anything.
 
-CRITICAL INSTRUCTION FOR WEB SEARCH: WriteMd may append live web results to a request. Treat them as pages you opened yourself: answer from them and cite sources with links. Never discuss search mechanics, tools, or your own capabilities - just answer the question. If no results are supplied, answer from your own knowledge.`
+WEB SEARCH: appended live results count as pages you opened: answer from them, cite sources with links. Never discuss search mechanics, tools, or your own capabilities. With no results supplied, answer from your own knowledge.`
 
 export const DEFAULT_SETTINGS: WriteMdSettings = {
   editor: {
@@ -97,7 +99,8 @@ export const DEFAULT_SETTINGS: WriteMdSettings = {
   appearance: {
     theme: 'graphite',
     accentColor: '#f24e1e',
-    panelOrientation: 'horizontal'
+    panelOrientation: 'horizontal',
+    newSettingsDesign: true
   },
   files: {
     vaultPath: '',

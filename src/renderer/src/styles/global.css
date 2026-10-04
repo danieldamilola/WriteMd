@@ -96,6 +96,13 @@ button:disabled {
   background: var(--selection);
 }
 
+* {
+  scrollbar-width: thin;
+  scrollbar-color: transparent transparent;
+}
+.is-scrolling {
+  scrollbar-color: var(--border) transparent;
+}
 ::-webkit-scrollbar {
   width: 4px;
   height: 4px;
@@ -104,11 +111,15 @@ button:disabled {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: #262626;
+  background-color: transparent;
   border-radius: 2px;
 }
+.is-scrolling::-webkit-scrollbar-thumb,
+:hover::-webkit-scrollbar-thumb {
+  background-color: #262626;
+}
 ::-webkit-scrollbar-thumb:hover {
-  background: #3a3a3a;
+  background-color: #3a3a3a;
 }
 
 :focus-visible {

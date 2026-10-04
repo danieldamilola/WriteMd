@@ -50,6 +50,7 @@ import {
   SecondaryDocState,
   shouldMountSecondaryView
 } from '../state/file-state'
+import { hasOriginalDocUpdate } from '../state/conflict'
 import './Panel'
 import './InfoPill'
 import './DocBar'
@@ -1500,6 +1501,24 @@ ${searchContext}`
             this.content = newDoc
             this.fileState.setContent(newDoc)
           }
+        } else if (
+          isSecondary &&
+          this.secondaryDoc?.isDiff &&
+          update.transactions.some((tr) => hasOriginalDocUpdate(tr))
+        ) {
+          // Accept in the diff view: no document change, only the original
+          // retargeted, but the merge doc is the resolved content and still
+          // needs to reach the file.
+          this.fileState.setSecondaryContent(update.state.doc.toString())
+        } else if (
+          isSecondary &&
+          this.secondaryDoc?.isDiff &&
+          update.transactions.some((tr) => hasOriginalDocUpdate(tr))
+        ) {
+          // Accept in the diff view: no document change, only the original
+          // retargeted, but the merge doc is the resolved content and still
+          // needs to reach the file.
+          this.fileState.setSecondaryContent(update.state.doc.toString())
         }
         if (this.findOpen && (update.docChanged || update.selectionSet)) {
           this.findPanelEl?.refreshCounts()

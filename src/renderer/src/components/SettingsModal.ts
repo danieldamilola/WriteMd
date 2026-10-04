@@ -17,7 +17,14 @@ import {
   normalizeBinding,
   parseBinding
 } from '../state/shortcuts'
-import { TAB_LABELS, searchSettingsTabs, type SettingsTab } from '../state/settings-search'
+import {
+  TAB_LABELS,
+  searchSettingsRows,
+  searchSettingsTabs,
+  searchTargetTab,
+  searchTokens,
+  type SettingsTab
+} from '../state/settings-search'
 
 /**
  * The element that actually holds focus, descending through open shadow roots.
@@ -143,6 +150,12 @@ export class SettingsModal extends LitElement {
       border-color: var(--border);
     }
 
+    .search-status {
+      font-size: 11px;
+      color: var(--text-muted);
+      padding: 6px 2px 0 2px;
+    }
+
     .sidebar-nav {
       padding: 8px;
       display: flex;
@@ -199,6 +212,50 @@ export class SettingsModal extends LitElement {
     /* The hidden attribute loses to the class display rule without this. */
     .nav-btn[hidden] {
       display: none;
+    }
+
+    /* Classic popup: centered dialog over a dimmed app, no shell chrome. */
+    :host(.classic) {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: rgba(0, 0, 0, 0.5);
+    }
+    :host(.classic) .modal-dialog {
+      width: min(900px, 94vw);
+      height: min(700px, 90vh);
+      border: 1px solid var(--border-subtle);
+      border-radius: 12px;
+      box-shadow: var(--shadow-3);
+    }
+    :host(.classic) .sidebar {
+      width: 230px;
+    }
+    :host(.classic) .sidebar-footer,
+    :host(.classic) .win-controls {
+      display: none;
+    }
+    :host(.classic) .main-header {
+      padding: 0 24px;
+    }
+    .modal-dialog .close-btn {
+      display: none;
+      width: 32px;
+      height: 32px;
+      align-items: center;
+      justify-content: center;
+      background: transparent;
+      border: none;
+      color: var(--text-secondary);
+      border-radius: 6px;
+      cursor: pointer;
+    }
+    .modal-dialog .close-btn:hover {
+      background: var(--bg-hover);
+      color: var(--text);
+    }
+    :host(.classic) .modal-dialog .close-btn {
+      display: flex;
     }
 
     /* Main Area */
@@ -296,6 +353,20 @@ export class SettingsModal extends LitElement {
       font-weight: 600;
       color: var(--text);
       margin: 0 0 12px 4px;
+    }
+
+    .beta-badge {
+      display: inline-block;
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      color: var(--accent-text);
+      background: var(--accent);
+      border-radius: 99px;
+      padding: 2px 8px;
+      margin-left: 8px;
+      vertical-align: 2px;
     }
 
     /* Theme Grid */
@@ -462,6 +533,16 @@ export class SettingsModal extends LitElement {
       line-height: 1.5;
     }
 
+    .setting-row.search-hit,
+    .section-title.search-hit {
+      background: var(--bg-hover);
+      box-shadow: inset 3px 0 0 var(--accent);
+    }
+    .setting-row.search-hit-active,
+    .section-title.search-hit-active {
+      background: var(--bg-active);
+    }
+
     .control-btn {
       padding: 6px 12px;
       background: var(--bg-hover);
@@ -596,6 +677,7 @@ export class SettingsModal extends LitElement {
   @state() private appVersion = ''
   @state() private autoCheckForUpdates = true
   @state() private panelOrientation: 'horizontal' | 'vertical' = 'horizontal'
+  @state() private newSettingsDesign = true
   @state() private updateStatus:
     'idle' | 'checking' | 'available' | 'downloading' | 'downloaded' | 'up-to-date' | 'error' =
     'idle'
@@ -714,6 +796,7 @@ export class SettingsModal extends LitElement {
     this.pdfMargin = s.get('export.pdfMargin', 24)
     this.panelOrientation = s.get('appearance.panelOrientation', 'horizontal') as
       'horizontal' | 'vertical'
+    this.newSettingsDesign = s.get<boolean>('appearance.newSettingsDesign', true)
     this.aiProvider = s.get('ai.provider', 'OpenAI')
     this.aiModel = s.get('ai.model', 'gpt-4o')
     this.aiApiKey = s.get('ai.apiKey', '')
@@ -785,30 +868,128 @@ export class SettingsModal extends LitElement {
   }
 
   /**
-   * Jump to the first surviving section so the panel never shows a section
-   * the nav has just hidden.
+   * Route the query to the section that actually holds the match. Auto-save
+   * lives under Files, so section keywords alone kept sending it to Editor,
+   * where nothing matched.
    */
   private handleSearchInput = (e: InputEvent): void => {
     this.searchQuery = (e.target as HTMLInputElement).value
-    const matches = this.matchingTabs()
-    if (matches.length > 0 && !matches.includes(this.tab)) this.tab = matches[0]
+    this.hitIndex = 0
+    const target = searchTargetTab(this.searchQuery)
+    if (target && target !== this.tab) this.tab = target
   }
 
+  /** Enter / ArrowDown step through the matches in the open panel. */
   private handleSearchKey = (e: KeyboardEvent): void => {
-    if (e.key !== 'Enter' && e.key !== 'ArrowDown') return
+    if (e.key !== 'Enter' && e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return
     e.preventDefault()
-    const first = this.matchingTabs()[0]
-    if (first) this.tab = first
+    if (this.searchTokens().length === 0) return
+    if (this.hitRows.length === 0) {
+      const target = searchTargetTab(this.searchQuery)
+      if (target) this.tab = target
+      return
+    }
+    const step = e.key === 'ArrowUp' ? -1 : 1
+    const next = (this.hitIndex + step + this.hitRows.length) % this.hitRows.length
+    this.hitIndex = next
+    this.paintHits()
   }
 
-  /** Tabs matching the search box, used both by the nav filter and tab jump. */
+  /** Tabs worth showing for the current query: section words or row matches. */
   private matchingTabs(): SettingsTab[] {
-    return searchSettingsTabs(this.searchQuery)
+    if (this.searchTokens().length === 0) return searchSettingsTabs('')
+    const sections = searchSettingsTabs(this.searchQuery)
+    const rows = searchSettingsRows(this.searchQuery).map((r) => r.tab)
+    const all = [...new Set([...rows, ...sections])]
+    // Nothing matched: keep the whole nav usable instead of blanking the panel
+    // behind a sidebar of nothing.
+    return all.length > 0 ? all : searchSettingsTabs('')
   }
 
-  /** Sections the search box has not filtered out. */
-  private get visibleTabs(): SettingsTab[] {
+  private searchTokens(): string[] {
+    return searchTokens(this.searchQuery)
+  }
+
+  /** What the search box found, counted the same way the nav filters it. */
+  private matchStatus(): string {
+    const rows = searchSettingsRows(this.searchQuery).length
+    if (rows > 0) return rows === 1 ? '1 matching setting' : `${rows} matching settings`
+    const sections = searchSettingsTabs(this.searchQuery).length
+    if (sections === 1) return '1 matching section'
+    return sections > 1 ? `${sections} matching sections` : 'No matches'
+  }
+
+  private hitsInPanel(): HTMLElement[] {
+    const tokens = this.searchTokens()
+    if (tokens.length === 0) return []
+    const panel = this.renderRoot.querySelector('.content-panel')
+    if (!panel) return []
+    const rows = Array.from(panel.querySelectorAll<HTMLElement>('.setting-row'))
+    const matched = rows.filter((row) => {
+      const text = `${row.textContent ?? ''}`.toLowerCase()
+      return tokens.every((t) => text.includes(t))
+    })
+    if (matched.length > 0) return matched
+    // Descriptions and option values are not in the row index (the system
+    // prompt has no row at all), so fall back to section titles and index
+    // labels before giving up.
+    const titles = Array.from(panel.querySelectorAll<HTMLElement>('.section-title')).filter(
+      (el) => tokens.every((t) => `${el.textContent ?? ''}`.toLowerCase().includes(t))
+    )
+    if (titles.length > 0) return titles
+    const labels = searchSettingsRows(this.searchQuery)
+      .filter((r) => r.tab === this.tab)
+      .map((r) => r.label.toLowerCase())
+    return rows.filter((row) => {
+      const text = `${row.textContent ?? ''}`.toLowerCase()
+      return labels.some((l) => text.includes(l))
+    })
+  }
+
+  /**
+   * Highlight matches after every render. Classes are applied here rather than
+   * through the templates because a match depends on the text of whatever the
+   * panel ended up rendering, including rows built from data (shortcuts).
+   */
+  protected updated(changed: Map<string, unknown>): void {
+    super.updated(changed)
+    this.hitRows = this.hitsInPanel()
+    if (this.hitIndex >= this.hitRows.length) this.hitIndex = 0
+    this.paintHits()
+  }
+
+private hitRows: HTMLElement[] = []
+private hitIndex = 0
+private lastHitKey = ''
+  private paintedHits: HTMLElement[] = []
+
+  private paintHits(): void {
+    // Lit reuses row nodes across renders, so last pass's marks have to be
+    // taken off before the new set goes on.
+    for (const el of this.paintedHits) {
+      el.classList.remove('search-hit', 'search-hit-active')
+    }
+    this.paintedHits = this.hitRows
+    for (let i = 0; i < this.hitRows.length; i++) {
+      this.hitRows[i].classList.add('search-hit')
+      this.hitRows[i].classList.toggle('search-hit-active', i === this.hitIndex)
+    }
+    // Follow the match only when the query, the section, or the active hit
+    // moved: a re-render from toggling a switch must not yank the panel.
+    const key = `${this.tab}|${this.searchQuery}|${this.hitIndex}`
+    if (key === this.lastHitKey) return
+    this.lastHitKey = key
+    this.hitRows[this.hitIndex]?.scrollIntoView({ block: 'center', behavior: 'smooth' })
+  }
+
+/** Sections the search box has not filtered out. */
+private get visibleTabs(): SettingsTab[] {
     return this.matchingTabs()
+  }
+
+  /** A nav header with no buttons left under it is just noise. */
+  private groupVisible(tabs: SettingsTab[]): boolean {
+    return tabs.some((t) => this.visibleTabs.includes(t))
   }
 
   firstUpdated(): void {
@@ -1086,6 +1267,7 @@ export class SettingsModal extends LitElement {
   }
 
   render(): unknown {
+    this.classList.toggle('classic', !this.newSettingsDesign)
     return html`
       <div
         class="modal-dialog"
@@ -1104,9 +1286,12 @@ export class SettingsModal extends LitElement {
               @keydown=${this.handleSearchKey}
               @input=${this.handleSearchInput}
             />
+            ${this.searchQuery.trim() ? html`<div class="search-status">${this.matchStatus()}</div>` : ''}
           </div>
           <div class="sidebar-nav">
-            <div class="nav-group">Workspace</div>
+            <div class="nav-group" ?hidden=${!this.groupVisible(['general', 'editor', 'files'])}>
+              Workspace
+            </div>
             <button
               class="nav-btn ${this.tab === 'general' ? 'active' : ''}"
               ?hidden=${!this.visibleTabs.includes('general')}
@@ -1128,7 +1313,9 @@ export class SettingsModal extends LitElement {
               >
                 ${icon('folder-open')} Files & Vault
               </button>
-              <div class="nav-group">Application</div>
+              <div class="nav-group" ?hidden=${!this.groupVisible(['appearance', 'shortcuts', 'advanced'])}>
+              Application
+            </div>
               <button
                 class="nav-btn ${this.tab === 'appearance' ? 'active' : ''}"
                 ?hidden=${!this.visibleTabs.includes('appearance')}
@@ -1150,7 +1337,7 @@ export class SettingsModal extends LitElement {
               >
                 ${icon('settings')} Advanced
               </button>
-              <div class="nav-group">Plugins</div>
+              <div class="nav-group" ?hidden=${!this.groupVisible(['ai', 'about'])}>Plugins</div>
               <button
                 class="nav-btn ${this.tab === 'ai' ? 'active' : ''}"
                 ?hidden=${!this.visibleTabs.includes('ai')}
@@ -1188,6 +1375,19 @@ export class SettingsModal extends LitElement {
           <div class="main-area">
             <div class="main-header">
               <h2>${this.tab === 'files' ? 'Files & Vault' : TAB_LABELS[this.tab]}</h2>
+              <button class="close-btn" aria-label="Close settings" @click=${this.close}>
+                <svg
+                  viewBox="0 0 24 24"
+                  width="18"
+                  height="18"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                >
+                  <line x1="18" y1="6" x2="6" y2="18" />
+                  <line x1="6" y1="6" x2="18" y2="18" />
+                </svg>
+              </button>
               <div class="win-controls">
                 <button
                   class="win-btn"
@@ -1348,6 +1548,25 @@ export class SettingsModal extends LitElement {
             role="switch"
             aria-checked="${this.panelOrientation === 'vertical'}"
             @click=${() => this.updateSetting('appearance.panelOrientation', this.panelOrientation === 'vertical' ? 'horizontal' : 'vertical')}
+          ></button>
+        </div>
+      </div>
+
+      <div class="section-title">Settings Window</div>
+      <div class="section">
+        <div class="setting-row">
+          <div>
+            <div class="setting-label">New Design <span class="beta-badge">Beta</span></div>
+            <div class="setting-desc">
+              Full-screen settings shell. Off restores the classic popup dialog.
+            </div>
+          </div>
+          <button
+            class="toggle-switch"
+            role="switch"
+            aria-checked="${this.newSettingsDesign}"
+            aria-label="New settings design"
+            @click=${() => this.updateSetting('appearance.newSettingsDesign', !this.newSettingsDesign)}
           ></button>
         </div>
       </div>
