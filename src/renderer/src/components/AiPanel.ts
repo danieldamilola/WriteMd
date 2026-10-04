@@ -76,7 +76,7 @@ export class AiPanel extends LitElement {
      */
     ${scrollbarStyles}
 
-    /* â”€â”€ transcript â”€â”€ */
+    /* Ã¢â€â‚¬Ã¢â€â‚¬ transcript Ã¢â€â‚¬Ã¢â€â‚¬ */
 
     .chat-log {
       flex: 1;
@@ -317,7 +317,7 @@ export class AiPanel extends LitElement {
       max-width: 100%;
     }
 
-    /* â”€â”€ streaming reveal â”€â”€ */
+    /* Ã¢â€â‚¬Ã¢â€â‚¬ streaming reveal Ã¢â€â‚¬Ã¢â€â‚¬ */
 
     /*
      * The spans the streamedText directive creates live in this shadow root, so
@@ -385,7 +385,7 @@ export class AiPanel extends LitElement {
       white-space: nowrap;
     }
 
-    /* â”€â”€ prompt bar â”€â”€ */
+    /* Ã¢â€â‚¬Ã¢â€â‚¬ prompt bar Ã¢â€â‚¬Ã¢â€â‚¬ */
 
     /*
      * The composer is one raised card with the text field above a control row,
@@ -692,7 +692,7 @@ export class AiPanel extends LitElement {
       outline-offset: 1px;
     }
 
-    /* â”€â”€ popovers â”€â”€ */
+    /* Ã¢â€â‚¬Ã¢â€â‚¬ popovers Ã¢â€â‚¬Ã¢â€â‚¬ */
 
     .ai-pop {
       position: absolute;
@@ -708,7 +708,7 @@ export class AiPanel extends LitElement {
       background: var(--bg-elevated);
       box-shadow: var(--shadow-3);
       transform-origin: bottom left;
-      animation: ai-pop-in 140ms cubic-bezier(0.22, 1, 0.36, 1);
+      animation: ai-pop-in var(--motion-fast) var(--motion-ease);
     }
 
     @keyframes ai-pop-in {
@@ -784,7 +784,7 @@ export class AiPanel extends LitElement {
       color: var(--accent);
     }
 
-    /* â”€â”€ unconfigured â”€â”€ */
+    /* Ã¢â€â‚¬Ã¢â€â‚¬ unconfigured Ã¢â€â‚¬Ã¢â€â‚¬ */
 
     /*
      * This used to reuse .empty-state, which is declared in Editor's shadow root

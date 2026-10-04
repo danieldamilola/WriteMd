@@ -18,6 +18,8 @@ import { COMMANDS, bindingFromEvent, bindingsEqual, effectiveBindings } from '..
 import { initAutoHideScrollbars } from '../utils/auto-hide-scrollbars'
 import {
   applyMotionPreference,
+  slideIn,
+  slideOut,
   watchSystemMotionPreference,
   type MotionPreference
 } from '../utils/motion'
@@ -137,6 +139,12 @@ export class WriteMdApp extends LitElement {
   @state() private splitActive = false
   @state() private panelOrientation: 'horizontal' | 'vertical' = 'horizontal'
   @state() private verticalPanelCollapsed = false
+  /**
+   * True between the moment the collapse animation starts and the moment the
+   * rail unmounts. Without it the element would be gone before the animation
+   * could play and the panel would simply vanish.
+   */
+  @state() private verticalPanelLeaving = false
   @state() private tabs: Array<{ path: string | null; dirty: boolean }> = []
   @state() private activeTab = 0
   @state() private secondaryPath: string | null = null
@@ -456,6 +464,38 @@ export class WriteMdApp extends LitElement {
     }
   }
 
+  /**
+   * Collapse or expand the tab rail.
+   *
+   * The rail is unmounted when collapsed, so a collapse has to play before the
+   * state flips and an expand has to play after the element exists. Both go
+   * through the shared engine, which collapses to a single frame when motion is
+   * off, so there is no reduced-motion branch here.
+   */
+  private toggleVerticalPanel = (): void => {
+    const rail = (): HTMLElement | null =>
+      (this.shadowRoot?.querySelector('writemd-vertical-tab-bar') as HTMLElement | null) ?? null
+
+    if (this.verticalPanelCollapsed) {
+      this.verticalPanelCollapsed = false
+      void this.updateComplete.then(() => {
+        void slideIn(rail(), 'x')
+      })
+      return
+    }
+
+    const el = rail()
+    if (!el) {
+      this.verticalPanelCollapsed = true
+      return
+    }
+    this.verticalPanelLeaving = true
+    void slideOut(el, 'x').then(() => {
+      this.verticalPanelCollapsed = true
+      this.verticalPanelLeaving = false
+    })
+  }
+
   private async openFileDialog(): Promise<void> {
     const result = await api()?.file?.openDialog?.({
       properties: ['openFile'],
@@ -541,7 +581,7 @@ export class WriteMdApp extends LitElement {
           @open-menu=${() => (this.showPalette = true)}
           @open-settings=${() => (this.showSettings = true)}
           @toggle-split=${() => this.fileState.toggleSplitView()}
-          @toggle-panel=${() => (this.verticalPanelCollapsed = !this.verticalPanelCollapsed)}
+          @toggle-panel=${this.toggleVerticalPanel}
         >
           <div
             slot="tabs"
@@ -603,10 +643,12 @@ export class WriteMdApp extends LitElement {
           </div>
         </writemd-top-bar>
 
-        <div class="main-area">
+<div class="main-area">
           ${
-            this.panelOrientation === 'vertical' && !this.verticalPanelCollapsed
+            this.panelOrientation === 'vertical' &&
+            (!this.verticalPanelCollapsed || this.verticalPanelLeaving)
               ? html`<writemd-vertical-tab-bar
+                  class=${this.verticalPanelLeaving ? 'leaving' : ''}
                   .tabs=${this.tabs}
                   .activeTab=${this.activeTab}
                   .secondaryPath=${this.secondaryPath}

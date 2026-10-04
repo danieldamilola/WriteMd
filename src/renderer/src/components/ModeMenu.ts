@@ -22,7 +22,7 @@ export class ModeMenu extends LitElement {
       box-sizing: border-box;
       user-select: none;
       transform-origin: bottom right;
-      animation: menu-in 140ms cubic-bezier(0.22, 1, 0.36, 1);
+      animation: menu-in var(--motion-fast) var(--motion-ease);
     }
 
     @keyframes menu-in {

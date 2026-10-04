@@ -27,7 +27,7 @@ import { defaultKeymap, history, historyKeymap } from '@codemirror/commands'
 import { search } from '@codemirror/search'
 import { writeMDTheme } from './EditorTheme'
 import { installFocusReportingFix } from '../utils/focus-reporting'
-import { reducedMotionNow } from '../utils/motion'
+import { conceal } from '../utils/motion'
 import { vscodeHighlight } from './CodeHighlight'
 import {
   livePreviewPlugin,
@@ -205,7 +205,7 @@ export class Editor extends LitElement {
         font-size: 12px;
         box-shadow: 0 6px 20px rgb(0 0 0 / 18%);
         pointer-events: none;
-        animation: notice-in 200ms cubic-bezier(0.22, 1, 0.36, 1);
+        animation: notice-in var(--motion-base) var(--motion-ease);
       }
 
       @keyframes notice-in {
@@ -230,7 +230,17 @@ export class Editor extends LitElement {
         position: relative;
         height: 100%;
         overflow: hidden;
-        transition: flex 200ms cubic-bezier(0.22, 1, 0.36, 1);
+        /*
+         * The left pane's inline style goes from flex:1 to
+         * flex:0 0 calc(50% - 2.5px) when the split opens. The shorthand
+         * expands to grow/shrink/basis and all three interpolate, so this
+         * carries the pane from full width to its share. This used to be a
+         * WAAPI animation on flexBasis alongside this transition: two
+         * mechanisms on one property, and the left pane jumped back out to full
+         * width on the first frame before easing down, which is what read as a
+         * bounce. The incoming pane has its own pane-in for the reveal.
+         */
+        transition: flex var(--motion-base) var(--motion-ease);
       }
 
       :host-context([data-motion='reduced']) {
@@ -293,7 +303,7 @@ export class Editor extends LitElement {
         width: 5px;
         cursor: col-resize;
         background: transparent;
-        transition: background 150ms;
+        transition: background var(--motion-base);
         flex-shrink: 0;
         z-index: 10;
       }
@@ -308,7 +318,7 @@ export class Editor extends LitElement {
       }
 
       .pane-in {
-        animation: pane-in 180ms cubic-bezier(0.22, 1, 0.36, 1);
+        animation: pane-in var(--motion-base) var(--motion-ease);
       }
 
       @keyframes pane-in {
@@ -331,7 +341,7 @@ export class Editor extends LitElement {
       writemd-vault-explorer,
       writemd-surface-launcher,
       writemd-panel .sub-header + * {
-        animation: surface-in 160ms ease-out;
+        animation: surface-in var(--motion-base) var(--motion-ease-out);
       }
 
       @keyframes surface-in {
@@ -431,7 +441,7 @@ export class Editor extends LitElement {
         box-shadow: var(--shadow-3);
         padding: 4px;
         transform-origin: top right;
-        animation: ai-history-in 140ms cubic-bezier(0.22, 1, 0.36, 1);
+        animation: ai-history-in var(--motion-fast) var(--motion-ease);
       }
 
       @keyframes ai-history-in {
@@ -591,6 +601,12 @@ export class Editor extends LitElement {
   @state() private filePath: string | null = null
   @state() private viewMode: ViewMode = 'live'
   @state() private splitActive = false
+  /**
+   * True while the split is playing its exit. The pane stays mounted until the
+   * animation ends, and the left pane keeps its width for the same moment, so
+   * the space is claimed once rather than twice.
+   */
+  @state() private splitLeaving = false
   @state() private splitSurface: SplitSurface = 'launcher'
   @state() private secondaryDoc: SecondaryDocState | null = null
   @state() private textMenu: { x: number; y: number } | null = null
@@ -854,12 +870,19 @@ export class Editor extends LitElement {
       const secondaryPathChanged = this.secondaryDoc?.path !== s.secondaryDoc?.path
       const secondaryModeChanged = this.secondaryDoc?.viewMode !== s.secondaryDoc?.viewMode
 
+      const wasSplitActive = this.splitActive
       this.content = s.content
       this.filePath = s.path
       this.viewMode = normalizedMode
       this.splitActive = s.splitActive
       this.splitSurface = s.splitSurface
       this.secondaryDoc = s.secondaryDoc
+
+      // Closing the split has to keep the pane on screen long enough to leave,
+      // so every path that closes it (the toolbar toggle, the pane's own close
+      // button, Escape) goes through this one place instead of each animating
+      // its own teardown.
+      if (wasSplitActive && !s.splitActive) this.startSplitExit()
 
       // Chat is per document, so switching tabs swaps the transcript. The
       // initial document is handled at setup, above; this is the change case.
@@ -1113,7 +1136,7 @@ export class Editor extends LitElement {
         }
       }
 
-      // Custom instructions from Settings â†’ AI Assistant, with live file context appended
+      // Custom instructions from Settings Ã¢â€ â€™ AI Assistant, with live file context appended
       const customPrompt =
         this.settingsStore.get('ai.systemPrompt', DEFAULT_AI_SYSTEM_PROMPT) ||
         DEFAULT_AI_SYSTEM_PROMPT
@@ -1373,36 +1396,23 @@ ${searchContext}`
       this.secondaryEditorView.destroy()
       this.secondaryEditorView = null
     }
+  }
 
-    // Opening the split snaps the left pane to its new width. `flex` shorthand
-    // does not transition, so drive it with WAAPI against the final basis.
-    if (
-      changedProperties.has('splitActive') &&
-      changedProperties.get('splitActive') === false &&
-      this.splitActive &&
-      !reducedMotionNow()
-    ) {
-      const panels = this.shadowRoot?.querySelectorAll<HTMLElement>('writemd-panel.pane')
-      const left = panels?.[0]
-      if (left) {
-        const finalWidth = left.getBoundingClientRect().width
-        const containerWidth = left.parentElement?.getBoundingClientRect().width ?? finalWidth * 2
-        left.animate([{ flexBasis: `${containerWidth}px` }, { flexBasis: `${finalWidth}px` }], {
-          duration: 320,
-          easing: 'cubic-bezier(0.4, 0, 0.2, 1)'
-        })
-      }
-      const right = panels?.[1]
-      if (right) {
-        right.animate(
-          [
-            { opacity: 0, transform: 'translateX(24px)' },
-            { opacity: 1, transform: 'translateX(0)' }
-          ],
-          { duration: 220, easing: 'cubic-bezier(0.22, 1, 0.36, 1)' }
-        )
-      }
-    }
+  /**
+   * Close the split with motion: the pane leaves first, then the left pane
+   * takes the space. The left pane keeps its width while the exit plays, so the
+   * two never overlap, and its own `transition: flex` carries the expansion
+   * afterwards.
+   */
+  private startSplitExit(): void {
+    if (this.splitLeaving) return
+    this.splitLeaving = true
+    const pane = this.shadowRoot?.querySelector<HTMLElement>('writemd-panel.pane-in') ?? null
+    void conceal(pane).then(() => {
+      this.splitLeaving = false
+      this.secondaryEditorView?.destroy()
+      this.secondaryEditorView = null
+    })
   }
 
   /**
@@ -2082,7 +2092,7 @@ ${searchContext}`
         <div class="panes">
           <writemd-panel
             class="pane"
-            style=${this.splitActive ? `flex: 0 0 calc(${this.leftPaneWidth}% - 2.5px);` : ''}
+            style=${this.splitActive || this.splitLeaving ? `flex: 0 0 calc(${this.leftPaneWidth}% - 2.5px);` : ''}
           >
             ${isVerticalTabs ? '' : html`<writemd-doc-bar></writemd-doc-bar>`}
 
@@ -2118,7 +2128,7 @@ ${searchContext}`
 
           <!-- split view - 2 (Right Pane, only when splitActive is true) -->
           ${
-            this.splitActive
+            (this.splitActive || this.splitLeaving)
               ? html`
                   <div
                     class="resizer ${this.isDraggingResizer ? 'dragging' : ''}"
@@ -2132,7 +2142,7 @@ ${searchContext}`
                     @mousedown=${this.startResize}
                     @keydown=${this.handleResizerKey}
                   ></div>
-                  <writemd-panel class="pane pane-in">
+                  <writemd-panel class="pane pane-in ${this.splitLeaving ? ' pane-leaving' : ''}">
                     ${
                       this.mountsSecondaryView && secondaryDoc
                         ? html`

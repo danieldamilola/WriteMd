@@ -25,10 +25,30 @@ export class WriteMdIconButton extends LitElement {
       cursor: pointer;
       color: var(--text-muted);
       transition:
-        background 120ms ease,
-        color 120ms ease;
+        background var(--motion-fast) var(--motion-ease),
+        color var(--motion-fast) var(--motion-ease),
+        transform var(--motion-instant) var(--motion-ease);
       box-sizing: border-box;
       -webkit-app-region: no-drag;
+    }
+
+    /*
+     * A press is a scale, not another colour. The same 0.985 the app's motion
+     * tokens define, so every control answers a click the same way. Written as
+     * a transform rather than a filter so it stays on the compositor.
+     */
+    button:active {
+      transform: scale(var(--motion-press-scale));
+    }
+
+    :host-context([data-motion='reduced']) button {
+      transition:
+        background var(--motion-fast) var(--motion-ease),
+        color var(--motion-fast) var(--motion-ease);
+    }
+
+    :host-context([data-motion='reduced']) button:active {
+      transform: none;
     }
 
     :host([size='md']) button {

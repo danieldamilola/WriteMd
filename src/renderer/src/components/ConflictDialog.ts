@@ -15,7 +15,7 @@ export class ConflictDialog extends LitElement {
       background: var(--scrim, rgba(0, 0, 0, 0.65));
       backdrop-filter: blur(4px);
       -webkit-backdrop-filter: blur(4px);
-      animation: fadeIn 120ms ease-out;
+      animation: fadeIn var(--motion-fast) var(--motion-ease-out);
     }
 
     @keyframes fadeIn {
@@ -38,7 +38,7 @@ export class ConflictDialog extends LitElement {
       flex-direction: column;
       gap: 16px;
       box-sizing: border-box;
-      animation: slideUp 140ms ease-out;
+      animation: slideUp var(--motion-base) var(--motion-ease-out);
     }
 
     @keyframes slideUp {

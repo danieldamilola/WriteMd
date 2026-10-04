@@ -116,7 +116,7 @@ export class TextMenu extends LitElement {
       }
       .m-panel {
         transform-origin: top left;
-        animation: menu-in 140ms cubic-bezier(0.22, 1, 0.36, 1);
+        animation: menu-in var(--motion-fast) var(--motion-ease);
       }
 
       @keyframes menu-in {
@@ -283,9 +283,9 @@ export class TextMenu extends LitElement {
   }
 
   /**
-   * Insert a website link `[label](https://â€¦)`:
-   * - clipboard holds a URL â†’ use it (selection becomes the label)
-   * - selection itself is a URL â†’ linkify in place as `[url](url)`
+   * Insert a website link `[label](https://Ã¢â‚¬Â¦)`:
+   * - clipboard holds a URL Ã¢â€ â€™ use it (selection becomes the label)
+   * - selection itself is a URL Ã¢â€ â€™ linkify in place as `[url](url)`
    * - otherwise insert `[label](https://)` with the URL selected for typing
    */
   private async insertExternalLink(sel: string): Promise<void> {
@@ -473,7 +473,7 @@ export class TextMenu extends LitElement {
         })),
         {
           id: 'link-browse',
-          label: 'Browse for fileâ€¦',
+          label: 'Browse for fileÃ¢â‚¬Â¦',
           icon: 'folder',
           dividerBefore: this.linkFiles.length > 0
         }
@@ -506,7 +506,7 @@ export class TextMenu extends LitElement {
                     >
                       ${menuIcon(item.icon)}
                       <span>${item.label}</span>
-                      <span class="m-chevron">â€º</span>
+                      <span class="m-chevron">Ã¢â‚¬Âº</span>
                       <div class="submenu ${this.flip ? 'left' : ''}" role="menu">
                         ${item.children.map(
                           (sub) => html`
