@@ -21,19 +21,30 @@ interface MathMatch {
  * rescanned when the document itself changes. The old code rebuilt them on
  * every selection change as well.
  */
+/**
+ * How far before the first change a rescan starts.
+ *
+ * Matches before the change keep their exact positions, so they are kept. A
+ * delimiter pair that straddles the boundary is re-found only if it starts
+ * inside this window, which is why the window exists: a `$$` block larger than
+ * this loses its widget until the next edit, and no hand-written note has one.
+ */
+const RESCAN_MARGIN = 20_000
+
 let cachedDoc: Text | null = null
 let cachedMatches: MathMatch[] = []
 
-function scanMath(doc: Text): MathMatch[] {
+function scanMath(doc: Text, from: number): MathMatch[] {
   const matches: MathMatch[] = []
-  const text = doc.toString()
+  const start = Math.max(0, from)
+  const text = doc.sliceString(start)
 
   const blockRegex = /\$\$([\s\S]*?)\$\$/g
   let match: RegExpExecArray | null
   while ((match = blockRegex.exec(text)) !== null) {
     matches.push({
-      from: match.index,
-      to: match.index + match[0].length,
+      from: start + match.index,
+      to: start + match.index + match[0].length,
       content: match[1].trim(),
       block: true
     })
@@ -41,26 +52,46 @@ function scanMath(doc: Text): MathMatch[] {
 
   const inlineRegex = /\$([^$\n]+?)\$/g
   while ((match = inlineRegex.exec(text)) !== null) {
-    const from = match.index
-    const to = from + match[0].length
+    const from2 = start + match.index
+    const to = from2 + match[0].length
     // Inline math inside a `$$` block belongs to that block, not to itself.
-    if (matches.some((m) => m.block && from >= m.from && to <= m.to)) continue
-    matches.push({ from, to, content: match[1].trim(), block: false })
+    if (matches.some((m) => m.block && from2 >= m.from && to <= m.to)) continue
+    matches.push({ from: from2, to, content: match[1].trim(), block: false })
   }
 
   matches.sort((a, b) => a.from - b.from)
   return matches
 }
 
-function matchesFor(state: EditorState): MathMatch[] {
-  if (state.doc !== cachedDoc) {
-    cachedDoc = state.doc
-    cachedMatches = scanMath(state.doc)
-  }
+function rescanFrom(state: EditorState, from: number): MathMatch[] {
+  const start = Math.max(0, from - RESCAN_MARGIN)
+  const kept = cachedMatches.filter((m) => m.to <= start)
+  const rescanned = scanMath(state.doc, start)
+  cachedDoc = state.doc
+  cachedMatches = [...kept, ...rescanned].sort((a, b) => a.from - b.from)
   return cachedMatches
 }
 
-function getMathDecorations(state: EditorState): DecorationSet {
+function matchesFor(state: EditorState, changedFrom?: number): MathMatch[] {
+  // A changed document is always a new object, so the identity check only
+  // decides whether the cache belongs to this document at all. `changedFrom`
+  // means the caller already established that it does.
+  if (changedFrom === undefined) {
+    if (state.doc !== cachedDoc) {
+      cachedDoc = state.doc
+      cachedMatches = scanMath(state.doc, 0)
+    }
+    return cachedMatches
+  }
+  if (!cachedDoc) {
+    cachedDoc = state.doc
+    cachedMatches = scanMath(state.doc, 0)
+    return cachedMatches
+  }
+  return rescanFrom(state, changedFrom)
+}
+
+function getMathDecorations(state: EditorState, changedFrom?: number): DecorationSet {
   const builder = new RangeSetBuilder<Decoration>()
   const doc = state.doc
   const readOnly = state.facet(readOnlyFacet)
@@ -74,7 +105,7 @@ function getMathDecorations(state: EditorState): DecorationSet {
     }
   }
 
-  for (const m of matchesFor(state)) {
+  for (const m of matchesFor(state, changedFrom)) {
     if (m.from >= m.to) continue
     let active = false
     const startLine = doc.lineAt(m.from).number
@@ -109,7 +140,19 @@ export const mathPlugin = StateField.define<DecorationSet>({
     return getMathDecorations(state)
   },
   update(value, tr) {
-    if (tr.docChanged || tr.selection) {
+    if (tr.docChanged) {
+      // Only an edit of the very document the cache was built from can rescan
+      // partially; anything else (a new file, a restored tab) starts over.
+      if (tr.startState.doc === cachedDoc && cachedMatches.length > 0) {
+        let first = tr.newDoc.length
+        tr.changes.iterChangedRanges((fromA) => {
+          if (fromA < first) first = fromA
+        })
+        return getMathDecorations(tr.state, first)
+      }
+      return getMathDecorations(tr.state)
+    }
+    if (tr.selection) {
       return getMathDecorations(tr.state)
     }
     return value

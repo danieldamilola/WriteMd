@@ -49,6 +49,64 @@ export function cellSourceRange(
   return null
 }
 
+/** Split one table line into trimmed cell texts, renderer semantics. */
+export function parseTableCells(line: string): string[] {
+  const trimmed = line.trim().replace(/^\|/, '').replace(/\|$/, '')
+  return trimmed.split('|').map((c) => c.trim())
+}
+
+/** Per-column alignment declared by the separator row. */
+function parseAligns(sepCells: string[]): Array<'left' | 'center' | 'right' | ''> {
+  return sepCells.map((sep) => {
+    const s = sep.trim()
+    if (s.startsWith(':') && s.endsWith(':')) return 'center'
+    if (s.endsWith(':')) return 'right'
+    if (s.startsWith(':')) return 'left'
+    return ''
+  })
+}
+
+/** Fill an existing `<tr>` with one row's cells. */
+function renderRow(
+  tr: HTMLTableRowElement,
+  cells: string[],
+  columns: number,
+  aligns: Array<'left' | 'center' | 'right' | ''>,
+  docLine: number,
+  tag: 'td' | 'th'
+): void {
+  const existing = Array.from(tr.children) as HTMLElement[]
+  while (existing.length > columns) {
+    tr.removeChild(tr.lastChild as Node)
+    existing.pop()
+  }
+  for (let i = 0; i < columns; i++) {
+    let cell = existing[i]
+    if (!cell) {
+      cell = document.createElement(tag)
+      tr.appendChild(cell)
+    }
+    const html = renderInlineMarkdown(cells[i] ?? '')
+    if (cell.innerHTML !== html) cell.innerHTML = html
+    cell.className = 'cm-live-table-cell'
+    cell.dataset.line = String(docLine)
+    cell.dataset.cell = String(i)
+    cell.style.textAlign = aligns[i] ?? ''
+  }
+}
+
+function makeRow(
+  cells: string[],
+  columns: number,
+  aligns: Array<'left' | 'center' | 'right' | ''>,
+  docLine: number,
+  tag: 'td' | 'th'
+): HTMLTableRowElement {
+  const tr = document.createElement('tr')
+  renderRow(tr, cells, columns, aligns, docLine, tag)
+  return tr
+}
+
 export class TableWidget extends WidgetType {
   constructor(
     readonly rows: TableRow[],
@@ -76,59 +134,75 @@ export class TableWidget extends WidgetType {
     }
     const lines = this.rows.map((r) => r.text)
 
-    const parseCells = (line: string): string[] => {
-      const trimmed = line.trim().replace(/^\|/, '').replace(/\|$/, '')
-      return trimmed.split('|').map((c) => c.trim())
-    }
-
-    const headerCells = parseCells(lines[0])
-
-    // Parse alignment from separator row
-    const sepCells = parseCells(lines[1])
-    const aligns: Array<'left' | 'center' | 'right' | ''> = sepCells.map((sep) => {
-      const s = sep.trim()
-      if (s.startsWith(':') && s.endsWith(':')) return 'center'
-      if (s.endsWith(':')) return 'right'
-      if (s.startsWith(':')) return 'left'
-      return ''
-    })
+    const headerCells = parseTableCells(lines[0])
+    const columns = headerCells.length
+    const aligns = parseAligns(parseTableCells(lines[1]))
 
     const table = document.createElement('table')
     const thead = document.createElement('thead')
-    const headRow = document.createElement('tr')
-    headerCells.forEach((cell, i) => {
-      const th = document.createElement('th')
-      th.innerHTML = renderInlineMarkdown(cell)
-      th.className = 'cm-live-table-cell'
-      th.dataset.line = String(this.rows[0].line)
-      th.dataset.cell = String(i)
-      if (aligns[i]) th.style.textAlign = aligns[i]
-      headRow.appendChild(th)
-    })
-    thead.appendChild(headRow)
+    thead.appendChild(
+      makeRow(headerCells, columns, aligns, this.rows[0].line, 'th')
+    )
     table.appendChild(thead)
 
     if (lines.length > 2) {
       const tbody = document.createElement('tbody')
       for (let r = 2; r < lines.length; r++) {
-        const cells = parseCells(lines[r])
-        const tr = document.createElement('tr')
-        headerCells.forEach((_h, i) => {
-          const td = document.createElement('td')
-          td.innerHTML = renderInlineMarkdown(cells[i] ?? '')
-          td.className = 'cm-live-table-cell'
-          td.dataset.line = String(this.rows[r].line)
-          td.dataset.cell = String(i)
-          if (aligns[i]) td.style.textAlign = aligns[i]
-          tr.appendChild(td)
-        })
-        tbody.appendChild(tr)
+        tbody.appendChild(
+          makeRow(parseTableCells(lines[r]), columns, aligns, this.rows[r].line, 'td')
+        )
       }
       table.appendChild(tbody)
     }
 
     wrap.appendChild(table)
     return wrap
+  }
+
+  /**
+   * Patch the existing table instead of rebuilding it.
+   *
+   * CodeMirror calls this instead of `toDOM` when the widget is replaced by an
+   * equal-shaped one, which is every keystroke inside the table. Rebuilding from
+   * scratch re-created 32 000 cells for a 4000-row table, and that rebuild was
+   * the whole cost of typing in one: a second-long stall per character. Now
+   * only the row that changed is redrawn.
+   */
+  updateDOM(dom: HTMLElement): boolean {
+    const wrap = dom as HTMLElement
+    wrap.dataset.editable = String(this.cellsEditable)
+    if (this.rows.length < 2) return false
+    const tbody = wrap.querySelector('tbody')
+    const theadRow = wrap.querySelector('thead tr')
+    if (!tbody || !theadRow) return false
+
+    const lines = this.rows.map((r) => r.text)
+    const headerCells = parseTableCells(lines[0])
+    const columns = headerCells.length
+    const aligns = parseAligns(parseTableCells(lines[1]))
+
+    renderRow(theadRow as HTMLTableRowElement, headerCells, columns, aligns, this.rows[0].line, 'th')
+
+    const bodyRows = lines.slice(2)
+    const existing = Array.from(tbody.children) as HTMLTableRowElement[]
+    // Remove rows that no longer exist.
+    while (existing.length > bodyRows.length) {
+      tbody.removeChild(tbody.lastChild as Node)
+      existing.pop()
+    }
+    // Redraw only what changed; appending is cheaper than a rebuild.
+    for (let i = 0; i < bodyRows.length; i++) {
+      const docRow = this.rows[i + 2]
+      const cells = parseTableCells(bodyRows[i])
+      if (existing[i]) {
+        renderRow(existing[i], cells, columns, aligns, docRow.line, 'td')
+      } else {
+        const tr = makeRow(cells, columns, aligns, docRow.line, 'td')
+        tbody.appendChild(tr)
+        existing.push(tr)
+      }
+    }
+    return true
   }
 
   ignoreEvent(): boolean {

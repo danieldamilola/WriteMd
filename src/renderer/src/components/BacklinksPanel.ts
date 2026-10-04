@@ -141,15 +141,25 @@ export class BacklinksPanel extends LitElement {
       const vaultPaths: string[] = []
       if (tree) flattenTree(tree, vaultPaths)
       const toRead = [...vaultPaths, ...recent].filter((p) => !contents.has(p))
-      await Promise.all(
-        toRead.map(async (p) => {
+      // Bounded concurrency, not Promise.all over the whole vault. Reading
+      // every note at once meant 1500 simultaneous IPC round trips and reads on
+      // a large vault; 24 in flight keeps the scan quick without letting one
+      // oversized vault starve the process.
+      const CONCURRENCY = 24
+      let cursor = 0
+      const worker = async (): Promise<void> => {
+        while (cursor < toRead.length && id === this.runId) {
+          const p = toRead[cursor++]
           try {
             const result = await api()?.file?.read?.(p)
             if (result && id === this.runId) contents.set(p, result.content)
           } catch {
             // Unreadable or deleted files simply don't participate.
           }
-        })
+        }
+      }
+      await Promise.all(
+        Array.from({ length: Math.min(CONCURRENCY, toRead.length) }, () => worker())
       )
       if (id !== this.runId) return
       const found: BacklinkHit[] = []

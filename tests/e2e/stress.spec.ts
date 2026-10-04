@@ -236,6 +236,80 @@ test.describe('Stress sweep', () => {
     expect(m.worstTask, `the click blocked ${m.worstTask}ms`).toBeLessThan(BUDGET.longTaskMs)
   })
 
+  test('60 mermaid diagrams render without stalling', async () => {
+    await openNote('many-diagrams.md')
+    const m = await measure('render diagrams', async () => {
+      // Mermaid loads on first diagram, so the wait covers the dynamic import.
+      await expect
+        .poll(async () => window.locator('.cm-mermaid-widget svg').count(), { timeout: 60_000 })
+        .toBeGreaterThan(0)
+      const mounted = await window.locator('.cm-mermaid-widget').count()
+      const drawn = await window.locator('.cm-mermaid-widget svg').count()
+      console.log(`DIAGRAMS mounted=${mounted} drawn=${drawn}`)
+      // Scrolling must keep producing diagrams without a stall.
+      await window.locator('.cm-content').first().hover()
+      for (let i = 0; i < 5; i++) await window.mouse.wheel(0, 2500)
+      await expect
+        .poll(async () => window.locator('.cm-mermaid-widget svg').count(), { timeout: 60_000 })
+        .toBeGreaterThan(0)
+    })
+    expect(m.worstTask, `diagram rendering blocked ${m.worstTask}ms`).toBeLessThan(
+      BUDGET.longTaskMs
+    )
+  })
+
+  test('KaTeX and footnotes render in a large note', async () => {
+    await openNote('huge-single.md')
+    const m = await measure('render math and footnotes', async () => {
+      await window.locator('.cm-content').first().hover()
+      for (let i = 0; i < 6; i++) await window.mouse.wheel(0, 2000)
+    })
+    expect(m.worstTask, `scrolling past math blocked ${m.worstTask}ms`).toBeLessThan(
+      BUDGET.longTaskMs
+    )
+  })
+
+  test('the command palette opens and filters instantly', async () => {
+    await openNote('huge-single.md')
+    const m = await measure('open command palette', async () => {
+      await window.keyboard.press('Control+p')
+      const palette = window.locator('writemd-command-palette')
+      await expect(palette).toBeVisible()
+      await palette.locator('input').first().fill('ex')
+      await expect
+        .poll(async () => palette.locator('.item').count(), { timeout: 10_000 })
+        .toBeGreaterThan(0)
+      await window.keyboard.press('Escape')
+    })
+    expect(m.worstTask, `the palette blocked ${m.worstTask}ms`).toBeLessThan(BUDGET.longTaskMs)
+  })
+
+  test('backlinks scan the whole vault', async () => {
+    await openNote('huge-single.md')
+    const m = await measure('scan backlinks over 1500 notes', async () => {
+      await openSurface('Backlinks')
+      const panel = window.locator('writemd-backlinks-panel')
+      await expect(panel).toBeVisible()
+      // The scan reads every note in the vault; it is done when the loading text
+      // clears. `.empty-msg` is also the no-results state, so wait on the text.
+      await expect
+        .poll(() => panel.locator('.empty-msg').first().innerText(), { timeout: 180_000 })
+        .not.toBe('Scanning for links.')
+    })
+    expect(m.ms, `backlink scan took ${m.ms}ms`).toBeLessThan(60_000)
+  })
+
+  test('find is usable in a huge note', async () => {
+    await openNote('huge-single.md')
+    const m = await measure('open find panel', async () => {
+      await window.keyboard.press('Control+f')
+      const panel = window.locator('writemd-find-panel')
+      await expect(panel).toBeVisible()
+      await window.keyboard.press('Escape')
+    })
+    expect(m.worstTask, `opening find blocked ${m.worstTask}ms`).toBeLessThan(BUDGET.longTaskMs)
+  })
+
   test('scrolling a 6 MB document does not block', async () => {
     await measure('scroll huge-single', async () => {
       await openNote('huge-single.md')
@@ -262,10 +336,31 @@ test.describe('Stress sweep', () => {
     expect(m.worstTask, `find blocked ${m.worstTask}ms`).toBeLessThan(BUDGET.longTaskMs)
   })
 
+  /**
+ * Open a split-pane surface from a known state.
+ *
+ * The split button is a switch, not a menu, so a pane left open by an earlier
+ * scenario has to be closed before the launcher will appear.
+ */
+async function openSurface(label: string): Promise<void> {
+    const toggle = window.locator('writemd-icon-button[title="Split view"]')
+    const openPanes = window.locator(
+      'writemd-surface-launcher, writemd-vault-explorer, writemd-backlinks-panel'
+    )
+    for (let i = 0; i < 3; i++) {
+      if ((await openPanes.count()) === 0) break
+      await toggle.click()
+      await window.waitForTimeout(200)
+    }
+    const launcher = window.locator('writemd-surface-launcher')
+    if ((await launcher.count()) === 0) await toggle.click()
+    await expect(launcher).toBeVisible()
+    await launcher.locator('.row', { hasText: label }).click()
+  }
+
   test('the whole vault tree renders inside budget', async () => {
     await measure('render full vault tree', async () => {
-      await window.locator('writemd-icon-button[title="Split view"]').click()
-      await window.locator('writemd-surface-launcher .row', { hasText: 'Files' }).click()
+      await openSurface('Files')
       const explorer = window.locator('writemd-vault-explorer')
       await expect(explorer).toBeVisible()
       // Expand one folder at a time with a fresh query each round. Clicking by
