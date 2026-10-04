@@ -13,6 +13,38 @@ export function renderInlineMarkdown(text: string): string {
   return md.renderInline(text)
 }
 
+/**
+ * Characters that can start inline markdown. A cell without any of them renders
+ * as its own text, which skips a markdown-it parse per cell.
+ *
+ * That parse is the bulk of building a large table: 32 000 cells of plain words
+ * spent over a second in the parser alone.
+ */
+const INLINE_MARKDOWN_HINT = /[*_`[\]!<&~]/
+
+/** Same result as `renderInlineMarkdown`, without the parser when possible. */
+export function renderCell(text: string): string {
+  if (!INLINE_MARKDOWN_HINT.test(text)) return escapeHtml(text)
+  return md.renderInline(text)
+}
+
+function escapeHtml(text: string): string {
+  return text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+}
+
+/**
+ * Rows rendered before the table says so.
+ *
+ * Every cell is a DOM node, so a table with thousands of rows cannot be built
+ * in one pass without a visible stall. The rest of the table stays reachable in
+ * source mode, which the footer says out loud rather than silently truncating.
+ */
+export const MAX_RENDERED_ROWS = 400
+
 /** One non-blank source line of a table, with its 1-based document line number. */
 export interface TableRow {
   text: string
@@ -86,7 +118,7 @@ function renderRow(
       cell = document.createElement(tag)
       tr.appendChild(cell)
     }
-    const html = renderInlineMarkdown(cells[i] ?? '')
+    const html = renderCell(cells[i] ?? '')
     if (cell.innerHTML !== html) cell.innerHTML = html
     cell.className = 'cm-live-table-cell'
     cell.dataset.line = String(docLine)
@@ -145,9 +177,10 @@ export class TableWidget extends WidgetType {
     )
     table.appendChild(thead)
 
-    if (lines.length > 2) {
+    const bodyLimit = Math.min(lines.length, 2 + MAX_RENDERED_ROWS)
+    if (bodyLimit > 2) {
       const tbody = document.createElement('tbody')
-      for (let r = 2; r < lines.length; r++) {
+      for (let r = 2; r < bodyLimit; r++) {
         tbody.appendChild(
           makeRow(parseTableCells(lines[r]), columns, aligns, this.rows[r].line, 'td')
         )
@@ -156,7 +189,23 @@ export class TableWidget extends WidgetType {
     }
 
     wrap.appendChild(table)
+    if (lines.length > bodyLimit) wrap.appendChild(this.buildTruncationNotice(lines.length, bodyLimit))
     return wrap
+  }
+
+  /**
+   * Say what is not on screen instead of quietly showing a short table.
+   *
+   * The omitted rows are still in the document, and source mode still has all
+   * of them; a table that silently stops at row 400 reads as data loss.
+   */
+  private buildTruncationNotice(total: number, shown: number): HTMLElement {
+    const notice = document.createElement('div')
+    notice.className = 'cm-live-table-truncated'
+    notice.setAttribute('role', 'note')
+    const hidden = total - shown
+    notice.textContent = `${hidden} more row${hidden === 1 ? '' : 's'} not shown (${total} total). Switch to source mode to edit them.`
+    return notice
   }
 
   /**
@@ -183,7 +232,8 @@ export class TableWidget extends WidgetType {
 
     renderRow(theadRow as HTMLTableRowElement, headerCells, columns, aligns, this.rows[0].line, 'th')
 
-    const bodyRows = lines.slice(2)
+    const bodyLimit = Math.min(lines.length, 2 + MAX_RENDERED_ROWS)
+    const bodyRows = lines.slice(2, bodyLimit)
     const existing = Array.from(tbody.children) as HTMLTableRowElement[]
     // Remove rows that no longer exist.
     while (existing.length > bodyRows.length) {
@@ -202,7 +252,23 @@ export class TableWidget extends WidgetType {
         existing.push(tr)
       }
     }
+    this.syncTruncationNotice(wrap, lines.length, bodyLimit)
     return true
+  }
+
+  private syncTruncationNotice(wrap: HTMLElement, total: number, shown: number): void {
+    const existing = wrap.querySelector('.cm-live-table-truncated')
+    const hidden = total - shown
+    if (hidden <= 0) {
+      existing?.remove()
+      return
+    }
+    if (existing) {
+      const text = `${hidden} more row${hidden === 1 ? '' : 's'} not shown (${total} total). Switch to source mode to edit them.`
+      if (existing.textContent !== text) existing.textContent = text
+      return
+    }
+    wrap.appendChild(this.buildTruncationNotice(total, shown))
   }
 
   ignoreEvent(): boolean {

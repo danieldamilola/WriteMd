@@ -23,7 +23,7 @@ deterministic, regenerated from scratch each run, and safe to delete.
 | `unicode.md` | emoji, ZWJ, CJK, RTL, combining marks, lone surrogates |
 | `deep-nesting.md` | 40 nested lists, 30 nested quotes, long emphasis runs |
 | `features-*.md` | one file per parser extension (math, tasks, code, footnotes, callouts, frontmatter, images) |
-| `many/` | 1500 notes across 20 folders |
+| `many/` | 1500 notes across 20 folders, plus one folder holding 600 |
 
 ## What the profiler said
 
@@ -66,6 +66,25 @@ just to discover the view was already in sync.
 - **Tables patch instead of rebuild.** CodeMirror replaces a block widget on
   every keystroke inside it, and the table rebuilt all 32 000 cells every time.
   `updateDOM` now redraws only the row that changed.
+- **Table cells skip the parser when there is nothing to parse.** Every cell
+  went through markdown-it even when it was plain words, which was the bulk of
+  the first paint. Cells without an inline-markdown character render as escaped
+  text.
+- **A 4000-row table shows 400 rows and says how many are hidden.** No amount of
+  cleverness makes 32 000 cells cheap to build; the footer states the count and
+  points at source mode, which still has every row.
+- **Find counts to a cap.** Counting walked every match; it now stops at 5000
+  and reports `N of 5000+` rather than a wrong total.
+- **The AI panel stops sending whole files.** The open document was embedded in
+  every question, so a 6 MB note meant a 6 MB payload that no provider accepts.
+  The context is capped at 200 000 characters, the model is told the file was
+  cut, and the cut never lands inside a surrogate pair.
+- **PDF and DOCX export refuse documents over 4 MB** with a message naming the
+  alternative. Both run in one blocking pass on the main process at roughly
+  6 seconds per megabyte, so a large note looked like a hung app. HTML export is
+  not capped.
+- **A folder with more than 300 notes summarizes.** One row says how many are
+  hidden and expands on click, instead of a DOM row per note.
 - **No second serialization.** The editor keeps the exact string the view
   produced and compares against that instead of calling `doc.toString()` again.
 - **Mermaid loads on first diagram**, not at startup, so its layout engines
@@ -81,31 +100,36 @@ Same machine, same fixtures, before and after:
 
 | Scenario | Before | After |
 | --- | --- | --- |
-| Open 6 MB note | 1154 ms | 436 ms |
-| Open 4 MB of 200k-char lines | 9607 ms | 2911 ms |
-| Open 4000-row table | 4690 ms | 1802 ms |
-| Render the whole 1500-file tree | did not finish (click loop timed out) | 3121 ms, no long task |
-| Type 19 chars in a 6 MB note | 9803 ms, worst task 427 ms | 4448 ms, worst task 281 ms |
-| Type 8 chars in a 4000-row table | worst task 1143 ms | worst task 601 ms |
-| Backlink scan over 1500 notes | not measured | 970 ms |
-| 60 Mermaid diagrams | not measured | 2450 ms, no long task |
+| Open 6 MB note | 1154 ms | 630 ms |
+| Open 4 MB of 200k-char lines | 9607 ms | 2755 ms |
+| Open 4000-row table | 4690 ms, worst task 3550 ms | 496 ms, worst task 321 ms |
+| Click inside a 4000-row table | did not return | 94 ms |
+| Type 8 chars in a 4000-row table | worst task 1143 ms | worst task 206 ms |
+| Render the whole 1500-file tree | did not finish (click loop timed out) | 3630 ms, no long task |
+| Expand a 600-note folder | 600 rows of DOM | 1 summary row, 57 ms |
+| Type 19 chars in a 6 MB note | 9803 ms, worst task 427 ms | 4524 ms, worst task 261 ms |
+| Find in a 6 MB note, 14 000 matches | worst task 860 ms | worst task 362 ms |
 | Type 19 chars, CPU samples | 14261 | 2927 |
 | Word count share of typing CPU | 30.9% | 3.5% |
 | Whole-document string copies per keystroke | 4 | 1 |
-| Working set at rest | 757 MB | 570 MB |
-| Restore a 40-tab session | not measured | 1894 ms |
+| Working set at rest | 757 MB | 566 MB |
+| Restore a 40-tab session | not measured | 2016 ms |
+| Backlink scan over 1500 notes | not measured | 985 ms |
+| 60 Mermaid diagrams | not measured | 2434 ms, no long task |
 
-Micro-benchmarks (`tests/stress/perf.test.ts`) on a 6 MB note:
+Micro-benchmarks (`tests/stress/perf.test.ts`) on a 6 MB note, machine otherwise
+idle:
 
 | Operation | Time |
 | --- | --- |
-| `doc.toString()` | 21 ms |
-| Lezer markdown parse | 2590 ms |
-| markdown-it render (export) | 2310 ms |
-| math delimiter scan | 9 ms |
-| save-echo check | 5 ms |
-| word count, old way | 349 ms |
-| word count, new way | ~10 ms |
+| `doc.toString()` | 7 ms |
+| Lezer markdown parse | 749 ms |
+| markdown-it render (export) | 672 ms |
+| html-to-docx, 1 MB of HTML | 5884 ms |
+| math delimiter scan | 4 ms |
+| save-echo check | 2 ms |
+| word count, old way | 115 ms |
+| word count, new way | ~5 ms |
 
 ## Where the time goes now
 
@@ -127,19 +151,23 @@ CodeMirror and Lezer, which is the price of markdown parsing a 6 MB document.
 
 Not fixed, with the numbers so they can be compared later:
 
-- **4000-row tables** still cost about 1.2s to open, because opening builds all
-  32 000 cells once. Per keystroke it is now cheap; the first paint is not.
-- **200 000-character lines** cost about 2.7s to parse, all inside Lezer's inline
-  parser. Nothing in the app is quadratic here.
-- **Find** walks every match to count them: 860ms worst task with 14 000
-  matches in a 6 MB note.
-- **The vault tree renders every row** with no windowing. 1500 files is fine;
-  tens of thousands would need it.
-- **Math delimiters bigger than the 20 KB rescan margin** lose their widget until
-  the next edit.
-- **Export** was measured only through `markdown-it`: 2.3s to render a 6 MB note
-  to HTML before the docx and PDF stages, which are not covered here.
-- **The AI panel** was exercised only by the existing e2e spec, not under load.
+- **200 000-character lines** cost about 2.5s to parse, all inside Lezer's
+  inline parser. Nothing in the app is quadratic here, and the only fix would be
+  a different parser.
+- **A 6 MB note still takes 2.6s of Lezer parse** the first time it is opened
+  far from the cursor, and roughly 250ms of main-thread work per keystroke after
+  that. Bounded, not removed.
+- **Tables over 400 rows show a truncation notice** rather than virtualizing.
+  Row virtualization is the real answer and would need the widget to know the
+  viewport; CodeMirror only calls `updateDOM` when it replaces a widget.
+- **A folder over 300 notes needs one click to show the rest.** Windowing the
+  tree would remove the click and cost a scroll-position implementation.
+- **Math delimiter pairs larger than the 200 KB rescan margin** lose their
+  widget until the next edit.
+- **Export is capped at 4 MB for PDF and DOCX.** Documents above that need HTML,
+  which is fast but not paginated.
+- **The AI panel** is bounded by the context cap, not stress-tested against a
+  real provider: the existing e2e spec mocks the transport.
 
 ## Harness
 

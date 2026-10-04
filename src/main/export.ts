@@ -205,11 +205,34 @@ async function renderInHiddenWindow(html: string): Promise<Buffer> {
   }
 }
 
+/**
+ * Size ceiling for the two binary exports.
+ *
+ * Both build the whole document in one blocking pass on the main process:
+ * measured at roughly 6 seconds per megabyte for the docx conversion, and a
+ * hidden window print for the PDF. A 6 MB note is 35 seconds of a window that
+ * will not repaint, with no way to tell it apart from a hang. HTML export is
+ * not capped; rendering 6 MB to HTML takes well under a second.
+ */
+const BINARY_EXPORT_LIMIT = 4 * 1024 * 1024
+
+function tooLargeForBinaryExport(markdown: string, kind: 'PDF' | 'Word'): string | null {
+  if (markdown.length <= BINARY_EXPORT_LIMIT) return null
+  const mb = (markdown.length / (1024 * 1024)).toFixed(1)
+  return (
+    `This note is ${mb} MB, which ${kind} export cannot handle in one pass ` +
+    `(the limit is 4 MB and the conversion runs at about 6 seconds per MB). ` +
+    `Export as HTML instead, or split the note.`
+  )
+}
+
 export async function exportPdf(
   getWindow: () => BrowserWindowType | null,
   markdown: string,
   docPath: string | null
 ): Promise<ExportResult> {
+  const tooLarge = tooLargeForBinaryExport(markdown, 'PDF')
+  if (tooLarge) return { ok: false, reason: tooLarge }
   const filePath = await showExportSaveDialog(
     getWindow,
     defaultExportPath(docPath, 'pdf'),
@@ -339,6 +362,8 @@ export async function exportDocx(
   if (!markdown || markdown.trim() === '') {
     return { ok: false, reason: 'Document is empty' }
   }
+  const tooLarge = tooLargeForBinaryExport(markdown, 'Word')
+  if (tooLarge) return { ok: false, reason: tooLarge }
   const title = titleFromPath(docPath)
   const body = md.render(markdown)
   const rawHtml = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${escapeHtml(title)}</title></head><body><article>${body}</article></body></html>`

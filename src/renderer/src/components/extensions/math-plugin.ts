@@ -29,7 +29,7 @@ interface MathMatch {
  * inside this window, which is why the window exists: a `$$` block larger than
  * this loses its widget until the next edit, and no hand-written note has one.
  */
-const RESCAN_MARGIN = 20_000
+const RESCAN_MARGIN = 200_000
 
 let cachedDoc: Text | null = null
 let cachedMatches: MathMatch[] = []

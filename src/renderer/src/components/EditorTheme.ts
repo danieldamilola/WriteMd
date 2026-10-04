@@ -415,6 +415,13 @@ export const writeMDTheme: Extension = EditorView.theme({
     borderRadius: '3px',
     fontSize: '13px'
   },
+  '.cm-live-table-truncated': {
+    display: 'block',
+    padding: '8px 2px 2px 2px',
+    fontSize: '12px',
+    color: 'var(--text-muted)',
+    fontStyle: 'italic'
+  },
   /* Table: source mode lines break out of max-width and do not wrap */
   '.cm-line.cm-line-table-row': {
     whiteSpace: 'pre !important',

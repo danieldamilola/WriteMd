@@ -213,6 +213,17 @@ const r = rng(20240607)
     bytes += Buffer.byteLength(body)
   }
   console.log(`${'many/* (notes)'.padEnd(28)} ${String(written).padStart(9)} files, ${(bytes / 1024).toFixed(0)} KB`)
+
+  // One folder deeper than the explorer's row cap, so the summarized branch is
+  // exercised rather than assumed.
+  const bulk = quick ? 40 : 600
+  const bulkDir = join(ROOT, 'many', 'bulk')
+  mkdirSync(bulkDir, { recursive: true })
+  for (let i = 0; i < bulk; i++) {
+    const body = `# Bulk note ${i}\n\n${paragraph(r, 2)}\n`
+    writeFileSync(join(bulkDir, `bulk-${String(i).padStart(4, '0')}.md`), body, 'utf-8')
+  }
+  console.log(`${'many/bulk/*'.padEnd(28)} ${String(bulk).padStart(9)} files in one folder`)
 }
 
 // 9. One file per parser extension, so a stress run also covers features.

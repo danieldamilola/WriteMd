@@ -104,6 +104,31 @@ function describeAiError(e: unknown): string {
   return (match ? match[1] : raw).trim() || 'The request failed.'
 }
 
+/**
+ * How much of the open file rides along with an AI question.
+ *
+ * The full document used to be embedded in every request. That is a 6 MB string
+ * copy per question on a large note, and a payload no provider accepts, so the
+ * context is capped and the model is told the file was cut rather than left to
+ * assume it saw all of it. About 200 000 characters, roughly 50k tokens.
+ */
+export const AI_DOC_CONTEXT_LIMIT = 200_000
+
+export function documentContextFor(content: string): { text: string; note: string } {
+  if (content.length <= AI_DOC_CONTEXT_LIMIT) return { text: content, note: '' }
+  let cut = AI_DOC_CONTEXT_LIMIT
+  // Never end on half a surrogate pair: a lone surrogate in a request is
+  // invalid UTF-16 and some providers reject the whole payload over it.
+  const next = content.charCodeAt(cut)
+  if (next >= 0xdc00 && next <= 0xdfff) cut -= 1
+  const kept = content.slice(0, cut)
+  const totalMb = Math.round(content.length / (1024 * 1024))
+  return {
+    text: kept,
+    note: `Only the first ${Math.round(cut / 1024)} KB of this ${totalMb} MB file are shown below.\n\n`
+  }
+}
+
 /** Relative for anything recent, absolute beyond a week. */
 function formatWhen(ts: number): string {
   const diff = Date.now() - ts
@@ -1090,13 +1115,18 @@ export class Editor extends LitElement {
       const customPrompt =
         this.settingsStore.get('ai.systemPrompt', DEFAULT_AI_SYSTEM_PROMPT) ||
         DEFAULT_AI_SYSTEM_PROMPT
+      // The whole file used to go out with every question. A 6 MB note meant a
+      // 6 MB payload on the renderer's main thread and a request every provider
+      // rejects for size, so the context is capped and says so. Roughly 200k
+      // characters, which is about 50k tokens.
+      const docContext = documentContextFor(this.content)
       const systemPrompt = `${customPrompt}
 
 The user is currently editing the file: ${currentPath}
-Here is the current content of the active file:
+${docContext.note}Here is the current content of the active file:
 
 \`\`\`markdown
-${this.content}
+${docContext.text}
 \`\`\`
 
 If the user asks questions about their file, use the above content to answer.

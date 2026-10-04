@@ -382,6 +382,31 @@ async function openSurface(label: string): Promise<void> {
     expect(m.worstTask, `tree render blocked ${m.worstTask}ms`).toBeLessThan(BUDGET.treeLongTaskMs)
   })
 
+  test('a folder with 600 notes summarizes instead of rendering every row', async () => {
+    const m = await measure('expand a 600-note folder', async () => {
+      await openSurface('Files')
+      const explorer = window.locator('writemd-vault-explorer')
+      await expect(explorer).toBeVisible()
+      // Walk down the chain: each folder only exists once its parent is open.
+      for (const name of ['_stress', 'many', 'bulk']) {
+        const row = explorer.locator('.node-row[data-action="dir"]', { hasText: name })
+        await expect(row).toBeVisible()
+        if ((await row.getAttribute('aria-expanded')) === 'false') await row.click()
+      }
+      // The cap replaces the overflow with one row that says how much is left.
+      const more = explorer.locator('.more-row')
+      await expect(more).toHaveCount(1)
+      await expect(more).toContainText('600 total')
+      const rowsBefore = await explorer.locator('.node-row').count()
+      expect(rowsBefore).toBeLessThan(400)
+      await more.click()
+      await expect(more).toHaveCount(0)
+    })
+    expect(m.worstTask, `expanding the folder blocked ${m.worstTask}ms`).toBeLessThan(
+      BUDGET.longTaskMs
+    )
+  })
+
   test('typing with 40 tabs open stays responsive', async () => {
     await window.locator('.cm-content').first().click()
     await window.keyboard.press('Control+End')

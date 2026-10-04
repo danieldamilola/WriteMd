@@ -34,6 +34,19 @@ function time<T>(label: string, fn: () => T, budgetMs: number): T {
   return result
 }
 
+/** Same, for work that returns a promise. */
+async function timeAsync(
+  label: string,
+  fn: () => Promise<unknown>,
+  budgetMs: number
+): Promise<void> {
+  const started = performance.now()
+  await fn()
+  const ms = performance.now() - started
+  console.log(`${label.padEnd(44)} ${ms.toFixed(1).padStart(9)} ms`)
+  expect(ms, `${label} took ${ms.toFixed(1)}ms (budget ${budgetMs}ms)`).toBeLessThan(budgetMs)
+}
+
 describe('stress: hot paths', () => {
   it('serializes a 6 MB document without collapsing', () => {
     const doc = fixture('huge-single.md')
@@ -86,6 +99,26 @@ describe('stress: hot paths', () => {
     const md = createDocumentMarkdownIt()
     time('markdown-it render, 6 MB', () => md.render(doc), 25_000)
   })
+
+  it('converts rendered HTML to docx', async () => {
+    const doc = fixture('huge-single.md')
+    if (!present || !doc) return
+    const md = createDocumentMarkdownIt()
+    // One megabyte is already an unusual note. The point is the slope: docx
+    // conversion is what decides whether export needs a size guard.
+    const html = md.render(doc.slice(0, 1_000_000))
+    console.log(`html size ${(html.length / 1024).toFixed(0)} KB`)
+    await timeAsync(
+      'html-to-docx, 1 MB of HTML',
+      async () => {
+        const mod = await import('@turbodocx/html-to-docx')
+        await (mod as { default: (h: string, o?: unknown) => Promise<unknown> }).default(html, {
+          orientation: 'portrait'
+        })
+      },
+      60_000
+    )
+  }, 120_000)
 
   it('scans math delimiters without going quadratic', () => {
     // Worst case for a lazy `$$...$$` scan: many opening delimiters, no close.
