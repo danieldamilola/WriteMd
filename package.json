@@ -46,7 +46,7 @@
     "@electron-toolkit/preload": "^3.0.2",
     "@electron-toolkit/utils": "^4.0.0",
     "@lezer/common": "^1.5.3",
-    "@lezer/highlight": "^1.2.3",
+    "@lezer/highlight": "^1.2.5",
     "@lezer/markdown": "^1.7.2",
     "@turbodocx/html-to-docx": "^1.22.0",
     "electron-log": "^5.4.4",
