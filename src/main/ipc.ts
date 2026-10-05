@@ -364,6 +364,10 @@ export function setupIpc(getWindow: () => BrowserWindow | null): void {
       throw new Error(`Refusing to use that folder as the vault: ${vaultPath}`)
     }
     await setVaultPath(vaultPath)
+    // Deliberately not seeded with the welcome note, though this folder may
+    // also be new. Pointing the vault at a specific directory is a deliberate
+    // act by someone who already has notes; a file appearing there unasked is
+    // the surprise this app is built to avoid.
     ensureVaultExists()
   })
   ipcMain.handle('vault:ensure-exists', () => ensureVaultExists())

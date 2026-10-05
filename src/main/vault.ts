@@ -56,12 +56,35 @@ export async function setVaultPath(vaultPath: string): Promise<void> {
   vaultPathCache = vaultPath
 }
 
-export function ensureVaultExists(): string {
+export interface VaultReady {
+  path: string
+  /**
+   * True when this call had to create the directory. Onboarding keys off this:
+   * a vault that already existed is somebody's real notes, however empty it
+   * looks, and must never gain a file the app put there.
+   */
+  created: boolean
+}
+
+/**
+ * Create the vault root if it is missing, and report whether it was ours.
+ *
+ * `created` is what distinguishes a first run from a vault in progress. The
+ * directory being absent is the only honest signal: it cannot be faked by a
+ * folder the user emptied, and it cannot be missed by a folder that already has
+ * notes in it.
+ */
+export function ensureVault(): VaultReady {
   const vaultDir = getVaultPath()
   if (!existsSync(vaultDir)) {
     mkdirSync(vaultDir, { recursive: true })
+    return { path: vaultDir, created: true }
   }
-  return vaultDir
+  return { path: vaultDir, created: false }
+}
+
+export function ensureVaultExists(): string {
+  return ensureVault().path
 }
 
 export function listMarkdownFiles(dir: string): { name: string; path: string }[] {
