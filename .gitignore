@@ -33,3 +33,8 @@ test-results.txt
 # src/**/blog.settings.ts). Use `*.log` and `*.log.*` instead.
 *.log
 *.log.*
+
+# The folder WriteMd itself creates for pasted and dropped images. Anything that
+# lands here is scratch from a paste, not project content, so it should never be
+# committed. README screenshots live in docs/screenshots/ instead.
+/_assets/

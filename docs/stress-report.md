@@ -145,7 +145,7 @@ idle:
   silently, in every live-preview document. `ignoreEvent` now claims mousedown
   and click, the way the task checkbox already did.
 - **Links and checkboxes had no e2e coverage at all**, which is why the above
-  survived. `phases.md` lists "E2E coverage for links and backlinks" as
+  survived. `docs/phases.md` lists "E2E coverage for links and backlinks" as
   outstanding; wiki-link following and task toggling are now covered.
 
 ## Where the time goes now

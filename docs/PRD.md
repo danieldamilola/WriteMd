@@ -1,6 +1,6 @@
 # PRD: WriteMd - Frictionless Markdown Editor
 
-## 1. Product Vision By daniel and also
+## 1. Product Vision
 
 **WriteMd** is a local-first markdown editor that opens **any `.md` file directly** - no vault, no import, no copy-paste. Double-click a file, edit in a beautiful WYSIWYG interface, save. Done.
 
@@ -10,9 +10,7 @@
 
 ---
 
-hello world hello
-
-## 2. Problem Statement car
+## 2. Problem Statement
 
 | Current Tool           | Pain Point                                                                      |
 | ---------------------- | ------------------------------------------------------------------------------- |
@@ -559,7 +557,7 @@ writemd/
 
 This section is the original plan, kept for reference. It is not a status
 tracker: most of it shipped and the checkboxes were never updated. For actual
-progress see `phases.md` and the release notes. Two corrections worth carrying
+progress see `phases.md` (this directory) and the release notes. Two corrections worth carrying
 forward: the theme system ships 7 themes, not 5, and settings persist to
 `config.json`, not IndexedDB.
 

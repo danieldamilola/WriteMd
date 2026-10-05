@@ -5,7 +5,7 @@
 - **One Icon Set**: The 74 hand-pasted inline SVGs are replaced by a single 64-glyph module. The same glyph used to be drawn on grids of 8 through 22 at stroke widths from 1.2 to 3, and only 2 of the 74 set round caps, which is why parts of the interface looked heavier than others. Icons now come from Line Awesome by Icons8 (MIT), with the AI glyph from their `nrk_ai-solid-expressive` set, chosen by measuring each candidate against the rest. Menus and the toolbar draw from the same table, so they cannot drift apart again.
 - **Quicker Tab Strip**: The strip scrolls instead of clipping tabs past the window edge, reveals the active tab after the node is replaced, and only shows a close button on the tab you are in. Inactive tabs reveal theirs on hover.
 - **Editable AI System Prompt Validation**: The prompt and settings that reach the model are now validated against the schema rather than written and ignored.
-- **The AI Assistant Panel**: Chat tab, streaming replies (token by token, every provider), a composer that grows with its draft, attachments (dialog or drag & drop), and per-document transcript history. See `AI_PANEL_WORKLOG.md` for the full detail.
+- **The AI Assistant Panel**: Chat tab, streaming replies (token by token, every provider), a composer that grows with its draft, attachments (dialog or drag & drop), and per-document transcript history. See `docs/AI_PANEL_WORKLOG.md` for the full detail.
 - **Working Settings Toggles**: Auto-save, line numbers, and word wrap were drawn in Settings but read by nothing, so three visible switches did nothing. They are wired through, along with highlight-active-line, tab size, and Mermaid. Speculative controls with no reader were removed rather than left dead.
 
 **Bug Fixes**
