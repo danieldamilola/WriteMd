@@ -17,17 +17,27 @@ const VISIBLE_MS = 900
 
 const timers = new WeakMap<Element, number>()
 /**
- * Roots with a live listener, held weakly.
+ * Membership, held weakly, so checking a root costs nothing and retains nothing.
  *
- * Every Lit element creates a shadow root, and this app mounts and unmounts the
- * settings modal, the command palette and the conflict dialog on demand. A
- * strong Set pinned each of those detached roots, and the subtrees behind them,
- * for the life of the process. A `WeakRef` lets a root nobody holds any more be
- * collected; the entry is only useful while the root is alive.
+ * A strong `Set` here pinned every shadow root the app ever created, and the
+ * subtrees behind them, for the life of the process. This app mounts and unmounts
+ * the settings modal, the command palette and the conflict dialog on demand, so
+ * that was a leak on a routine path.
+ */
+const attached = new WeakSet<Document | ShadowRoot>()
+
+/**
+ * The same roots, as refs, so teardown can still reach them.
+ *
+ * Only walked by `initAutoHideScrollbars`' teardown. `attachRoot` runs on every
+ * shadow root creation, so it uses the `WeakSet` above rather than scanning this
+ * one: an O(n) scan with an array allocation per attached shadow root is a cost
+ * paid by every Lit component the app renders.
  */
 const roots = new Set<WeakRef<Document | ShadowRoot>>()
 
-function liveRoots(): Array<Document | ShadowRoot> {
+/** Drop collected entries and return the roots still alive. */
+function drainLiveRoots(): Array<Document | ShadowRoot> {
   const alive: Array<Document | ShadowRoot> = []
   for (const ref of Array.from(roots)) {
     const root = ref.deref()
@@ -53,7 +63,8 @@ function onScroll(event: Event): void {
 }
 
 function attachRoot(root: Document | ShadowRoot): void {
-  if (liveRoots().includes(root)) return
+  if (attached.has(root)) return
+  attached.add(root)
   roots.add(new WeakRef(root))
   root.addEventListener('scroll', onScroll, true)
 }
@@ -95,7 +106,13 @@ export function initAutoHideScrollbars(root: Document = document): () => void {
   adoptExistingRoots(root)
   return () => {
     restoreAttachShadow()
-    for (const r of liveRoots()) r.removeEventListener('scroll', onScroll, true)
+    for (const r of drainLiveRoots()) {
+      r.removeEventListener('scroll', onScroll, true)
+      // Membership has to be cleared too. A second init after teardown would
+      // otherwise find every root still "attached" and install no listener at
+      // all, leaving the scrollbars permanently hidden.
+      attached.delete(r)
+    }
     roots.clear()
   }
 }
