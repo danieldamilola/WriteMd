@@ -14,6 +14,48 @@ function notesForVersion(version: string): string | null {
   return null
 }
 
+/**
+ * A few lines of an update's notes, for the hover card on the toolbar button.
+ *
+ * The notes files open with `# Release Notes - v1.3.0`, then a `**Features**`
+ * heading and one `- **Bold title**: prose...` bullet per feature. The bold
+ * lead-in is the only part worth a hover card, so those are lifted out and the
+ * prose dropped. Falls back to the first prose lines when a release has no
+ * feature bullets, so an unusual notes file still says something.
+ */
+export function summarizeNotes(markdown: string, maxItems = 3): string[] {
+  const withoutTitle = markdown.replace(/^#\s+.*\n+/, '')
+
+  const bullets: string[] = []
+  for (const line of withoutTitle.split('\n')) {
+    const bullet = /^\s*[-*]\s+\*\*(.+?)\*\*/.exec(line)
+    if (bullet) bullets.push(bullet[1].trim())
+    if (bullets.length >= maxItems) return bullets
+  }
+  if (bullets.length > 0) return bullets
+
+  // No feature bullets: take the first few prose lines that are not headings.
+  // A `**Features**` section marker is a heading written in bold, and would
+  // otherwise survive the `*_#-` strip as the fragment `Features**`.
+  const prose: string[] = []
+  for (const line of withoutTitle.split('\n')) {
+    const trimmed = line.trim()
+    if (/^\*\*.+\*\*:?$/.test(trimmed)) continue
+    const text = trimmed.replace(/^[*_#-]+\s*/, '').trim()
+    if (!text || text.startsWith('**')) continue
+    prose.push(text)
+    if (prose.length >= maxItems) break
+  }
+  return prose
+}
+
+/** The summarized notes for a version that is not running yet, if bundled. */
+export function summarizeNotesForVersion(version: string, maxItems = 3): string[] {
+  if (!version) return []
+  const md = notesForVersion(version)
+  return md ? summarizeNotes(md, maxItems) : []
+}
+
 interface WhatsNewElement extends HTMLElement {
   open: boolean
   version: string

@@ -9,6 +9,7 @@ import { emit } from '../events/bus'
 import { showConfirm } from './ConfirmDialog'
 import { icon } from './icons'
 import { scrollbarStyles } from './scrollbars'
+import { summarizeNotesForVersion } from '../services/whats-new'
 import {
   COMMANDS,
   commandTitle,
@@ -686,6 +687,8 @@ export class SettingsModal extends LitElement {
   @state() private updateVersion = ''
   @state() private updateError = ''
   @state() private downloadProgress = 0
+  /** Set once a check reports the newest release was declined earlier. */
+  @state() private skippedVersion = ''
   @state() private capturingId: string | null = null
   @state() private conflictMsg = ''
 
@@ -1228,6 +1231,12 @@ export class SettingsModal extends LitElement {
       if (result && 'error' in result) {
         this.updateStatus = 'error'
         this.updateError = result.error
+      } else if (result && 'skipped' in result) {
+        // An update exists but this one was declined earlier. Saying so beats
+        // "up to date", which would be a lie.
+        this.updateStatus = 'up-to-date'
+        this.updateVersion = ''
+        this.skippedVersion = result.skipped
       } else if (!result || !result.updateInfo) {
         this.updateStatus = 'up-to-date'
       }
@@ -1235,6 +1244,16 @@ export class SettingsModal extends LitElement {
       this.updateStatus = 'error'
       this.updateError = e instanceof Error ? e.message : String(e)
     }
+  }
+
+  /** Stop offering the current version; the next release prompts again. */
+  private handleSkipUpdate(): void {
+    const version = this.updateVersion
+    if (!version) return
+    this.settingsStore.set('updates.skippedVersion', version)
+    this.skippedVersion = version
+    this.updateStatus = 'up-to-date'
+    this.updateVersion = ''
   }
 
   private async handleDownloadUpdate(): Promise<void> {
@@ -2100,9 +2119,11 @@ export class SettingsModal extends LitElement {
         case 'downloaded':
           return this.updateVersion ? `Update v${this.updateVersion} ready` : 'Update ready'
         case 'up-to-date':
-          return 'You are up to date'
+          // "Up to date" would be false if the user declined this release, so
+          // say what actually happened.
+          return this.skippedVersion ? `v${this.skippedVersion} skipped` : 'You are up to date'
         case 'error':
-          return this.updateError || 'Update check failed'
+          return 'Update check failed'
         default:
           return 'Check for new versions'
       }
@@ -2180,6 +2201,31 @@ export class SettingsModal extends LitElement {
               </div>`
             : ''
         }
+        ${this.renderIncomingNotes()}
+      </div>
+    `
+  }
+
+  /**
+   * What the pending update contains. The notes ship in the bundle, so this
+   * works offline and needs no GitHub round trip; a release with no notes file
+   * simply renders nothing.
+   */
+  private renderIncomingNotes(): unknown {
+    if (this.updateStatus !== 'available' || !this.updateVersion) return ''
+    const notes = summarizeNotesForVersion(this.updateVersion)
+    if (notes.length === 0) return ''
+    return html`
+      <div class="setting-desc" style="padding: 0 0 8px 0;">
+        <div style="color: var(--text-secondary); margin-bottom: 4px;">
+          What's new in v${this.updateVersion}
+        </div>
+        <ul style="margin: 0; padding-left: 18px;">
+          ${notes.map((note) => html`<li style="margin-bottom: 3px;">${note}</li>`)}
+        </ul>
+        <button class="control-btn" style="margin-top: 8px;" @click=${this.handleSkipUpdate}>
+          Skip this version
+        </button>
       </div>
     `
   }

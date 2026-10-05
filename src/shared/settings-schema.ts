@@ -55,6 +55,12 @@ export interface WriteMdSettings {
   updates: {
     autoCheckForUpdates: boolean
     lastSeenWhatsNewVersion: string
+    /**
+     * Version the user dismissed, so a declined update does not reappear on
+     * every launch. A newer version string does not match, so the next
+     * release prompts again.
+     */
+    skippedVersion: string
   }
   shortcuts: {
     bindings: Record<string, string>
@@ -136,7 +142,8 @@ export const DEFAULT_SETTINGS: WriteMdSettings = {
   },
   updates: {
     autoCheckForUpdates: true,
-    lastSeenWhatsNewVersion: ''
+    lastSeenWhatsNewVersion: '',
+    skippedVersion: ''
   },
   shortcuts: {
     bindings: {}

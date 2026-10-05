@@ -9,6 +9,11 @@ jobs:
   build:
     runs-on: ${{ matrix.os }}
     strategy:
+      # Was default (true), so the macOS job failing at `pnpm install` cancelled
+      # windows and ubuntu mid-build. The v1.3.0 release ended up published with
+      # no latest.yml because the Windows job never reached its upload step, and
+      # the updater then 404s looking for it.
+      fail-fast: false
       matrix:
         os: [windows-latest, macos-latest, ubuntu-latest]
 

@@ -3,6 +3,7 @@ import log from 'electron-log'
 import { ipcMain, BrowserWindow } from 'electron'
 import type { UpdaterState } from '../shared/electron-api'
 import { getSettings } from './settings'
+import { humanizeUpdaterError } from './updater-error'
 
 let snapshot: UpdaterState = { status: 'idle', version: '', percent: 0, error: '' }
 
@@ -17,7 +18,16 @@ export function setupUpdater(getWindow: () => BrowserWindow | null): void {
   autoUpdater.autoDownload = false // Ask before downloading
 
   autoUpdater.on('update-available', (info) => {
-    setSnapshot({ status: 'available', version: info?.version ?? '', error: '' })
+    // The renderer persists a declined version. Honoured here rather than in
+    // the UI so the button does not appear and then vanish, and so the manual
+    // check in Settings reports the same thing the toolbar does.
+    const version = info?.version ?? ''
+    if (version && version === getSettings().updates.skippedVersion) {
+      log.info(`Update v${version} was skipped by the user; not offering it`)
+      setSnapshot({ status: 'idle', version: '', percent: 0, error: '' })
+      return
+    }
+    setSnapshot({ status: 'available', version, percent: 0, error: '' })
     getWindow()?.webContents.send('updater:update-available', info)
   })
 
@@ -37,7 +47,9 @@ export function setupUpdater(getWindow: () => BrowserWindow | null): void {
   })
 
   autoUpdater.on('error', (err) => {
-    const message = err?.message || 'Update error'
+    // Full detail to the log, one sentence to the renderer.
+    log.error('Updater error', err)
+    const message = humanizeUpdaterError(err)
     setSnapshot({ status: 'error', error: message })
     getWindow()?.webContents.send('updater:error', message)
   })
@@ -51,10 +63,16 @@ export function setupUpdater(getWindow: () => BrowserWindow | null): void {
       if (result == null) {
         setSnapshot({ status: 'idle' })
       }
+      const version = result?.updateInfo?.version ?? ''
+      if (version && version === getSettings().updates.skippedVersion) {
+        // The event handler already cleared the snapshot; this only stops the
+        // returning payload from reading as "here is your update".
+        return { skipped: version }
+      }
       return { updateInfo: result?.updateInfo }
     } catch (e) {
       log.error('Check for updates failed', e)
-      const message = e instanceof Error ? e.message : String(e)
+      const message = humanizeUpdaterError(e)
       setSnapshot({ status: 'error', error: message })
       return { error: message }
     }

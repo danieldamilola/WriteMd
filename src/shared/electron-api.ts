@@ -273,7 +273,13 @@ export interface ElectronAPI {
     docx: (markdown: string, docPath: string | null) => Promise<ExportResult>
   }
   updater: {
-    check: () => Promise<{ updateInfo: UpdateInfo } | { error: string } | null>
+    /**
+     * `skipped` comes back when the newest release matches a version the user
+     * declined. The update exists; it is just not being offered.
+     */
+    check: () => Promise<
+      { updateInfo: UpdateInfo } | { error: string } | { skipped: string } | null
+    >
     download: () => Promise<string[]>
     install: () => void
     getState: () => Promise<UpdaterState>

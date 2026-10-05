@@ -82,7 +82,17 @@ function extract(zipPath, distDir, exeName) {
 
 async function main() {
   const electronDir = path.join(__dirname, '..', 'node_modules', 'electron')
-  const exeName = PLATFORM === 'win32' ? 'electron.exe' : 'electron'
+  // The path inside the zip is not the executable name on macOS: the archive
+  // holds Electron.app/Contents/MacOS/Electron. Checking for a flat `electron`
+  // there meant the extraction "succeeded", the presence check failed, and
+  // postinstall exited 1, which failed `pnpm install` on every macOS runner and
+  // took the release job with it.
+  const exeName =
+    PLATFORM === 'win32'
+      ? 'electron.exe'
+      : PLATFORM === 'darwin'
+        ? path.join('Electron.app', 'Contents', 'MacOS', 'Electron')
+        : 'electron'
   const distDir = path.join(electronDir, 'dist')
   const distExe = path.join(distDir, exeName)
 
@@ -119,8 +129,12 @@ async function main() {
   extract(zipPath, distDir, exeName)
 
   if (!fs.existsSync(distExe)) {
-    console.error('[ensure-electron] extraction finished but binary still missing')
-    process.exit(1)
+    // Same reasoning as the download failure above: this script exists because
+    // one machine's extractor is unreliable, not because a missing binary
+    // should break `pnpm install`. Electron-dependent steps fail on their own
+    // with a far clearer message than anything printed here.
+    console.error(`[ensure-electron] extraction finished but ${exeName} still missing`)
+    process.exit(0)
   }
   console.log('[ensure-electron] binary ready')
 }
