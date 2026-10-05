@@ -1,5 +1,5 @@
 import { BrowserWindow, dialog, type BrowserWindow as BrowserWindowType } from 'electron'
-import { writeFile, rename, stat, readFile, unlink } from 'fs/promises'
+import { rename, stat, readFile, unlink, open, chmod } from 'fs/promises'
 import { dirname, resolve, relative, extname } from 'path'
 import { mkdirSync } from 'fs'
 import { randomUUID } from 'crypto'
@@ -137,8 +137,27 @@ function defaultExportPath(docPath: string | null, ext: string): string | undefi
 async function atomicWrite(targetPath: string, data: string | Buffer): Promise<number> {
   mkdirSync(dirname(targetPath), { recursive: true })
   const tempPath = `${targetPath}.${randomUUID()}.tmp`
+  // Overwriting an existing file must not change its permissions. The temp file
+  // gets the process umask, so without this an export over a `0600` PDF quietly
+  // widened it for everyone who can reach the folder.
+  let mode: number | undefined
   try {
-    await writeFile(tempPath, data)
+    mode = (await stat(targetPath)).mode
+  } catch {
+    // New file: the umask default is right.
+  }
+  try {
+    const handle = await open(tempPath, 'w')
+    try {
+      await handle.writeFile(data)
+      // Flush before the rename. A rename is atomic with respect to the directory
+      // entry, not the data, so without this a crash can leave the name pointing
+      // at a file whose contents never reached the disk.
+      await handle.sync()
+    } finally {
+      await handle.close()
+    }
+    if (mode !== undefined) await chmod(tempPath, mode)
     await rename(tempPath, targetPath)
   } catch (e) {
     await unlink(tempPath).catch(() => {})
@@ -205,11 +224,34 @@ async function renderInHiddenWindow(html: string): Promise<Buffer> {
   }
 }
 
+/**
+ * Size ceiling for the two binary exports.
+ *
+ * Both build the whole document in one blocking pass on the main process:
+ * measured at roughly 6 seconds per megabyte for the docx conversion, and a
+ * hidden window print for the PDF. A 6 MB note is 35 seconds of a window that
+ * will not repaint, with no way to tell it apart from a hang. HTML export is
+ * not capped; rendering 6 MB to HTML takes well under a second.
+ */
+const BINARY_EXPORT_LIMIT = 4 * 1024 * 1024
+
+function tooLargeForBinaryExport(markdown: string, kind: 'PDF' | 'Word'): string | null {
+  if (markdown.length <= BINARY_EXPORT_LIMIT) return null
+  const mb = (markdown.length / (1024 * 1024)).toFixed(1)
+  return (
+    `This note is ${mb} MB, which ${kind} export cannot handle in one pass ` +
+    `(the limit is 4 MB and the conversion runs at about 6 seconds per MB). ` +
+    `Export as HTML instead, or split the note.`
+  )
+}
+
 export async function exportPdf(
   getWindow: () => BrowserWindowType | null,
   markdown: string,
   docPath: string | null
 ): Promise<ExportResult> {
+  const tooLarge = tooLargeForBinaryExport(markdown, 'PDF')
+  if (tooLarge) return { ok: false, reason: tooLarge }
   const filePath = await showExportSaveDialog(
     getWindow,
     defaultExportPath(docPath, 'pdf'),
@@ -339,6 +381,8 @@ export async function exportDocx(
   if (!markdown || markdown.trim() === '') {
     return { ok: false, reason: 'Document is empty' }
   }
+  const tooLarge = tooLargeForBinaryExport(markdown, 'Word')
+  if (tooLarge) return { ok: false, reason: tooLarge }
   const title = titleFromPath(docPath)
   const body = md.render(markdown)
   const rawHtml = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${escapeHtml(title)}</title></head><body><article>${body}</article></body></html>`

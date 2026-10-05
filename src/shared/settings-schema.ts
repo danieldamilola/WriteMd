@@ -14,11 +14,26 @@ export interface WriteMdSettings {
     autoSaveDelay: number
     showLineNumbers: boolean
     highlightActiveLine: boolean
+    /**
+     * Where the user last dragged the floating table toolbar, in pixels from the
+     * spot CodeMirror anchors it to. Per-editor while the session lives (so the
+     * two split panes can sit on different tables); this copy seeds new editors
+     * and survives restarts.
+     */
+    tableToolbarOffset: { x: number; y: number }
   }
   appearance: {
     theme: string
     accentColor: string
     panelOrientation: 'horizontal' | 'vertical'
+    /** Full-screen settings shell. Off restores the centered popup dialog. */
+    newSettingsDesign: boolean
+    /**
+     * `system` follows the OS animation setting, `full` animates regardless of
+     * it, `reduced` never animates. Written onto `<html>` as `data-motion`, which
+     * is what every animated surface tests.
+     */
+    motion: 'system' | 'full' | 'reduced'
   }
   files: {
     vaultPath: string
@@ -57,6 +72,10 @@ export interface WriteMdSettings {
     /** A key is stored but this install cannot decrypt it; the user must retype. */
     apiKeyUndecryptable: boolean
     systemPrompt: string
+    /** Explicit opencode CLI path (e.g. %APPDATA%\npm\opencode.cmd); empty = autodetect. */
+    opencodeCliPath: string
+    /** Ground answers with a keyless web search before sending to the model. */
+    webSearchEnabled: boolean
   }
 }
 
@@ -66,15 +85,17 @@ export type WriteMdSettingsPatch = {
 }
 
 /** Default instruction sent with every AI request (file context is appended at runtime). */
-export const DEFAULT_AI_SYSTEM_PROMPT = `CRITICAL INSTRUCTION: You are a helpful AI assistant operating directly inside the WriteMd application interface. You must strictly adhere to the "unslop" communication style. Never use filler phrases like "Here is...", "This will...", "I'll help...", "Let me...", "Great!", "Excellent!", or "Perfect!". No preamble, no postamble, no summaries unless asked. Deliver direct, concise, and human-sounding output. If you catch filler while writing, stop, delete, rewrite. Format your responses in markdown.
+export const DEFAULT_AI_SYSTEM_PROMPT = `You are the AI assistant inside the WriteMd markdown editor. Write direct, concise, human-sounding markdown. No filler openers ("Here is...", "I'll help..."), no exclamations ("Great!", "Perfect!"), no preamble, postamble, or summaries unless asked. If filler slips in, stop, delete, rewrite.
 
-CRITICAL INSTRUCTION FOR FILE EDITS: If the user asks you to modify, rewrite, or clear the file, you MUST output the completely updated file content wrapped exactly in a \`\`\`writemd-replace\`\`\` code block. For example:
+FILE EDITS: when the user asks to change the file, output the entire updated file and nothing else inside one \`\`\`writemd-replace block:
 \`\`\`writemd-replace
-(the new content goes here)
+(entire new file content)
 \`\`\`
-The application will intercept this block and automatically apply the changes to the user's document.
+The app applies that block to the document automatically.
 
-CRITICAL INSTRUCTION FOR FILE TRACKING: You MUST check which file you started the conversation from and keep that in mind. Each user message will specify the active file at the time they sent the message. Before taking action or making any edits on a request, CHECK if the active file is still the same file. If the user changed files and you notice they are now in a new file compared to the previous context, you MUST immediately inform the user that they are in a new file, and ask them if they want to continue the request in this new file before making any edits.`
+FILE TRACKING: every user message names its file. If it differs from the file the conversation started in, stop and ask which file to work in before editing anything.
+
+WEB SEARCH: appended live results count as pages you opened: answer from them, cite sources with links. Never discuss search mechanics, tools, or your own capabilities. With no results supplied, answer from your own knowledge.`
 
 export const DEFAULT_SETTINGS: WriteMdSettings = {
   editor: {
@@ -86,12 +107,15 @@ export const DEFAULT_SETTINGS: WriteMdSettings = {
     autoSave: true,
     autoSaveDelay: 500,
     showLineNumbers: false,
-    highlightActiveLine: true
+    highlightActiveLine: true,
+    tableToolbarOffset: { x: 0, y: 0 }
   },
   appearance: {
-    theme: 'dark',
-    accentColor: '',
-    panelOrientation: 'horizontal'
+    theme: 'graphite',
+    accentColor: '#f24e1e',
+    panelOrientation: 'horizontal',
+    newSettingsDesign: true,
+    motion: 'system'
   },
   files: {
     vaultPath: '',
@@ -123,7 +147,9 @@ export const DEFAULT_SETTINGS: WriteMdSettings = {
     apiKey: '',
     apiKeySet: false,
     apiKeyUndecryptable: false,
-    systemPrompt: DEFAULT_AI_SYSTEM_PROMPT
+    systemPrompt: DEFAULT_AI_SYSTEM_PROMPT,
+    opencodeCliPath: '',
+    webSearchEnabled: false
   }
 }
 
@@ -153,6 +179,18 @@ const ARRAY_ELEMENT_TYPES: Record<string, 'string' | 'number' | 'boolean'> = {
   'files.recentFiles': 'string',
   'files.openTabs': 'string',
   'shortcuts.bindings': 'string'
+}
+
+/**
+ * Settings whose value is one of a fixed set of strings.
+ *
+ * A union type is erased at runtime, so `typeof value !== typeof fallback` is
+ * satisfied by any string. These are the ones where an unexpected member is not
+ * harmless: an unknown `motion` resolved to "match the system", so a typo looked
+ * like it had been set.
+ */
+const STRING_UNIONS: Record<string, readonly string[]> = {
+  'appearance.motion': ['system', 'full', 'reduced']
 }
 
 /**
@@ -211,6 +249,15 @@ export function validatePatch(patch: unknown): {
       } else if (typeof value !== typeof fallback) {
         problems.push(`${dotted} must be a ${typeof fallback}, got ${typeof value}`)
         continue
+      } else {
+        // A union needs its members named. `typeof` alone let any string through
+        // for `appearance.motion`, which the renderer then cast its way past, so
+        // a typo persisted and silently resolved to "match the system".
+        const allowed = STRING_UNIONS[dotted]
+        if (allowed && !allowed.includes(value as string)) {
+          problems.push(`${dotted} must be one of: ${allowed.join(', ')}`)
+          continue
+        }
       }
       clean[section] ??= {}
       clean[section][key] = value

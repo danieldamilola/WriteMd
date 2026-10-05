@@ -16,7 +16,12 @@ export const writeMDTheme: Extension = EditorView.theme({
     overflow: 'auto',
     height: '100%',
     display: 'flex',
-    justifyContent: 'center'
+    justifyContent: 'center',
+    scrollbarWidth: 'thin',
+    scrollbarColor: 'transparent transparent'
+  },
+  '.cm-scroller.is-scrolling, .cm-scroller:hover': {
+    scrollbarColor: 'var(--border) transparent'
   },
   '.cm-scroller::-webkit-scrollbar': {
     width: '8px',
@@ -29,11 +34,17 @@ export const writeMDTheme: Extension = EditorView.theme({
     display: 'none'
   },
   '.cm-scroller::-webkit-scrollbar-thumb': {
-    background: 'var(--border)',
+    backgroundColor: 'transparent',
     borderRadius: '4px',
     border: '2px solid transparent',
     backgroundClip: 'padding-box'
   },
+  '.cm-scroller.is-scrolling::-webkit-scrollbar-thumb, .cm-scroller:hover::-webkit-scrollbar-thumb':
+    {
+      backgroundColor: 'var(--border)',
+      border: '2px solid transparent',
+      backgroundClip: 'padding-box'
+    },
   '.cm-scroller::-webkit-scrollbar-thumb:hover': {
     background: 'var(--text-muted)',
     border: '2px solid transparent',
@@ -171,13 +182,31 @@ export const writeMDTheme: Extension = EditorView.theme({
     border: '1px solid var(--cm-chrome-border)',
     borderRadius: '6px',
     boxShadow: '0 4px 12px rgba(0,0,0,0.5)',
-    zIndex: '100'
+    zIndex: '100',
+    alignItems: 'center',
+    userSelect: 'none',
+    cursor: 'grab',
+    touchAction: 'none'
+  },
+  '.cm-table-grip': {
+    display: 'flex',
+    alignItems: 'center',
+    alignSelf: 'stretch',
+    padding: '0 5px 0 3px',
+    marginRight: '1px',
+    borderRight: '1px solid var(--cm-chrome-border)',
+    color: 'var(--cm-chrome-muted)',
+    cursor: 'grab'
+  },
+  '.cm-table-grip:hover': {
+    color: 'var(--cm-chrome-fg)'
   },
   '.cm-table-toolbar button': {
     background: 'transparent',
     border: 'none',
     color: 'var(--cm-chrome-muted)',
-    cursor: 'pointer',
+    /* The whole bar is a handle, so the pointer says so on the buttons too. */
+    cursor: 'grab',
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
@@ -386,11 +415,33 @@ export const writeMDTheme: Extension = EditorView.theme({
     color: 'var(--syntax-h3)',
     fontWeight: '600'
   },
+  /* Table: cells are editable in place; empty ones still need a click target.
+     Editability is a property of the table, and it lives on the wrapper, so the
+     cells themselves carry no such attribute to match on. */
+  '.cm-live-table-wrap[data-editable="true"] td, .cm-live-table-wrap[data-editable="true"] th': {
+    cursor: 'text'
+  },
+  '.cm-live-table-wrap td:empty::before, .cm-live-table-wrap th:empty::before': {
+    content: "'\\00a0'"
+  },
+  '.cm-live-table-wrap .cm-live-table-editing': {
+    outline: '2px solid var(--border-focus)',
+    outlineOffset: '-2px',
+    borderRadius: '4px',
+    backgroundColor: 'var(--bg-hover)'
+  },
   '.cm-live-table-wrap td code': {
     backgroundColor: 'var(--code-bg)',
     padding: '1px 5px',
     borderRadius: '3px',
     fontSize: '13px'
+  },
+  '.cm-live-table-truncated': {
+    display: 'block',
+    padding: '8px 2px 2px 2px',
+    fontSize: '12px',
+    color: 'var(--text-muted)',
+    fontStyle: 'italic'
   },
   /* Table: source mode lines break out of max-width and do not wrap */
   '.cm-line.cm-line-table-row': {

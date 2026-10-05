@@ -129,10 +129,42 @@ export class VaultExplorer extends LitElement {
       outline: 2px solid var(--border-focus);
       outline-offset: -2px;
     }
+
+    .more-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      width: 100%;
+      background: none;
+      border: none;
+      color: var(--text-secondary);
+      font: inherit;
+      font-size: 12px;
+      text-align: left;
+      padding: 4px 8px 4px 26px;
+      cursor: pointer;
+      border-radius: 4px;
+    }
+
+    .more-row:hover {
+      background: var(--bg-hover);
+      color: var(--text);
+    }
   `
+
+  /**
+   * Rows rendered per directory before the rest are summarized.
+   *
+   * A folder with thousands of notes produced one DOM row per note, and every
+   * expand re-diffed all of them. Past this the folder shows a count and a
+   * button, which is one row instead of thousands.
+   */
+  private static readonly MAX_ROWS = 300
 
   @state() private rootNode: VaultTreeNode | null = null
   @state() private expandedDirs = new Set<string>()
+  /** Folders where the user asked for past the row cap to be shown anyway. */
+  @state() private expandedAllDirs = new Set<string>()
   @state() private loadError = false
   @state() private activePath: string | null = null
   private fileState = FileState.getInstance()
@@ -204,13 +236,50 @@ export class VaultExplorer extends LitElement {
     try {
       const fileContent = await api()?.file?.read?.(path)
       if (fileContent) {
-        this.fileState.openSecondaryFile(path, fileContent.content)
+        await this.fileState.openSecondaryFile(path, fileContent.content)
       }
     } catch (e) {
       console.error(`Failed to open ${path}:`, e)
       // Previously the click simply did nothing, with no feedback at all.
       alert(`Could not open ${path.split(/[/\\]/).pop() ?? path}`)
     }
+  }
+
+  /**
+   * A directory's children, summarized past the row cap.
+   *
+   * Directories come first in the tree already (the main process sorts them
+   * that way), so the cap never hides a folder behind a file list.
+   */
+  private renderChildren(node: VaultTreeNode, depth: number): unknown {
+    const children = node.children ?? []
+    if (children.length === 0) return html`<div class="empty-msg">No markdown notes</div>`
+    const showAll = this.expandedAllDirs.has(node.path)
+    const capped = !showAll && children.length > VaultExplorer.MAX_ROWS
+    if (!capped) {
+      return html`${children.map((child) => this.renderNode(child, depth))}`
+    }
+    const dirs = children.filter((c) => c.isDirectory)
+    const files = children.filter((c) => !c.isDirectory)
+    const room = Math.max(0, VaultExplorer.MAX_ROWS - dirs.length)
+    const hiddenFiles = files.length - room
+    return html`
+      ${dirs.map((child) => this.renderNode(child, depth))}
+      ${files.slice(0, room).map((child) => this.renderNode(child, depth))}
+      <button
+        class="more-row"
+        @click=${() => this.expandAll(node.path)}
+        aria-label="Show all ${children.length} entries"
+      >
+        Show ${hiddenFiles} more file${hiddenFiles === 1 ? '' : 's'} (${children.length} total)
+      </button>
+    `
+  }
+
+  private expandAll(path: string): void {
+    const next = new Set(this.expandedAllDirs)
+    next.add(path)
+    this.expandedAllDirs = next
   }
 
   private renderNode(node: VaultTreeNode, depth = 0): unknown {
@@ -259,11 +328,7 @@ export class VaultExplorer extends LitElement {
             isExpanded || depth === 0
               ? html`
                   <div class="${depth > 0 ? 'children' : 'tree-root'}">
-                    ${
-                      node.children && node.children.length > 0
-                        ? node.children.map((child) => this.renderNode(child, depth + 1))
-                        : html`<div class="empty-msg">No markdown notes</div>`
-                    }
+                    ${this.renderChildren(node, depth + 1)}
                   </div>
                 `
               : ''

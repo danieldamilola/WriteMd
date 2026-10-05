@@ -42,6 +42,30 @@
 
   --transition-fast: 100ms ease-out;
   --transition-normal: 150ms ease-out;
+
+  /*
+   * Motion. One set of numbers for the whole app, so a pane, a menu and a dialog
+   * all feel like the same hand moved them. Durations and easings live here
+   * rather than inline because a transition in a component's styles cannot read
+   * a value from this file, so each component declares
+   * `transition: opacity var(--motion-base)` and the tokens resolve against its
+   * own scope at use time.
+   *
+   * Entrance eases out, exit eases in, and nothing overshoots: a panel that
+   * bounces past its resting width reads as a glitch rather than as motion.
+   */
+  --motion-instant: 80ms;
+  --motion-fast: 120ms;
+  --motion-base: 160ms;
+  --motion-slow: 220ms;
+  --motion-slower: 320ms;
+  --motion-ease: cubic-bezier(0.22, 1, 0.36, 1);
+  --motion-ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --motion-ease-in: cubic-bezier(0.4, 0, 1, 1);
+  --motion-ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
+  /* Pressed states, matching a scale just under 1 rather than a colour change. */
+  --motion-press-scale: 0.985;
+  --motion-reveal-shift: 8px;
 }
 
 * {
@@ -96,6 +120,13 @@ button:disabled {
   background: var(--selection);
 }
 
+* {
+  scrollbar-width: thin;
+  scrollbar-color: transparent transparent;
+}
+.is-scrolling {
+  scrollbar-color: var(--border) transparent;
+}
 ::-webkit-scrollbar {
   width: 4px;
   height: 4px;
@@ -104,11 +135,15 @@ button:disabled {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: #262626;
+  background-color: transparent;
   border-radius: 2px;
 }
+.is-scrolling::-webkit-scrollbar-thumb,
+:hover::-webkit-scrollbar-thumb {
+  background-color: #262626;
+}
 ::-webkit-scrollbar-thumb:hover {
-  background: #3a3a3a;
+  background-color: #3a3a3a;
 }
 
 :focus-visible {

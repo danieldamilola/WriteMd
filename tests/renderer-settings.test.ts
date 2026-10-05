@@ -25,6 +25,11 @@ describe('SettingsStore', () => {
   })
 
   describe('get', () => {
+    it('defaults to the Graphite theme with the red accent', () => {
+      expect(store.get('appearance.theme', '')).toBe('graphite')
+      expect(store.get('appearance.accentColor', '')).toBe('#f24e1e')
+    })
+
     it('reads a nested key', () => {
       expect(store.get('editor.fontSize', 0)).toBe(DEFAULT_SETTINGS.editor.fontSize)
     })

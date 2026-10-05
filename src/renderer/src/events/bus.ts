@@ -24,6 +24,8 @@ export interface AppEvents {
    * fixes it, instead of leaving the user to find it.
    */
   'settings:open': { tab?: string }
+  /** A successful Settings fetch updates the composer picker immediately. */
+  'ai:models-updated': { models: string[] }
 }
 
 type Handler<K extends keyof AppEvents> = (detail: AppEvents[K]) => void

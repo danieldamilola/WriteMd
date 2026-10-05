@@ -44,6 +44,23 @@ describe('validatePatch', () => {
     expect(bad.problems[0]).toMatch(/files\.recentFiles must be an array of string/)
   })
 
+  it('accepts every member of a string union', () => {
+    for (const motion of ['system', 'full', 'reduced']) {
+      const { clean, problems } = validatePatch({ appearance: { motion } })
+      expect(problems).toEqual([])
+      expect(clean).toEqual({ appearance: { motion } })
+    }
+  })
+
+  it('rejects a string outside a union, which typeof alone let through', () => {
+    // `appearance.motion` is a union, erased at runtime, so the type check was
+    // satisfied by any string. A typo persisted and then resolved to "match the
+    // system", which looks like the setting had been applied.
+    const { clean, problems } = validatePatch({ appearance: { motion: 'fulll' } })
+    expect(problems[0]).toBe('appearance.motion must be one of: system, full, reduced')
+    expect(clean).toEqual({})
+  })
+
   it('refuses to let a client set the derived api flags', () => {
     const { clean, problems } = validatePatch({
       ai: { apiKeySet: true, apiKeyUndecryptable: true }

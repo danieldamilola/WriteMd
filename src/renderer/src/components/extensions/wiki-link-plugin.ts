@@ -26,8 +26,15 @@ class WikiLinkWidget extends WidgetType {
     return other.label === this.label
   }
 
-  ignoreEvent(): boolean {
-    return false
+  ignoreEvent(event: Event): boolean {
+    // Pointer events belong to the widget, not to the editor.
+    //
+    // Returning false let CodeMirror handle mousedown, which put the cursor on
+    // the link's line. That line is then "active", so the decoration holding
+    // this widget is dropped in favour of the raw `[[text]]`, and the click
+    // landed on a node that no longer existed: following a wiki link from live
+    // preview silently did nothing.
+    return event.type === 'mousedown' || event.type === 'click'
   }
 
   toDOM(): HTMLElement {
@@ -47,6 +54,35 @@ class WikiLinkWidget extends WidgetType {
   }
 }
 
+/**
+ * How far outside the viewport a scan looks.
+ *
+ * Widgets are only rendered inside the viewport anyway, so scanning the whole
+ * document on every keystroke bought nothing and cost a full-document string
+ * copy each time (6% of all typing time on a 6 MB note, plus the garbage).
+ * The margin keeps a link that straddles the edge rendered instead of popping
+ * in one character later.
+ */
+const SCAN_MARGIN = 2_000
+
+/**
+ * The slice of the document a viewport needs scanned.
+ *
+ * Exported for tests: jsdom never lays out, so a view's viewport there is
+ * always the empty range at 0 and an end-of-document link can only be checked
+ * through this function.
+ */
+export function wikiLinkScanRange(
+  viewportFrom: number,
+  viewportTo: number,
+  docLength: number
+): { start: number; end: number } {
+  return {
+    start: Math.max(0, viewportFrom - SCAN_MARGIN),
+    end: Math.min(docLength, viewportTo + SCAN_MARGIN)
+  }
+}
+
 function getWikiLinkDecorations(view: EditorView): DecorationSet {
   const builder = new RangeSetBuilder<Decoration>()
   const readOnly = view.state.facet(readOnlyFacet)
@@ -60,16 +96,21 @@ function getWikiLinkDecorations(view: EditorView): DecorationSet {
     }
   }
 
-  const text = view.state.doc.toString()
+  const doc = view.state.doc
+  const { start, end } = wikiLinkScanRange(view.viewport.from, view.viewport.to, doc.length)
+  const text = doc.sliceString(start, end)
   const regex = /\[\[(.*?)\]\]/g
   let match
 
   while ((match = regex.exec(text)) !== null) {
-    const from = match.index
+    const from = start + match.index
     const to = from + match[0].length
+    // A link cut in half by the scan window is left alone; it renders once the
+    // viewport moves far enough to contain it whole.
+    if (to > end) break
     const content = match[1]
 
-    const line = view.state.doc.lineAt(from).number
+    const line = doc.lineAt(from).number
 
     if (!activeLines.has(line) || readOnly) {
       builder.add(from, to, Decoration.replace({ widget: new WikiLinkWidget(content) }))

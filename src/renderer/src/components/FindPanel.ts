@@ -12,6 +12,16 @@ import {
   closeSearchPanel
 } from '@codemirror/search'
 
+/**
+ * How many matches are counted before the panel says "N+".
+ *
+ * Counting walked every match in the document, which cost 860ms in a 6 MB note
+ * with 14 000 matches, on every keystroke in the find box. The search itself
+ * still finds everything; only the tally is capped, and it says so rather than
+ * reporting a wrong number.
+ */
+export const MATCH_COUNT_LIMIT = 5000
+
 @customElement('writemd-find-panel')
 export class FindPanel extends LitElement {
   static styles = css`
@@ -136,6 +146,8 @@ export class FindPanel extends LitElement {
   @state() private replaceText = ''
   @state() private matchIndex = 0
   @state() private matchTotal = 0
+  /** True when the tally hit its cap, so the count is a floor, not a total. */
+  @state() private matchTruncated = false
   @state() private queryValid = true
   @state() private pendingFlags: Partial<{
     wholeWord: boolean
@@ -255,6 +267,7 @@ export class FindPanel extends LitElement {
     if (!query.valid || !query.search) {
       this.matchIndex = 0
       this.matchTotal = 0
+      this.matchTruncated = false
       return
     }
     const { from } = this.view.state.selection.main
@@ -263,7 +276,7 @@ export class FindPanel extends LitElement {
     let found = false
     const cursor = query.getCursor(this.view.state, 0)
     let next = cursor.next()
-    while (!next.done) {
+    while (!next.done && total < MATCH_COUNT_LIMIT) {
       total += 1
       if (!found && next.value.from >= from) {
         index = total
@@ -271,6 +284,7 @@ export class FindPanel extends LitElement {
       }
       next = cursor.next()
     }
+    this.matchTruncated = !next.done
     // Cursor past the last match: next search wraps, so show the first.
     if (total > 0 && !found) index = 1
     this.matchTotal = total
@@ -418,7 +432,9 @@ export class FindPanel extends LitElement {
       ? 'Invalid regex'
       : this.matchTotal === 0
         ? 'No results'
-        : `${this.matchIndex} of ${this.matchTotal}`
+        : this.matchTruncated
+          ? `${this.matchIndex} of ${this.matchTotal}+`
+          : `${this.matchIndex} of ${this.matchTotal}`
     return html`
       <div
         class="bar"

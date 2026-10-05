@@ -4,9 +4,11 @@ import { pathToFileURL } from 'url'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
 import { setupIpc, closeAllWatchers } from './ipc'
+import { stopOpencodeServer } from './opencode-server'
 import { registerExternalPath } from './path-guard'
 import { hardenWebContents } from './harden'
-import { ensureVaultExists } from './vault'
+import { ensureVault } from './vault'
+import { seedWelcomeNote } from './welcome-note'
 import { registerFileAssociations } from './file-associations'
 import { setupUpdater } from './updater'
 
@@ -135,7 +137,12 @@ app.whenReady().then(() => {
     optimizer.watchWindowShortcuts(window)
   })
 
-  ensureVaultExists()
+  // A vault that did not exist until this launch is a first run, and the one
+  // moment a note explaining the editor is welcome. An existing vault is left
+  // untouched: it holds real notes, however empty it looks.
+  const vault = ensureVault()
+  if (vault.created) seedWelcomeNote(vault.path, true)
+
   registerFileAssociations()
   setupIpc(() => mainWindow)
   setupUpdater(() => mainWindow)
@@ -159,6 +166,7 @@ app.on('window-all-closed', () => {
 
 app.on('will-quit', () => {
   closeAllWatchers()
+  stopOpencodeServer()
 })
 
 app.on('second-instance', (_event, argv) => {

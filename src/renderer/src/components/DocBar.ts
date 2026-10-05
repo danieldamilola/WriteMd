@@ -133,7 +133,7 @@ export class DocBar extends LitElement {
         min-width: 230px;
         z-index: 200;
         transform-origin: top right;
-        animation: menu-in 140ms cubic-bezier(0.22, 1, 0.36, 1);
+        animation: menu-in var(--motion-fast) var(--motion-ease);
       }
 
       @keyframes menu-in {
@@ -143,7 +143,7 @@ export class DocBar extends LitElement {
         }
       }
 
-      @media (prefers-reduced-motion: reduce) {
+      :host-context([data-motion='reduced']) {
         .m-panel.note-menu {
           animation: none;
         }

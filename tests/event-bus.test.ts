@@ -53,6 +53,13 @@ describe('app event bus', () => {
     expect(wiki).toHaveBeenCalledOnce()
   })
 
+  it('delivers a fetched model list to the composer subscriber', () => {
+    const seen = vi.fn()
+    on('ai:models-updated', seen)
+    emit('ai:models-updated', { models: ['gemini-3.6-flash'] })
+    expect(seen).toHaveBeenCalledWith({ models: ['gemini-3.6-flash'] })
+  })
+
   it('one throwing handler does not stop the others', () => {
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
     const after = vi.fn()

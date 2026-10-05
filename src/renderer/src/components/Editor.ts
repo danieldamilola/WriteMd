@@ -26,6 +26,8 @@ import { GFM } from '@lezer/markdown'
 import { defaultKeymap, history, historyKeymap } from '@codemirror/commands'
 import { search } from '@codemirror/search'
 import { writeMDTheme } from './EditorTheme'
+import { installFocusReportingFix } from '../utils/focus-reporting'
+import { conceal } from '../utils/motion'
 import { vscodeHighlight } from './CodeHighlight'
 import {
   livePreviewPlugin,
@@ -50,6 +52,7 @@ import {
   SecondaryDocState,
   shouldMountSecondaryView
 } from '../state/file-state'
+import { hasOriginalDocUpdate } from '../state/conflict'
 import './Panel'
 import './InfoPill'
 import './DocBar'
@@ -101,6 +104,31 @@ function describeAiError(e: unknown): string {
   const wrapped = /^Error invoking remote method '[^']*':\s*(?:Error:\s*)?([\s\S]*)$/
   const match = wrapped.exec(raw)
   return (match ? match[1] : raw).trim() || 'The request failed.'
+}
+
+/**
+ * How much of the open file rides along with an AI question.
+ *
+ * The full document used to be embedded in every request. That is a 6 MB string
+ * copy per question on a large note, and a payload no provider accepts, so the
+ * context is capped and the model is told the file was cut rather than left to
+ * assume it saw all of it. About 200 000 characters, roughly 50k tokens.
+ */
+export const AI_DOC_CONTEXT_LIMIT = 200_000
+
+export function documentContextFor(content: string): { text: string; note: string } {
+  if (content.length <= AI_DOC_CONTEXT_LIMIT) return { text: content, note: '' }
+  let cut = AI_DOC_CONTEXT_LIMIT
+  // Never end on half a surrogate pair: a lone surrogate in a request is
+  // invalid UTF-16 and some providers reject the whole payload over it.
+  const next = content.charCodeAt(cut)
+  if (next >= 0xdc00 && next <= 0xdfff) cut -= 1
+  const kept = content.slice(0, cut)
+  const totalMb = Math.round(content.length / (1024 * 1024))
+  return {
+    text: kept,
+    note: `Only the first ${Math.round(cut / 1024)} KB of this ${totalMb} MB file are shown below.\n\n`
+  }
 }
 
 /** Relative for anything recent, absolute beyond a week. */
@@ -177,7 +205,7 @@ export class Editor extends LitElement {
         font-size: 12px;
         box-shadow: 0 6px 20px rgb(0 0 0 / 18%);
         pointer-events: none;
-        animation: notice-in 200ms cubic-bezier(0.22, 1, 0.36, 1);
+        animation: notice-in var(--motion-base) var(--motion-ease);
       }
 
       @keyframes notice-in {
@@ -187,7 +215,7 @@ export class Editor extends LitElement {
         }
       }
 
-      @media (prefers-reduced-motion: reduce) {
+      :host-context([data-motion='reduced']) {
         .notice {
           animation: none;
         }
@@ -202,10 +230,20 @@ export class Editor extends LitElement {
         position: relative;
         height: 100%;
         overflow: hidden;
-        transition: flex 200ms cubic-bezier(0.22, 1, 0.36, 1);
+        /*
+         * The left pane's inline style goes from flex:1 to
+         * flex:0 0 calc(50% - 2.5px) when the split opens. The shorthand
+         * expands to grow/shrink/basis and all three interpolate, so this
+         * carries the pane from full width to its share. This used to be a
+         * WAAPI animation on flexBasis alongside this transition: two
+         * mechanisms on one property, and the left pane jumped back out to full
+         * width on the first frame before easing down, which is what read as a
+         * bounce. The incoming pane has its own pane-in for the reveal.
+         */
+        transition: flex var(--motion-base) var(--motion-ease);
       }
 
-      @media (prefers-reduced-motion: reduce) {
+      :host-context([data-motion='reduced']) {
         .pane {
           transition: none;
         }
@@ -265,7 +303,7 @@ export class Editor extends LitElement {
         width: 5px;
         cursor: col-resize;
         background: transparent;
-        transition: background 150ms;
+        transition: background var(--motion-base);
         flex-shrink: 0;
         z-index: 10;
       }
@@ -280,7 +318,7 @@ export class Editor extends LitElement {
       }
 
       .pane-in {
-        animation: pane-in 180ms cubic-bezier(0.22, 1, 0.36, 1);
+        animation: pane-in var(--motion-base) var(--motion-ease);
       }
 
       @keyframes pane-in {
@@ -290,7 +328,7 @@ export class Editor extends LitElement {
         }
       }
 
-      @media (prefers-reduced-motion: reduce) {
+      :host-context([data-motion='reduced']) {
         .pane-in {
           animation: none;
         }
@@ -303,7 +341,7 @@ export class Editor extends LitElement {
       writemd-vault-explorer,
       writemd-surface-launcher,
       writemd-panel .sub-header + * {
-        animation: surface-in 160ms ease-out;
+        animation: surface-in var(--motion-base) var(--motion-ease-out);
       }
 
       @keyframes surface-in {
@@ -312,7 +350,7 @@ export class Editor extends LitElement {
         }
       }
 
-      @media (prefers-reduced-motion: reduce) {
+      :host-context([data-motion='reduced']) {
         writemd-ai-panel,
         writemd-backlinks-panel,
         writemd-vault-explorer,
@@ -403,7 +441,7 @@ export class Editor extends LitElement {
         box-shadow: var(--shadow-3);
         padding: 4px;
         transform-origin: top right;
-        animation: ai-history-in 140ms cubic-bezier(0.22, 1, 0.36, 1);
+        animation: ai-history-in var(--motion-fast) var(--motion-ease);
       }
 
       @keyframes ai-history-in {
@@ -413,7 +451,7 @@ export class Editor extends LitElement {
         }
       }
 
-      @media (prefers-reduced-motion: reduce) {
+      :host-context([data-motion='reduced']) {
         .ai-history {
           animation: none;
         }
@@ -551,9 +589,24 @@ export class Editor extends LitElement {
   }
 
   @state() private content = ''
+  /**
+   * The exact text the CodeMirror views currently hold.
+   *
+   * Kept as the same string object the view produced, so the sync check in the
+   * state subscription is a pointer comparison instead of a fresh
+   * `doc.toString()` of the whole document on every keystroke.
+   */
+  private viewContent = ''
+  private secondaryViewContent = ''
   @state() private filePath: string | null = null
   @state() private viewMode: ViewMode = 'live'
   @state() private splitActive = false
+  /**
+   * True while the split is playing its exit. The pane stays mounted until the
+   * animation ends, and the left pane keeps its width for the same moment, so
+   * the space is claimed once rather than twice.
+   */
+  @state() private splitLeaving = false
   @state() private splitSurface: SplitSurface = 'launcher'
   @state() private secondaryDoc: SecondaryDocState | null = null
   @state() private textMenu: { x: number; y: number } | null = null
@@ -624,15 +677,22 @@ export class Editor extends LitElement {
     const electron = api()
     if (!electron?.net) return
     this.aiModelsLoading = true
+    const configuredModel = this.aiModel
     try {
       const provider = this.settingsStore?.get('ai.provider', 'OpenAI') ?? 'OpenAI'
       const models = await electron.net.fetchModels(provider, '')
-      this.aiModels = models
+      // A selected model stays usable even if a provider omits it from its
+      // discoverable list. The chat request is the authority on whether it is
+      // actually available to this key.
+      this.aiModels = configuredModel
+        ? [configuredModel, ...models.filter((model) => model !== configuredModel)]
+        : models
     } catch (e) {
-      // A provider with no discoverable list is normal (Anthropic), and a failed
-      // list must not take the panel down with it. The chip still opens settings.
+      // A failed discovery request must not make an already selected model look
+      // unavailable. Sending remains possible and surfaces the provider's real
+      // error if the key, model, or network is the underlying problem.
       console.error('Failed to fetch AI models:', e)
-      this.aiModels = []
+      this.aiModels = configuredModel ? [configuredModel] : []
     } finally {
       this.aiModelsLoading = false
     }
@@ -752,6 +812,11 @@ export class Editor extends LitElement {
     document.addEventListener('pointerdown', this.onAiHistoryPointerDown, true)
     this.busUnsubs.push(on('find:open', this.handleGlobalFind))
     this.busUnsubs.push(on('wiki:open', this.handleOpenWikiLink))
+    this.busUnsubs.push(
+      on('ai:models-updated', ({ models }) => {
+        this.aiModels = models
+      })
+    )
     this.settingsStore = SettingsStore.getInstance()
     this.panelOrientation = this.settingsStore.get('appearance.panelOrientation', 'horizontal') as
       'horizontal' | 'vertical'
@@ -772,6 +837,9 @@ export class Editor extends LitElement {
     // The chip reads the model through a getter, so nothing re-renders when it
     // changes unless this asks for one.
     this.settingsUnsubs.push(this.settingsStore.subscribe('ai.model', () => this.requestUpdate()))
+    this.settingsUnsubs.push(
+      this.settingsStore.subscribe('ai.webSearchEnabled', () => this.requestUpdate())
+    )
     void this.refreshAiModels()
     this.settingsUnsubs.push(
       this.settingsStore.subscribe('appearance.panelOrientation', (v) => {
@@ -802,12 +870,19 @@ export class Editor extends LitElement {
       const secondaryPathChanged = this.secondaryDoc?.path !== s.secondaryDoc?.path
       const secondaryModeChanged = this.secondaryDoc?.viewMode !== s.secondaryDoc?.viewMode
 
+      const wasSplitActive = this.splitActive
       this.content = s.content
       this.filePath = s.path
       this.viewMode = normalizedMode
       this.splitActive = s.splitActive
       this.splitSurface = s.splitSurface
       this.secondaryDoc = s.secondaryDoc
+
+      // Closing the split has to keep the pane on screen long enough to leave,
+      // so every path that closes it (the toolbar toggle, the pane's own close
+      // button, Escape) goes through this one place instead of each animating
+      // its own teardown.
+      if (wasSplitActive && !s.splitActive) this.startSplitExit()
 
       // Chat is per document, so switching tabs swaps the transcript. The
       // initial document is handled at setup, above; this is the change case.
@@ -823,15 +898,15 @@ export class Editor extends LitElement {
       // the primary catches up by itself once the merge closes.
       const mergeActive = Boolean(s.secondaryDoc?.isDiff)
 
-      if (
-        this.editorView &&
-        docChanged &&
-        !mergeActive &&
-        s.content !== this.editorView.state.doc.toString()
-      ) {
-        this.editorView.dispatch({
-          changes: { from: 0, to: this.editorView.state.doc.length, insert: s.content }
-        })
+      if (this.editorView && docChanged && !mergeActive && s.content !== this.viewContent) {
+        if (pathChanged) {
+          this.swapPrimaryDocument(s.content, s.path)
+        } else {
+          this.viewContent = s.content
+          this.editorView.dispatch({
+            changes: { from: 0, to: this.editorView.state.doc.length, insert: s.content }
+          })
+        }
       }
 
       if (this.editorView && pathChanged) {
@@ -844,15 +919,20 @@ export class Editor extends LitElement {
         this.secondaryEditorView &&
         s.secondaryDoc &&
         secondaryDocChanged &&
-        s.secondaryDoc.content !== this.secondaryEditorView.state.doc.toString()
+        s.secondaryDoc.content !== this.secondaryViewContent
       ) {
-        this.secondaryEditorView.dispatch({
-          changes: {
-            from: 0,
-            to: this.secondaryEditorView.state.doc.length,
-            insert: s.secondaryDoc.content
-          }
-        })
+        if (secondaryPathChanged) {
+          this.swapSecondaryDocument(s.secondaryDoc.content, s.secondaryDoc.path)
+        } else {
+          this.secondaryViewContent = s.secondaryDoc.content
+          this.secondaryEditorView.dispatch({
+            changes: {
+              from: 0,
+              to: this.secondaryEditorView.state.doc.length,
+              insert: s.secondaryDoc.content
+            }
+          })
+        }
       }
 
       if (this.secondaryEditorView && s.secondaryDoc && secondaryPathChanged) {
@@ -895,7 +975,14 @@ export class Editor extends LitElement {
     // The plaintext key never reaches the renderer; the main process reports
     // whether one is stored.
     const keySet = this.settingsStore.get<boolean>('ai.apiKeySet', false)
-    this.isAiConfigured = provider === 'Ollama' || keySet
+    this.isAiConfigured = provider === 'Ollama' || provider === 'OpenCode' || keySet
+  }
+
+  /** Toggle keyless web-search grounding from the composer globe button. */
+  private handleAiWebSearchToggle = (): void => {
+    if (!this.settingsStore) return
+    const current = this.settingsStore.get<boolean>('ai.webSearchEnabled', false)
+    void this.settingsStore.set('ai.webSearchEnabled', !current)
   }
 
   /**
@@ -1038,20 +1125,40 @@ export class Editor extends LitElement {
       const provider = this.settingsStore.get('ai.provider', 'OpenAI')
       const model = this.settingsStore.get('ai.model', '')
 
-      // Custom instructions from Settings → AI Assistant, with live file context appended
+      // Ground the answer when web search is on: run a keyless search for the
+      // user's question and append the cited results to the file context.
+      // Silent by design: this used to post a `thinking` transcript entry,
+      // which rendered as a second "Thought for 0.0s" line under every prompt.
+      let searchContext = ''
+      const webSearchOn = this.settingsStore.get('ai.webSearchEnabled', false)
+      if (webSearchOn && input.trim()) {
+        try {
+          searchContext = (await electron.web.searchContext(input.trim())) || ''
+        } catch (e) {
+          console.error('Web search failed:', e)
+        }
+      }
+
+      // Custom instructions from Settings > AI Assistant, with live file context appended
       const customPrompt =
         this.settingsStore.get('ai.systemPrompt', DEFAULT_AI_SYSTEM_PROMPT) ||
         DEFAULT_AI_SYSTEM_PROMPT
+      // The whole file used to go out with every question. A 6 MB note meant a
+      // 6 MB payload on the renderer's main thread and a request every provider
+      // rejects for size, so the context is capped and says so. Roughly 200k
+      // characters, which is about 50k tokens.
+      const docContext = documentContextFor(this.content)
       const systemPrompt = `${customPrompt}
 
 The user is currently editing the file: ${currentPath}
-Here is the current content of the active file:
+${docContext.note}Here is the current content of the active file:
 
 \`\`\`markdown
-${this.content}
+${docContext.text}
 \`\`\`
 
-If the user asks questions about their file, use the above content to answer.`
+If the user asks questions about their file, use the above content to answer.
+${searchContext}`
 
       // We bypass the ipc.ts system prompt handling completely to avoid needing an app restart.
       // We inject the system context as a 'user' message at the very beginning of the payload.
@@ -1206,6 +1313,7 @@ If the user asks questions about their file, use the above content to answer.`
       })
     }
     this.content = newContent
+    this.viewContent = newContent
     this.fileState.setContent(newContent)
     // Force an immediate save to disk so the 'dirty' flag is cleared.
     // This prevents the OS file watcher from firing while dirty=true and popping the conflict modal.
@@ -1291,34 +1399,23 @@ If the user asks questions about their file, use the above content to answer.`
       this.secondaryEditorView.destroy()
       this.secondaryEditorView = null
     }
+  }
 
-    // Opening the split snaps the left pane to its new width. `flex` shorthand
-    // does not transition, so drive it with WAAPI against the final basis.
-    if (
-      changedProperties.has('splitActive') &&
-      changedProperties.get('splitActive') === false &&
-      this.splitActive &&
-      !window.matchMedia('(prefers-reduced-motion: reduce)').matches
-    ) {
-      const panels = this.shadowRoot?.querySelectorAll<HTMLElement>('writemd-panel.pane')
-      const left = panels?.[0]
-      if (left) {
-        const finalWidth = left.getBoundingClientRect().width
-        const containerWidth =
-          left.parentElement?.getBoundingClientRect().width ?? finalWidth * 2
-        left.animate([{ flexBasis: `${containerWidth}px` }, { flexBasis: `${finalWidth}px` }], {
-          duration: 320,
-          easing: 'cubic-bezier(0.4, 0, 0.2, 1)'
-        })
-      }
-      const right = panels?.[1]
-      if (right) {
-        right.animate(
-          [{ opacity: 0, transform: 'translateX(24px)' }, { opacity: 1, transform: 'translateX(0)' }],
-          { duration: 220, easing: 'cubic-bezier(0.22, 1, 0.36, 1)' }
-        )
-      }
-    }
+  /**
+   * Close the split with motion: the pane leaves first, then the left pane
+   * takes the space. The left pane keeps its width while the exit plays, so the
+   * two never overlap, and its own `transition: flex` carries the expansion
+   * afterwards.
+   */
+  private startSplitExit(): void {
+    if (this.splitLeaving) return
+    this.splitLeaving = true
+    const pane = this.shadowRoot?.querySelector<HTMLElement>('writemd-panel.pane-in') ?? null
+    void conceal(pane).then(() => {
+      this.splitLeaving = false
+      this.secondaryEditorView?.destroy()
+      this.secondaryEditorView = null
+    })
   }
 
   /**
@@ -1455,12 +1552,27 @@ If the user asks questions about their file, use the above content to answer.`
       EditorView.updateListener.of((update) => {
         if (update.docChanged) {
           const newDoc = update.state.doc.toString()
+          // The string the view itself produced. The subscription below compares
+          // against it instead of re-serializing the document, which on a 6 MB
+          // note meant building a second copy of it on every keystroke just to
+          // discover it was already in sync.
           if (isSecondary) {
+            this.secondaryViewContent = newDoc
             this.fileState.setSecondaryContent(newDoc)
           } else {
             this.content = newDoc
+            this.viewContent = newDoc
             this.fileState.setContent(newDoc)
           }
+        } else if (
+          isSecondary &&
+          this.secondaryDoc?.isDiff &&
+          update.transactions.some((tr) => hasOriginalDocUpdate(tr))
+        ) {
+          // Accept in the diff view: no document change, only the original
+          // retargeted, but the merge doc is the resolved content and still
+          // needs to reach the file.
+          this.fileState.setSecondaryContent(update.state.doc.toString())
         }
         if (this.findOpen && (update.docChanged || update.selectionSet)) {
           this.findPanelEl?.refreshCounts()
@@ -1475,7 +1587,49 @@ If the user asks questions about their file, use the above content to answer.`
     return exts
   }
 
+  /**
+   * Point the primary view at a different file.
+   *
+   * `EditorState.create` rather than a dispatched replace. One view is reused
+   * across every tab, so its single undo stack accumulated every file's edits:
+   * opening a note and pressing Ctrl+Z applied the *previous* note's inverse
+   * change to this one. Announcing the load as non-history was not enough on its
+   * own, because the earlier document's events were still on the stack waiting
+   * behind it, and `isolateHistory` only stops adjacent events merging, not undo
+   * walking across the boundary. A new state is the boundary that holds.
+   *
+   * Selection and scroll restart with the document, which is what a new file
+   * wants anyway.
+   */
+  private swapPrimaryDocument(content: string, path: string | null): void {
+    const view = this.editorView
+    if (!view) return
+    this.viewContent = content
+    view.setState(
+      EditorState.create({
+        doc: content,
+        extensions: this.getBaseExtensions(false, this.viewMode, path)
+      })
+    )
+    view.requestMeasure()
+  }
+
+  /** Secondary-pane counterpart of `swapPrimaryDocument`. */
+  private swapSecondaryDocument(content: string, path: string | null): void {
+    const view = this.secondaryEditorView
+    if (!view || !this.secondaryDoc) return
+    this.secondaryViewContent = content
+    view.setState(
+      EditorState.create({
+        doc: content,
+        extensions: this.getBaseExtensions(true, this.secondaryDoc.viewMode, path)
+      })
+    )
+    view.requestMeasure()
+  }
+
   private initEditor(): void {
+    installFocusReportingFix()
     const container = this.shadowRoot?.querySelector('#primary-cm-wrapper')
     // Destroy before the early return, not after it. The container is absent
     // whenever the empty state is rendered, and bailing out first left a live
@@ -1488,10 +1642,12 @@ If the user asks questions about their file, use the above content to answer.`
       doc: this.content,
       extensions: this.getBaseExtensions(false, this.viewMode, this.filePath)
     })
+    this.viewContent = this.content
 
     this.editorView = new EditorView({
       state,
-      parent: container
+      parent: container,
+      root: this.shadowRoot ?? document
     })
 
     requestAnimationFrame(() => {
@@ -1509,10 +1665,18 @@ If the user asks questions about their file, use the above content to answer.`
       doc: this.secondaryDoc.content,
       extensions: this.getBaseExtensions(true, this.secondaryDoc.viewMode, this.secondaryDoc.path)
     })
+    this.secondaryViewContent = this.secondaryDoc.content
 
     this.secondaryEditorView = new EditorView({
       state,
-      parent: container
+      parent: container,
+      // The split pane's wrapper is slotted into <writemd-panel>, so
+      // CodeMirror picks that panel's shadow root as the view root and asks it
+      // for `activeElement` before it writes the caret. That shadow root reports
+      // null here, so every DOM-selection write was skipped and keystrokes
+      // landed wherever the caret used to be. The editor's own shadow root does
+      // report the focused view, so it is the root both views are given.
+      root: this.shadowRoot ?? document
     })
 
     requestAnimationFrame(() => {
@@ -1835,7 +1999,7 @@ If the user asks questions about their file, use the above content to answer.`
       if (result && !result.canceled && result.filePaths[0]) {
         const fileContent = await api()?.file?.read?.(result.filePaths[0])
         if (fileContent) {
-          this.fileState.openSecondaryFile(result.filePaths[0], fileContent.content)
+          await this.fileState.openSecondaryFile(result.filePaths[0], fileContent.content)
         }
       }
     } else {
@@ -1963,7 +2127,7 @@ If the user asks questions about their file, use the above content to answer.`
         <div class="panes">
           <writemd-panel
             class="pane"
-            style=${this.splitActive ? `flex: 0 0 calc(${this.leftPaneWidth}% - 2.5px);` : ''}
+            style=${this.splitActive || this.splitLeaving ? `flex: 0 0 calc(${this.leftPaneWidth}% - 2.5px);` : ''}
           >
             ${isVerticalTabs ? '' : html`<writemd-doc-bar></writemd-doc-bar>`}
 
@@ -1999,7 +2163,7 @@ If the user asks questions about their file, use the above content to answer.`
 
           <!-- split view - 2 (Right Pane, only when splitActive is true) -->
           ${
-            this.splitActive
+            this.splitActive || this.splitLeaving
               ? html`
                   <div
                     class="resizer ${this.isDraggingResizer ? 'dragging' : ''}"
@@ -2013,7 +2177,7 @@ If the user asks questions about their file, use the above content to answer.`
                     @mousedown=${this.startResize}
                     @keydown=${this.handleResizerKey}
                   ></div>
-                  <writemd-panel class="pane pane-in">
+                  <writemd-panel class="pane pane-in ${this.splitLeaving ? ' pane-leaving' : ''}">
                     ${
                       this.mountsSecondaryView && secondaryDoc
                         ? html`
@@ -2274,8 +2438,15 @@ If the user asks questions about their file, use the above content to answer.`
                                     .modelsLoading=${this.aiModelsLoading}
                                     .attachments=${this.aiAttachments}
                                     .attaching=${this.aiAttaching}
+                                    .webSearch=${
+                                      this.settingsStore?.get<boolean>(
+                                        'ai.webSearchEnabled',
+                                        false
+                                      ) ?? false
+                                    }
                                     @ai-submit=${this.handleAiSubmitEvent}
                                     @ai-cancel=${this.handleAiCancel}
+                                    @ai-websearch-toggle=${this.handleAiWebSearchToggle}
                                     @ai-attach-request=${this.handleAiAttachRequest}
                                     @ai-attach-files=${this.handleAiAttachFiles}
                                     @ai-attach-remove=${this.handleAiAttachRemove}

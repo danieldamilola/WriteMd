@@ -76,7 +76,7 @@ export class AiPanel extends LitElement {
      */
     ${scrollbarStyles}
 
-    /* ── transcript ── */
+    /* Ã¢â€â‚¬Ã¢â€â‚¬ transcript Ã¢â€â‚¬Ã¢â€â‚¬ */
 
     .chat-log {
       flex: 1;
@@ -317,7 +317,7 @@ export class AiPanel extends LitElement {
       max-width: 100%;
     }
 
-    /* ── streaming reveal ── */
+    /* Ã¢â€â‚¬Ã¢â€â‚¬ streaming reveal Ã¢â€â‚¬Ã¢â€â‚¬ */
 
     /*
      * The spans the streamedText directive creates live in this shadow root, so
@@ -340,7 +340,7 @@ export class AiPanel extends LitElement {
       filter: blur(0);
     }
 
-    @media (prefers-reduced-motion: reduce) {
+    :host-context([data-motion='reduced']) {
       .stream .stream-w {
         opacity: 1;
         filter: none;
@@ -385,7 +385,7 @@ export class AiPanel extends LitElement {
       white-space: nowrap;
     }
 
-    /* ── prompt bar ── */
+    /* Ã¢â€â‚¬Ã¢â€â‚¬ prompt bar Ã¢â€â‚¬Ã¢â€â‚¬ */
 
     /*
      * The composer is one raised card with the text field above a control row,
@@ -426,7 +426,9 @@ export class AiPanel extends LitElement {
 
     .ai-composer[data-dragover] {
       background: var(--bg-elevated);
-      box-shadow: var(--shadow-2), inset 0 0 0 1.5px var(--accent);
+      box-shadow:
+        var(--shadow-2),
+        inset 0 0 0 1.5px var(--accent);
     }
 
     .ai-attachments {
@@ -692,7 +694,7 @@ export class AiPanel extends LitElement {
       outline-offset: 1px;
     }
 
-    /* ── popovers ── */
+    /* Ã¢â€â‚¬Ã¢â€â‚¬ popovers Ã¢â€â‚¬Ã¢â€â‚¬ */
 
     .ai-pop {
       position: absolute;
@@ -708,7 +710,7 @@ export class AiPanel extends LitElement {
       background: var(--bg-elevated);
       box-shadow: var(--shadow-3);
       transform-origin: bottom left;
-      animation: ai-pop-in 140ms cubic-bezier(0.22, 1, 0.36, 1);
+      animation: ai-pop-in var(--motion-fast) var(--motion-ease);
     }
 
     @keyframes ai-pop-in {
@@ -718,7 +720,7 @@ export class AiPanel extends LitElement {
       }
     }
 
-    @media (prefers-reduced-motion: reduce) {
+    :host-context([data-motion='reduced']) {
       .ai-pop {
         animation: none;
       }
@@ -784,7 +786,7 @@ export class AiPanel extends LitElement {
       color: var(--accent);
     }
 
-    /* ── unconfigured ── */
+    /* Ã¢â€â‚¬Ã¢â€â‚¬ unconfigured Ã¢â€â‚¬Ã¢â€â‚¬ */
 
     /*
      * This used to reuse .empty-state, which is declared in Editor's shadow root
@@ -917,6 +919,9 @@ export class AiPanel extends LitElement {
    * than look inert.
    */
   @property({ type: Boolean }) attaching = false
+
+  /** Ground answers with a keyless web search before sending to the model. */
+  @property({ type: Boolean }) webSearch = false
 
   /**
    * Owns the word-by-word reveal for the one message that is still arriving.
@@ -1258,7 +1263,7 @@ export class AiPanel extends LitElement {
           <span class="ai-empty-mark">${icon('sparkle', 36)}</span>
           <p class="ai-empty-title">No assistant selected</p>
           <p class="ai-empty-body">
-            Add an API key and pick a model, or point WriteMd at a local Ollama instance.
+            Add an API key and pick a model, use local Ollama, or select the opencode CLI.
           </p>
           <button
             class="ai-empty-action"
@@ -1345,6 +1350,22 @@ export class AiPanel extends LitElement {
               @click=${() => this.requestAttach()}
             >
               ${icon(this.attaching ? 'clock' : 'plus', 15)}
+            </button>
+
+            <button
+              class="ai-tool"
+              type="button"
+              aria-label="Search the web"
+              aria-pressed=${this.webSearch}
+              title=${this.webSearch ? 'Web search on' : 'Web search off'}
+              style=${this.webSearch ? 'color: var(--accent);' : ''}
+              @click=${() => {
+                this.dispatchEvent(
+                  new CustomEvent('ai-websearch-toggle', { bubbles: true, composed: true })
+                )
+              }}
+            >
+              ${icon('globe', 15)}
             </button>
 
             <button

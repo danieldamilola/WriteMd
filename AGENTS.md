@@ -4,9 +4,9 @@
 
 **WriteMd** - Frictionless Markdown Editor. Hybrid vault model: new files go to vault (`~/Documents/WriteMd Vault/`), existing files open/edit/save in place. No accounts, no sync, no lock-in.
 
-**PRD:** `PRD.md` - single source of truth for scope, architecture, and decisions.
+**PRD:** `docs/PRD.md` - single source of truth for scope, architecture, and decisions.
 
-**Phases:** `phases.md` - implementation roadmap with acceptance criteria per task.
+**Phases:** `docs/phases.md` - implementation roadmap with acceptance criteria per task.
 
 **Figma Design:** https://www.figma.com/design/ctsfPaeg9sQl7OfXhy4eUT/Projects--UI?node-id=114-127&m=dev
 
@@ -59,7 +59,7 @@ Some screens are not designed yet (menu bar, settings modal, welcome screen, exp
 
 ## Workflow
 
-- Read `phases.md` for the current phase and its acceptance criteria before writing code.
+- Read `docs/phases.md` for the current phase and its acceptance criteria before writing code.
 - `pnpm typecheck` must pass before anything is considered done.
 - `pnpm test` for touched areas. Add a test when fixing a bug.
 - Verify in the running app when the change is visual. Screenshots or it didn't happen.

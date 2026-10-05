@@ -15,6 +15,14 @@ import { showConfirm } from '../services/confirm'
 import { SettingsStore } from '../state/settings'
 import { FileState, type ConflictInfo } from '../state/file-state'
 import { COMMANDS, bindingFromEvent, bindingsEqual, effectiveBindings } from '../state/shortcuts'
+import { initAutoHideScrollbars } from '../utils/auto-hide-scrollbars'
+import {
+  applyMotionPreference,
+  slideIn,
+  slideOut,
+  watchSystemMotionPreference,
+  type MotionPreference
+} from '../utils/motion'
 
 @customElement('writemd-app')
 export class WriteMdApp extends LitElement {
@@ -131,6 +139,12 @@ export class WriteMdApp extends LitElement {
   @state() private splitActive = false
   @state() private panelOrientation: 'horizontal' | 'vertical' = 'horizontal'
   @state() private verticalPanelCollapsed = false
+  /**
+   * True between the moment the collapse animation starts and the moment the
+   * rail unmounts. Without it the element would be gone before the animation
+   * could play and the panel would simply vanish.
+   */
+  @state() private verticalPanelLeaving = false
   @state() private tabs: Array<{ path: string | null; dirty: boolean }> = []
   @state() private activeTab = 0
   @state() private secondaryPath: string | null = null
@@ -140,8 +154,10 @@ export class WriteMdApp extends LitElement {
   private fileState = FileState.getInstance()
   private unsubscribeFileState: (() => void) | null = null
   private unsubscribeOrientation: (() => void) | null = null
+  private unsubscribeMotion: (() => void) | null = null
   private unsubscribeFileOpen: (() => void) | null = null
   private unsubscribeSettingsOpen: (() => void) | null = null
+  private teardownAutoHideScrollbars: (() => void) | null = null
   private stripObserver: ResizeObserver | null = null
   private observedStrip: HTMLElement | null = null
 
@@ -199,6 +215,7 @@ export class WriteMdApp extends LitElement {
     window.addEventListener('keydown', this.handleGlobalShortcuts)
     window.addEventListener('dragover', this.handleWindowDragOver)
     window.addEventListener('drop', this.handleWindowDrop)
+    this.teardownAutoHideScrollbars = initAutoHideScrollbars()
     this.unsubscribeSettingsOpen = on('settings:open', ({ tab }) => {
       this.settingsTab = tab ?? 'general'
       this.showSettings = true
@@ -228,8 +245,15 @@ export class WriteMdApp extends LitElement {
     )
     document.documentElement.setAttribute(
       'data-theme',
-      this.settingsStore.get('appearance.theme', 'dark')
+      this.settingsStore.get('appearance.theme', 'graphite')
     )
+    // Motion is decided once, here, and every animated surface in the app tests
+    // the resulting `data-motion` attribute rather than the media query itself.
+    applyMotionPreference(this.settingsStore.get('appearance.motion', 'system') as MotionPreference)
+    watchSystemMotionPreference()
+    this.unsubscribeMotion = this.settingsStore.subscribe('appearance.motion', (v) => {
+      applyMotionPreference((v as MotionPreference) ?? 'system')
+    })
     this.unsubscribeFileState = this.fileState.subscribe((s) => {
       this.splitActive = s.splitActive
       this.tabs = s.tabs
@@ -251,10 +275,13 @@ export class WriteMdApp extends LitElement {
     window.removeEventListener('keydown', this.handleGlobalShortcuts)
     window.removeEventListener('dragover', this.handleWindowDragOver)
     window.removeEventListener('drop', this.handleWindowDrop)
+    this.teardownAutoHideScrollbars?.()
+    this.teardownAutoHideScrollbars = null
     this.unsubscribeFileOpen?.()
     this.unsubscribeSettingsOpen?.()
     this.unsubscribeFileState?.()
     this.unsubscribeOrientation?.()
+    this.unsubscribeMotion?.()
     this.stripObserver?.disconnect()
     this.stripObserver = null
     this.observedStrip = null
@@ -435,6 +462,38 @@ export class WriteMdApp extends LitElement {
     }
   }
 
+  /**
+   * Collapse or expand the tab rail.
+   *
+   * The rail is unmounted when collapsed, so a collapse has to play before the
+   * state flips and an expand has to play after the element exists. Both go
+   * through the shared engine, which collapses to a single frame when motion is
+   * off, so there is no reduced-motion branch here.
+   */
+  private toggleVerticalPanel = (): void => {
+    const rail = (): HTMLElement | null =>
+      (this.shadowRoot?.querySelector('writemd-vertical-tab-bar') as HTMLElement | null) ?? null
+
+    if (this.verticalPanelCollapsed) {
+      this.verticalPanelCollapsed = false
+      void this.updateComplete.then(() => {
+        void slideIn(rail(), 'x')
+      })
+      return
+    }
+
+    const el = rail()
+    if (!el) {
+      this.verticalPanelCollapsed = true
+      return
+    }
+    this.verticalPanelLeaving = true
+    void slideOut(el, 'x').then(() => {
+      this.verticalPanelCollapsed = true
+      this.verticalPanelLeaving = false
+    })
+  }
+
   private async openFileDialog(): Promise<void> {
     const result = await api()?.file?.openDialog?.({
       properties: ['openFile'],
@@ -520,7 +579,7 @@ export class WriteMdApp extends LitElement {
           @open-menu=${() => (this.showPalette = true)}
           @open-settings=${() => (this.showSettings = true)}
           @toggle-split=${() => this.fileState.toggleSplitView()}
-          @toggle-panel=${() => (this.verticalPanelCollapsed = !this.verticalPanelCollapsed)}
+          @toggle-panel=${this.toggleVerticalPanel}
         >
           <div
             slot="tabs"
@@ -584,8 +643,10 @@ export class WriteMdApp extends LitElement {
 
         <div class="main-area">
           ${
-            this.panelOrientation === 'vertical' && !this.verticalPanelCollapsed
+            this.panelOrientation === 'vertical' &&
+            (!this.verticalPanelCollapsed || this.verticalPanelLeaving)
               ? html`<writemd-vertical-tab-bar
+                  class=${this.verticalPanelLeaving ? 'leaving' : ''}
                   .tabs=${this.tabs}
                   .activeTab=${this.activeTab}
                   .secondaryPath=${this.secondaryPath}

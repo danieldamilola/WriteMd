@@ -11,7 +11,7 @@ import {
 } from './extensions/link-click'
 import { tableLinePlugin } from './extensions/table-line'
 import { inlinePreviewPlugin } from './extensions/live-decorations'
-import { liveTableField } from './extensions/live-table'
+import { liveTableField, tableCellEditing } from './extensions/live-table'
 
 export { readOnlyFacet, readOnlyExtension, tableLinePlugin, liveTableField }
 export { documentPathFacet, linkClickStyleFacet } from './extensions/document-path'
@@ -20,6 +20,7 @@ export function livePreviewPlugin(config: { onLinkClick?: LinkClickHandler } = {
   const { onLinkClick = defaultOnLinkClick } = config
   return [
     liveTableField,
+    tableCellEditing,
     previewFrozenField,
     inlinePreviewPlugin,
     freezeMousePlugin,
