@@ -40,3 +40,11 @@
 - **Stale Settings Specs**: Three `editor.spec.ts` cases still clicked the removed settings X button and asserted the old 230px sidebar; they use the Back button and the 250px shell now.
 - **Project-Wide Dashes**: All remaining em/en dashes replaced with hyphens per the unslop style.
 - **Smaller Fixes**: The math delimiter cache was a module global, so in split view whichever pane was not scanned last re-read the whole document on every arrow key; it is keyed by document now. `focus-reporting` referenced the `ShadowRoot` global unguarded, which throws wherever it is undefined and took the whole focus check with it. Scrollbar roots were held in a strong Set, pinning every shadow root the app ever created. `appearance.motion` accepted any string. PDF and DOCX export skipped the fsync and the file-mode carry-over that note writes do. OpenCode's cached sessions survived a server restart, its stream kept pumping after the prompt failed, and its version gate compared `v2.3.1` unparsed and refused to start.
+
+**Documentation**
+
+- **The README's Download Link Was Dead**: The vault folder name had been pasted into the repository slug, so the URL read `danieldamilola/WriteMd Vaultreleases`. The Release badge, the CI badge and the installation link all pointed at a page that does not exist, which meant the documented way to install 1.3.0 led nowhere. All three now resolve, and the CI badge points at a workflow that is actually in the repository.
+- **Screenshots That Resolve**: The README's images pointed into `_assets/`, the folder WriteMd itself creates for pasted and dropped images, and had never been committed, so they rendered as broken images. They live in `docs/screenshots/` now with descriptive filenames and alt text that describes what is on screen rather than repeating the file name. That folder is gitignored, since anything in it is scratch from a paste.
+- **Working Docs Moved to `docs/`**: `PRD.md`, `phases.md`, `AI_PANEL_WORKLOG.md` and `zen-animations-overview.md` were sitting in the repository root next to the build config. They move under `docs/`, with every reference updated.
+
+566 unit and 68 end-to-end tests pass on this branch, up from 483 and 59.
