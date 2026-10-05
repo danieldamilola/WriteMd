@@ -45,3 +45,7 @@ tmp-*.jpeg
 # lands here is scratch from a paste, not project content, so it should never be
 # committed. README screenshots live in docs/screenshots/ instead.
 /_assets/
+
+# Debug screenshots the Playwright specs write into the working directory. They
+# exist to be looked at during a run, not kept.
+tmp-*.png
