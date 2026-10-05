@@ -1,6 +1,6 @@
 {
   "name": "writemd",
-  "version": "1.2.0",
+"version": "1.3.0",
   "description": "A frictionless Markdown editor. Files stay on your machine.",
   "main": "./out/main/index.js",
   "author": "danieldamilola",
