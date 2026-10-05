@@ -181,13 +181,31 @@ export const writeMDTheme: Extension = EditorView.theme({
     border: '1px solid var(--cm-chrome-border)',
     borderRadius: '6px',
     boxShadow: '0 4px 12px rgba(0,0,0,0.5)',
-    zIndex: '100'
+    zIndex: '100',
+    alignItems: 'center',
+    userSelect: 'none',
+    cursor: 'grab',
+    touchAction: 'none'
+  },
+  '.cm-table-grip': {
+    display: 'flex',
+    alignItems: 'center',
+    alignSelf: 'stretch',
+    padding: '0 5px 0 3px',
+    marginRight: '1px',
+    borderRight: '1px solid var(--cm-chrome-border)',
+    color: 'var(--cm-chrome-muted)',
+    cursor: 'grab'
+  },
+  '.cm-table-grip:hover': {
+    color: 'var(--cm-chrome-fg)'
   },
   '.cm-table-toolbar button': {
     background: 'transparent',
     border: 'none',
     color: 'var(--cm-chrome-muted)',
-    cursor: 'pointer',
+    /* The whole bar is a handle, so the pointer says so on the buttons too. */
+    cursor: 'grab',
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',

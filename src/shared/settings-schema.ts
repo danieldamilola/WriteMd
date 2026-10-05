@@ -14,6 +14,13 @@ export interface WriteMdSettings {
     autoSaveDelay: number
     showLineNumbers: boolean
     highlightActiveLine: boolean
+    /**
+     * Where the user last dragged the floating table toolbar, in pixels from the
+     * spot CodeMirror anchors it to. Per-editor while the session lives (so the
+     * two split panes can sit on different tables); this copy seeds new editors
+     * and survives restarts.
+     */
+    tableToolbarOffset: { x: number; y: number }
   }
   appearance: {
     theme: string
@@ -100,7 +107,8 @@ export const DEFAULT_SETTINGS: WriteMdSettings = {
     autoSave: true,
     autoSaveDelay: 500,
     showLineNumbers: false,
-    highlightActiveLine: true
+    highlightActiveLine: true,
+    tableToolbarOffset: { x: 0, y: 0 }
   },
   appearance: {
     theme: 'graphite',
