@@ -44,6 +44,18 @@ const FIXTURES = [
 
 const TIMEOUT = 180_000
 
+/**
+ * Setup budget for the hooks below, which is not `TIMEOUT`.
+ *
+ * `test.describe.configure({ timeout })` sets the budget for tests, not for
+ * hooks: a hook takes the config's global `timeout`, which is 30s here. These
+ * write a 1500-note tree and a 6 MB note to disk, launch Electron, reload
+ * against the result, and then delete all of it again, which is minutes of work
+ * on a Windows runner. Playwright kills a hook at the global budget and the run
+ * then reports it as a spec failure with the real cause nowhere in sight.
+ */
+const SETUP_TIMEOUT = 600_000
+
 /** Size on disk, for the auto-save scenario. */
 function fileSize(path: string): number {
   try {
@@ -89,6 +101,9 @@ test.describe('Stress sweep', () => {
   let window: Page
 
   test.beforeAll(async () => {
+    // Raises this hook's own budget. See SETUP_TIMEOUT for why the config's
+    // global 30s is not enough here.
+    test.setTimeout(SETUP_TIMEOUT)
     const openTabs = FIXTURES.map((f) => join(STRESS, f))
     for (const p of openTabs) {
       if (!p.startsWith(STRESS)) throw new Error(`refusing to open ${p}`)
@@ -127,14 +142,17 @@ test.describe('Stress sweep', () => {
       }
     })
     await window.reload()
-    // Not the 5s default. This boots the app against a synthetic vault holding a
-    // 1500-note tree and a 6 MB note, and the reload has to re-read it before the
-    // first paint. It boots, but on a loaded CI runner it does not boot in five
-    // seconds, and a timeout here reads as "the app failed to start".
-    await expect(window.locator('writemd-top-bar')).toBeVisible({ timeout: 120_000 })
+    // Bounded well above Playwright's 5s default, but not the lever that decides
+    // this spec: the hook budget above is. On a runner with memory for it, the
+    // app paints here in a few seconds; where it does not, the worker dies with
+    // a native crash and no amount of waiting helps.
+    await expect(window.locator('writemd-top-bar')).toBeVisible({ timeout: 60_000 })
   })
 
   test.afterAll(async () => {
+    // Same reason as the setup hook: closing the app and deleting a 1500-note
+    // synthetic vault is not a 30-second job on Windows.
+    test.setTimeout(SETUP_TIMEOUT)
     await app?.close()
     fixture.cleanup()
     mkdirSync(join(process.cwd(), 'test-results'), { recursive: true })

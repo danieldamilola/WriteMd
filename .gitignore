@@ -28,6 +28,13 @@ temp-test-vault/
 test-output.txt
 test-results.txt
 
+# Screenshots an e2e spec writes next to the repo root while it works out what a
+# drag or a layout actually did. They are scratch output for whoever is looking
+# at the failure, not assets.
+tmp-*.png
+tmp-*.jpg
+tmp-*.jpeg
+
 # Note: `*.log*` was removed. The pattern is broad enough to swallow real
 # source and docs (anything with a `.log` segment, e.g. docs/dialog.log.md or
 # src/**/blog.settings.ts). Use `*.log` and `*.log.*` instead.

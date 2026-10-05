@@ -20,7 +20,7 @@ describe('psCommand quoting', () => {
   it('uses single quotes so Node argv quoting has nothing to mangle', () => {
     // Pre-quoted strings through spawn argv get backslash-escaped by Node,
     // which cmd.exe reads literally. Regression test for:
-    // '"C:\…\opencode.cmd"' is not recognized as an internal or external command.
+    // '"C:\â€¦\opencode.cmd"' is not recognized as an internal or external command.
     expect(psCommand('C:\\npm\\opencode.cmd', ['--version'])).toEqual([
       '-NoProfile',
       '-NonInteractive',
@@ -77,34 +77,55 @@ describe('opencode model list parsing', () => {
  * basename check alone is not a boundary: a UNC path passes one and then runs a
  * program the renderer chose.
  */
+/**
+ * `ai.opencodeCliPath` is written by `settings:set` with no user gesture behind
+ * it, and whatever it names is executed with this process's privileges. A
+ * basename check alone is not a boundary: a UNC path passes one and then runs a
+ * program the renderer chose.
+ *
+ * The path rules are platform-dependent by design, so the cases are too:
+ * `isAbsolute` is POSIX on Linux and Win32 on Windows, and a `C:\...` path is
+ * genuinely not a usable absolute path on Linux. Each platform gets the
+ * rejection it should actually produce.
+ */
+const onWindows = process.platform === 'win32'
+
 describe('custom opencode path rejection', () => {
   it('accepts an absolute local path', () => {
-    expect(
-      rejectCustomOpencodePath('C:\\Users\\me\\AppData\\Roaming\\npm\\opencode.cmd')
-    ).toBeNull()
-    expect(rejectCustomOpencodePath('/usr/local/bin/opencode')).toBeNull()
-  })
-
-  it('rejects a relative path, which resolves against our own cwd', () => {
-    expect(rejectCustomOpencodePath('opencode.cmd')).toBe('not an absolute path')
-    expect(rejectCustomOpencodePath('..\\..\\opencode.cmd')).toBe('not an absolute path')
-  })
-
-  it('rejects a UNC path, which is remote and passes a basename test', () => {
-    expect(rejectCustomOpencodePath('\\\\attacker\\share\\opencode.cmd')).toBe(
-      'not a local file path'
-    )
-  })
-
-  it('rejects a device path', () => {
-    expect(rejectCustomOpencodePath('\\\\?\\C:\\opencode.cmd')).toBe('not a local file path')
+    const absolute = onWindows
+      ? 'C:\\Users\\me\\AppData\\Roaming\\npm\\opencode.cmd'
+      : '/usr/local/bin/opencode'
+    expect(rejectCustomOpencodePath(absolute)).toBeNull()
   })
 
   it('accepts a path with a space or an ampersand in it', () => {
     // Not a security boundary: psCommand single-quotes the binary and execFile
     // passes an argv array, so quoting covers that. A rule broad enough to catch
     // `&` would reject a real install under `C:\Program Files\R&D`.
-    expect(rejectCustomOpencodePath('C:\\Program Files\\R&D\\opencode.cmd')).toBeNull()
+    const awkward = onWindows ? 'C:\\Program Files\\R&D\\opencode.cmd' : '/opt/R&D/opencode'
+    expect(rejectCustomOpencodePath(awkward)).toBeNull()
+  })
+
+  it('rejects a relative path, which resolves against our own cwd', () => {
+    // Relative on every platform, so this case needs no guard.
+    expect(rejectCustomOpencodePath('opencode.cmd')).toBe('not an absolute path')
+    expect(rejectCustomOpencodePath('bin/opencode')).toBe('not an absolute path')
+  })
+
+  it.runIf(onWindows)('rejects a UNC path, which is remote and passes a basename test', () => {
+    expect(rejectCustomOpencodePath('\\\\attacker\\share\\opencode.cmd')).toBe(
+      'not a local file path'
+    )
+  })
+
+  it.runIf(onWindows)('rejects a device path', () => {
+    expect(rejectCustomOpencodePath('\\\\?\\C:\\opencode.cmd')).toBe('not a local file path')
+  })
+
+  it('refuses a remote path on every platform', () => {
+    // On Linux this never reaches the UNC check, because it is not an absolute
+    // path at all. Either way it is refused, which is the property that matters.
+    expect(rejectCustomOpencodePath('\\\\attacker\\share\\opencode.cmd')).not.toBeNull()
   })
 })
 

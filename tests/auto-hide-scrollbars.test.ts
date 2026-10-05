@@ -66,4 +66,29 @@ describe('auto-hide scrollbars', () => {
     scroller.dispatchEvent(new Event('scroll'))
     expect(scroller.classList.contains('is-scrolling')).toBe(false)
   })
+
+  it('re-attaches when initialised again after a teardown', () => {
+    // Teardown has to clear the "already attached" bookkeeping, not just the
+    // listeners. Root membership is kept in a WeakSet precisely because it does
+    // not retain roots, and a WeakSet has no clear(), so the teardown walk is the
+    // only place that can undo it. Miss that and a second init finds every root
+    // still attached, installs nothing, and the scrollbars stay hidden for good.
+    const scroller = document.createElement('div')
+    document.body.appendChild(scroller)
+    teardown()
+    teardown = initAutoHideScrollbars()
+    scroller.dispatchEvent(new Event('scroll'))
+    expect(scroller.classList.contains('is-scrolling')).toBe(true)
+  })
+
+  it('covers a shadow root created after a re-init', () => {
+    const teardownAgain = initAutoHideScrollbars()
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+    const inner = document.createElement('div')
+    host.attachShadow({ mode: 'open' }).appendChild(inner)
+    inner.dispatchEvent(new Event('scroll'))
+    expect(inner.classList.contains('is-scrolling')).toBe(true)
+    teardownAgain()
+  })
 })

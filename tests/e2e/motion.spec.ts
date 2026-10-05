@@ -88,9 +88,11 @@ test.describe('Motion preference', () => {
     await page.waitForTimeout(1200)
     expect(await motionAttribute(page)).toBe('full')
     await page.locator('writemd-icon-button[title="Split view"]').click()
-    await page.waitForTimeout(50)
-    // pane-in and surface-in, among others.
-    expect(await runningAnimations(page)).toBeGreaterThan(0)
+    // Polled rather than sampled once after a fixed sleep. What is under test is
+    // that opening the split animates at all; a 50ms wait races the animation's
+    // own duration, and on a loaded runner the round trip can land after the
+    // pane has finished easing in.
+    await expect.poll(() => runningAnimations(page), { timeout: 5000 }).toBeGreaterThan(0)
     await app.close()
   })
 
