@@ -45,16 +45,16 @@ const FIXTURES = [
 const TIMEOUT = 180_000
 
 /**
- * Setup budget for the hook below, which is not `TIMEOUT`.
+ * Setup budget for the hooks below, which is not `TIMEOUT`.
  *
  * `test.describe.configure({ timeout })` sets the budget for tests, not for
- * hooks: a hook takes the config's global `timeout`, which is 30s here. This one
- * writes a 1500-note tree and a 6 MB note to disk, launches Electron, and reloads
- * the app against the result, so on a loaded CI runner it is nowhere near 30
- * seconds. Playwright kills the hook at the global budget and the run then
- * reports it as a spec failure with the real cause nowhere in sight.
+ * hooks: a hook takes the config's global `timeout`, which is 30s here. These
+ * write a 1500-note tree and a 6 MB note to disk, launch Electron, reload
+ * against the result, and then delete all of it again, which is minutes of work
+ * on a Windows runner. Playwright kills a hook at the global budget and the run
+ * then reports it as a spec failure with the real cause nowhere in sight.
  */
-const SETUP_TIMEOUT = 900_000
+const SETUP_TIMEOUT = 600_000
 
 /** Size on disk, for the auto-save scenario. */
 function fileSize(path: string): number {
@@ -142,10 +142,11 @@ test.describe('Stress sweep', () => {
       }
     })
     await window.reload()
-    // Generous, and the inner bound rather than the effective one: this boot has
-    // to re-read a synthetic vault holding a 1500-note tree and a 6 MB note. It
-    // boots, just not within Playwright's 5s default on a loaded CI runner.
-    await expect(window.locator('writemd-top-bar')).toBeVisible({ timeout: 180_000 })
+    // Bounded well above Playwright's 5s default, but not the lever that decides
+    // this spec: the hook budget above is. On a runner with memory for it, the
+    // app paints here in a few seconds; where it does not, the worker dies with
+    // a native crash and no amount of waiting helps.
+    await expect(window.locator('writemd-top-bar')).toBeVisible({ timeout: 60_000 })
   })
 
   test.afterAll(async () => {
