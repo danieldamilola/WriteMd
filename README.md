@@ -15,7 +15,7 @@ WriteMd is a fast, private, local-first Markdown editor. Double-click any `.md` 
 _Design inspired by OpenCode._
 
 <div align="center">
-  <img src="docs/screenshots/table-live-editing.png" alt="A Markdown table rendering as editable cells, with the floating table toolbar above it" width="880">
+  <img src="docs/readme-screenshots/just-download.png" alt="A short note open in WriteMd, with a clickable wiki link to the repository" width="880">
 </div>
 
 ## Highlights
@@ -84,14 +84,6 @@ Recent files live in `config.json` under `files.recentFiles`. There is no
 IndexedDB and no separate `recent-files.json`.
 
 ## Screenshots
-
-<div align="center">
-  <img src="docs/screenshots/math-and-diagrams.png" alt="KaTeX math inline and as a display block, above a Mermaid flowchart rendered from a fenced code block" width="880">
-  <br><br>
-  <img src="docs/screenshots/split-pane-files.png" alt="Split view: the note on the left, the vault file list in the right pane, with the vertical tab rail down the side" width="880">
-</div>
-
-### In use
 
 <div align="center">
   <img src="docs/readme-screenshots/just-download.png" alt="A short note open in WriteMd, with a clickable wiki link to the repository" width="880">
