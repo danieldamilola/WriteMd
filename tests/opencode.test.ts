@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import { psCommand, opencodeLoginCommand, opencodeMajor } from '../src/main/opencode'
+import {
+  psCommand,
+  opencodeLoginCommand,
+  opencodeMajor,
+  rejectCustomOpencodePath
+} from '../src/main/opencode'
 import { collectModelIds, parseTextModelList, unionModelIds } from '../src/main/opencode'
 import {
   compareSemver,
@@ -66,6 +71,43 @@ describe('opencode model list parsing', () => {
   })
 })
 
+/**
+ * `ai.opencodeCliPath` is written by `settings:set` with no user gesture behind
+ * it, and whatever it names is executed with this process's privileges. A
+ * basename check alone is not a boundary: a UNC path passes one and then runs a
+ * program the renderer chose.
+ */
+describe('custom opencode path rejection', () => {
+  it('accepts an absolute local path', () => {
+    expect(
+      rejectCustomOpencodePath('C:\\Users\\me\\AppData\\Roaming\\npm\\opencode.cmd')
+    ).toBeNull()
+    expect(rejectCustomOpencodePath('/usr/local/bin/opencode')).toBeNull()
+  })
+
+  it('rejects a relative path, which resolves against our own cwd', () => {
+    expect(rejectCustomOpencodePath('opencode.cmd')).toBe('not an absolute path')
+    expect(rejectCustomOpencodePath('..\\..\\opencode.cmd')).toBe('not an absolute path')
+  })
+
+  it('rejects a UNC path, which is remote and passes a basename test', () => {
+    expect(rejectCustomOpencodePath('\\\\attacker\\share\\opencode.cmd')).toBe(
+      'not a local file path'
+    )
+  })
+
+  it('rejects a device path', () => {
+    expect(rejectCustomOpencodePath('\\\\?\\C:\\opencode.cmd')).toBe('not a local file path')
+  })
+
+  it('accepts a path with a space or an ampersand in it', () => {
+    // Not a security boundary: psCommand single-quotes the binary and execFile
+    // passes an argv array, so quoting covers that. A rule broad enough to catch
+    // `&` would reject a real install under `C:\Program Files\R&D`.
+    expect(rejectCustomOpencodePath('C:\\Program Files\\R&D\\opencode.cmd')).toBeNull()
+  })
+})
+
 describe('opencode console login command', () => {
   it('uses auth login on v2 and console login on v1', () => {
     expect(opencodeMajor('1.18.34')).toBe(1)
@@ -99,6 +141,18 @@ describe('opencode serve contract', () => {
     expect(compareSemver('1.18.34', '1.14.19')).toBeGreaterThan(0)
     expect(compareSemver('1.14.19', '1.14.19')).toBe(0)
     expect(compareSemver('1.9.0', '1.14.19')).toBeLessThan(0)
+  })
+
+  it('gates on the parsed version, so a "v"-prefixed CLI is not called too old', () => {
+    // `compareSemver` reads `v2` as NaN and scores it 0, which is below the
+    // minimum. Comparing the raw `--version` output therefore refused to start a
+    // current CLI with "OpenCode vv2.3.1 is too old". Parsing first is the fix.
+    const printed = 'opencode v2.3.1'
+    const parsed = parseOpenCodeVersion(printed)
+    expect(parsed).toBe('2.3.1')
+    expect(compareSemver(parsed as string, '1.14.19')).toBeGreaterThan(0)
+    // The unparsed tail, which is what used to reach the gate, does fail.
+    expect(compareSemver(printed.split(/\s/).pop() as string, '1.14.19')).toBeLessThan(0)
   })
 
   it('finds the server URL in serve output', () => {

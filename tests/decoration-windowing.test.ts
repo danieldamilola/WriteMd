@@ -56,8 +56,9 @@ describe('math decorations', () => {
 describe('wiki link decorations', () => {
   it('renders a link near the viewport', () => {
     const v = view('see [[Some Note]] here\n', [wikiLinkPlugin] as never)
-    const marks = (v.plugin(wikiLinkPlugin as never) as unknown as { decorations: { size: number } })
-      .decorations
+    const marks = (
+      v.plugin(wikiLinkPlugin as never) as unknown as { decorations: { size: number } }
+    ).decorations
     expect(marks.size).toBe(1)
     v.destroy()
   })

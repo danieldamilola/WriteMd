@@ -64,7 +64,7 @@ export class SettingsStore {
   /** Reset to factory defaults and persist. */
   reset(): void {
     this.settings = structuredClone(DEFAULT_SETTINGS)
-    void api()?.settings?.set?.(this.settings)
+    this.persist()
     applySettingsToDOM(this)
   }
 
@@ -92,7 +92,23 @@ export class SettingsStore {
     target[keys[keys.length - 1]] = value
     this.notify(key, value)
     applySettingsToDOM(this)
-    void api()?.settings?.set?.(this.settings)
+    this.persist()
+  }
+
+  /**
+   * Push the whole settings object to the main process.
+   *
+   * The rejection is caught and logged rather than left floating: `settings:set`
+   * rethrows on a write failure, so an unhandled one surfaced as an unhandled
+   * rejection in the renderer while the UI carried on as though the save had
+   * landed. Nothing here can recover from it, but it should not be silent either.
+   */
+  private persist(): void {
+    const send = api()?.settings?.set?.(this.settings)
+    if (!send) return
+    void send.catch((e: unknown) => {
+      console.error('Failed to persist settings:', e)
+    })
   }
 
   subscribe(key: string, callback: (value: unknown) => void): () => void {

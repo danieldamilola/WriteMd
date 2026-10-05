@@ -426,7 +426,9 @@ export class AiPanel extends LitElement {
 
     .ai-composer[data-dragover] {
       background: var(--bg-elevated);
-      box-shadow: var(--shadow-2), inset 0 0 0 1.5px var(--accent);
+      box-shadow:
+        var(--shadow-2),
+        inset 0 0 0 1.5px var(--accent);
     }
 
     .ai-attachments {

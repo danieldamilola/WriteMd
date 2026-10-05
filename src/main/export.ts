@@ -1,5 +1,5 @@
 import { BrowserWindow, dialog, type BrowserWindow as BrowserWindowType } from 'electron'
-import { writeFile, rename, stat, readFile, unlink } from 'fs/promises'
+import { rename, stat, readFile, unlink, open, chmod } from 'fs/promises'
 import { dirname, resolve, relative, extname } from 'path'
 import { mkdirSync } from 'fs'
 import { randomUUID } from 'crypto'
@@ -137,8 +137,27 @@ function defaultExportPath(docPath: string | null, ext: string): string | undefi
 async function atomicWrite(targetPath: string, data: string | Buffer): Promise<number> {
   mkdirSync(dirname(targetPath), { recursive: true })
   const tempPath = `${targetPath}.${randomUUID()}.tmp`
+  // Overwriting an existing file must not change its permissions. The temp file
+  // gets the process umask, so without this an export over a `0600` PDF quietly
+  // widened it for everyone who can reach the folder.
+  let mode: number | undefined
   try {
-    await writeFile(tempPath, data)
+    mode = (await stat(targetPath)).mode
+  } catch {
+    // New file: the umask default is right.
+  }
+  try {
+    const handle = await open(tempPath, 'w')
+    try {
+      await handle.writeFile(data)
+      // Flush before the rename. A rename is atomic with respect to the directory
+      // entry, not the data, so without this a crash can leave the name pointing
+      // at a file whose contents never reached the disk.
+      await handle.sync()
+    } finally {
+      await handle.close()
+    }
+    if (mode !== undefined) await chmod(tempPath, mode)
     await rename(tempPath, targetPath)
   } catch (e) {
     await unlink(tempPath).catch(() => {})

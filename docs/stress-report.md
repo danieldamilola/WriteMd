@@ -13,29 +13,29 @@ npx playwright test tests/e2e/stress.spec.ts
 Fixtures live in the real vault under `_stress/` and nowhere else. They are
 deterministic, regenerated from scratch each run, and safe to delete.
 
-| Fixture | What it is |
-| --- | --- |
-| `huge-single.md` | 6 MB, 8000 sections, mixed markdown |
-| `huge-table.md` | 4000 rows x 8 columns (32 000 cells) |
-| `long-lines.md` | 4 MB as 20 lines of 200 000 characters |
-| `many-diagrams.md` | 60 Mermaid blocks |
-| `wiki-links.md` | 3000 `[[wiki]]` and markdown links |
-| `unicode.md` | emoji, ZWJ, CJK, RTL, combining marks, lone surrogates |
-| `deep-nesting.md` | 40 nested lists, 30 nested quotes, long emphasis runs |
-| `features-*.md` | one file per parser extension (math, tasks, code, footnotes, callouts, frontmatter, images) |
-| `many/` | 1500 notes across 20 folders, plus one folder holding 600 |
+| Fixture            | What it is                                                                                  |
+| ------------------ | ------------------------------------------------------------------------------------------- |
+| `huge-single.md`   | 6 MB, 8000 sections, mixed markdown                                                         |
+| `huge-table.md`    | 4000 rows x 8 columns (32 000 cells)                                                        |
+| `long-lines.md`    | 4 MB as 20 lines of 200 000 characters                                                      |
+| `many-diagrams.md` | 60 Mermaid blocks                                                                           |
+| `wiki-links.md`    | 3000 `[[wiki]]` and markdown links                                                          |
+| `unicode.md`       | emoji, ZWJ, CJK, RTL, combining marks, lone surrogates                                      |
+| `deep-nesting.md`  | 40 nested lists, 30 nested quotes, long emphasis runs                                       |
+| `features-*.md`    | one file per parser extension (math, tasks, code, footnotes, callouts, frontmatter, images) |
+| `many/`            | 1500 notes across 20 folders, plus one folder holding 600                                   |
 
 ## What the profiler said
 
 Before any change, a CPU profile of 19 keystrokes in `huge-single.md` looked
 like this:
 
-| Self time | Where |
-| --- | --- |
-| 30.9% | `InfoPill.countStats` (word count) |
-| 11.1% | garbage collector |
-| 25% | Lezer markdown parser |
-| 12.6% | `getMathDecorations` + `getWikiLinkDecorations` + `getFrontmatterDecorations` |
+| Self time | Where                                                                         |
+| --------- | ----------------------------------------------------------------------------- |
+| 30.9%     | `InfoPill.countStats` (word count)                                            |
+| 11.1%     | garbage collector                                                             |
+| 25%       | Lezer markdown parser                                                         |
+| 12.6%     | `getMathDecorations` + `getWikiLinkDecorations` + `getFrontmatterDecorations` |
 
 The word count ran `text.trim().split(/\s+/)` on every render, and the pill
 re-renders on every keystroke: 350ms and a million-element array per character
@@ -61,7 +61,7 @@ just to discover the view was already in sync.
   offset (with a 20 KB margin so a pair straddling the boundary is re-found)
   rather than the whole file. It has to stay a `StateField`, because block
   replacements are rejected from plugins (`Block decorations may not be
-  specified via plugins`), which the stress run caught the hard way: the editor
+specified via plugins`), which the stress run caught the hard way: the editor
   came up empty on every document with `$$`.
 - **Tables patch instead of rebuild.** CodeMirror replaces a block widget on
   every keystroke inside it, and the table rebuilt all 32 000 cells every time.
@@ -98,42 +98,42 @@ just to discover the view was already in sync.
 
 Same machine, same fixtures, before and after:
 
-| Scenario | Before | After |
-| --- | --- | --- |
-| Open 6 MB note | 1154 ms | 630 ms |
-| Open 4 MB of 200k-char lines | 9607 ms | 2755 ms |
-| Open 4000-row table | 4690 ms, worst task 3550 ms | 496 ms, worst task 321 ms |
-| Click inside a 4000-row table | did not return | 94 ms |
-| Type 8 chars in a 4000-row table | worst task 1143 ms | worst task 206 ms |
-| Render the whole 1500-file tree | did not finish (click loop timed out) | 3630 ms, no long task |
-| Expand a 600-note folder | 600 rows of DOM | 1 summary row, 57 ms |
-| Type 19 chars in a 6 MB note | 9803 ms, worst task 427 ms | 5196 ms, worst task 364 ms |
-| Find in a 6 MB note, 14 000 matches | worst task 860 ms | worst task 534 ms |
-| Follow a wiki link | did nothing | 529 ms |
-| Toggle a task in a 500-task note | no coverage | 161 ms |
-| Auto-save a 6 MB note, no false conflict | not measured | 8770 ms, worst task 1048 ms |
-| Switch theme on a 6 MB note | not measured | 1437 ms, worst task 86 ms |
-| Type 19 chars, CPU samples | 14261 | 2927 |
-| Word count share of typing CPU | 30.9% | 3.5% |
-| Whole-document string copies per keystroke | 4 | 1 |
-| Working set at rest | 757 MB | 566 MB |
-| Restore a 40-tab session | not measured | 2016 ms |
-| Backlink scan over 1500 notes | not measured | 985 ms |
-| 60 Mermaid diagrams | not measured | 2434 ms, no long task |
+| Scenario                                   | Before                                | After                       |
+| ------------------------------------------ | ------------------------------------- | --------------------------- |
+| Open 6 MB note                             | 1154 ms                               | 630 ms                      |
+| Open 4 MB of 200k-char lines               | 9607 ms                               | 2755 ms                     |
+| Open 4000-row table                        | 4690 ms, worst task 3550 ms           | 496 ms, worst task 321 ms   |
+| Click inside a 4000-row table              | did not return                        | 94 ms                       |
+| Type 8 chars in a 4000-row table           | worst task 1143 ms                    | worst task 206 ms           |
+| Render the whole 1500-file tree            | did not finish (click loop timed out) | 3630 ms, no long task       |
+| Expand a 600-note folder                   | 600 rows of DOM                       | 1 summary row, 57 ms        |
+| Type 19 chars in a 6 MB note               | 9803 ms, worst task 427 ms            | 5196 ms, worst task 364 ms  |
+| Find in a 6 MB note, 14 000 matches        | worst task 860 ms                     | worst task 534 ms           |
+| Follow a wiki link                         | did nothing                           | 529 ms                      |
+| Toggle a task in a 500-task note           | no coverage                           | 161 ms                      |
+| Auto-save a 6 MB note, no false conflict   | not measured                          | 8770 ms, worst task 1048 ms |
+| Switch theme on a 6 MB note                | not measured                          | 1437 ms, worst task 86 ms   |
+| Type 19 chars, CPU samples                 | 14261                                 | 2927                        |
+| Word count share of typing CPU             | 30.9%                                 | 3.5%                        |
+| Whole-document string copies per keystroke | 4                                     | 1                           |
+| Working set at rest                        | 757 MB                                | 566 MB                      |
+| Restore a 40-tab session                   | not measured                          | 2016 ms                     |
+| Backlink scan over 1500 notes              | not measured                          | 985 ms                      |
+| 60 Mermaid diagrams                        | not measured                          | 2434 ms, no long task       |
 
 Micro-benchmarks (`tests/stress/perf.test.ts`) on a 6 MB note, machine otherwise
 idle:
 
-| Operation | Time |
-| --- | --- |
-| `doc.toString()` | 7 ms |
-| Lezer markdown parse | 749 ms |
-| markdown-it render (export) | 672 ms |
-| html-to-docx, 1 MB of HTML | 5884 ms |
-| math delimiter scan | 4 ms |
-| save-echo check | 2 ms |
-| word count, old way | 115 ms |
-| word count, new way | ~5 ms |
+| Operation                   | Time    |
+| --------------------------- | ------- |
+| `doc.toString()`            | 7 ms    |
+| Lezer markdown parse        | 749 ms  |
+| markdown-it render (export) | 672 ms  |
+| html-to-docx, 1 MB of HTML  | 5884 ms |
+| math delimiter scan         | 4 ms    |
+| save-echo check             | 2 ms    |
+| word count, old way         | 115 ms  |
+| word count, new way         | ~5 ms   |
 
 ## What the stress run found that was not performance
 
@@ -153,13 +153,13 @@ idle:
 A CPU profile of 19 keystrokes in a 6 MB note, with the whole 1559-row vault
 tree mounted in the split pane, attributes the work like this:
 
-| Share | What |
-| --- | --- |
-| ~45% | Lezer's markdown parser and tree walk (`parse`, `parseInline`, `finishLeaf`, `addActions`, `nextChild`) |
-| ~14% | browser layout and paint |
-| ~6% | garbage collection |
-| ~3.5% | the word count |
-| rest | CodeMirror view, DOM, input plumbing |
+| Share | What                                                                                                    |
+| ----- | ------------------------------------------------------------------------------------------------------- |
+| ~45%  | Lezer's markdown parser and tree walk (`parse`, `parseInline`, `finishLeaf`, `addActions`, `nextChild`) |
+| ~14%  | browser layout and paint                                                                                |
+| ~6%   | garbage collection                                                                                      |
+| ~3.5% | the word count                                                                                          |
+| rest  | CodeMirror view, DOM, input plumbing                                                                    |
 
 The app's own share is now single-digit percent. Everything left is inside
 CodeMirror and Lezer, which is the price of markdown parsing a 6 MB document.

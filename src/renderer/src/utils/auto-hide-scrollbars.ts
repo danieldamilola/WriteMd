@@ -16,7 +16,26 @@
 const VISIBLE_MS = 900
 
 const timers = new WeakMap<Element, number>()
-const roots = new Set<Document | ShadowRoot>()
+/**
+ * Roots with a live listener, held weakly.
+ *
+ * Every Lit element creates a shadow root, and this app mounts and unmounts the
+ * settings modal, the command palette and the conflict dialog on demand. A
+ * strong Set pinned each of those detached roots, and the subtrees behind them,
+ * for the life of the process. A `WeakRef` lets a root nobody holds any more be
+ * collected; the entry is only useful while the root is alive.
+ */
+const roots = new Set<WeakRef<Document | ShadowRoot>>()
+
+function liveRoots(): Array<Document | ShadowRoot> {
+  const alive: Array<Document | ShadowRoot> = []
+  for (const ref of Array.from(roots)) {
+    const root = ref.deref()
+    if (root) alive.push(root)
+    else roots.delete(ref)
+  }
+  return alive
+}
 
 function onScroll(event: Event): void {
   const target = event.target
@@ -34,8 +53,8 @@ function onScroll(event: Event): void {
 }
 
 function attachRoot(root: Document | ShadowRoot): void {
-  if (roots.has(root)) return
-  roots.add(root)
+  if (liveRoots().includes(root)) return
+  roots.add(new WeakRef(root))
   root.addEventListener('scroll', onScroll, true)
 }
 
@@ -76,7 +95,7 @@ export function initAutoHideScrollbars(root: Document = document): () => void {
   adoptExistingRoots(root)
   return () => {
     restoreAttachShadow()
-    for (const r of roots) r.removeEventListener('scroll', onScroll, true)
+    for (const r of liveRoots()) r.removeEventListener('scroll', onScroll, true)
     roots.clear()
   }
 }

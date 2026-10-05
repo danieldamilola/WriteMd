@@ -62,11 +62,15 @@ describe('stress: hot paths', () => {
     const state = EditorState.create({ doc })
     // frontmatter, math, and wiki-link fields each stringify the whole doc on
     // every transaction, so this is the floor for one keystroke in a big file.
-    time('3 x doc.toString(), 6 MB', () => {
-      state.doc.toString()
-      state.doc.toString()
-      state.doc.toString()
-    }, 250)
+    time(
+      '3 x doc.toString(), 6 MB',
+      () => {
+        state.doc.toString()
+        state.doc.toString()
+        state.doc.toString()
+      },
+      250
+    )
   })
 
   it('parses 6 MB of markdown', () => {
@@ -123,22 +127,30 @@ describe('stress: hot paths', () => {
   it('scans math delimiters without going quadratic', () => {
     // Worst case for a lazy `$$...$$` scan: many opening delimiters, no close.
     const adversarial = '$$ '.repeat(200_000)
-    time('math block scan, 1 MB adversarial', () => {
-      const re = /\$\$([\s\S]*?)\$\$/g
-      let m: RegExpExecArray | null
-      while ((m = re.exec(adversarial)) !== null) {
-        if (m.index > 0) break
-      }
-    }, 2_000)
-    const doc = fixture('long-lines.md')
-    if (present && doc) {
-      time('math block scan, 4 MB long lines', () => {
+    time(
+      'math block scan, 1 MB adversarial',
+      () => {
         const re = /\$\$([\s\S]*?)\$\$/g
         let m: RegExpExecArray | null
-        while ((m = re.exec(doc)) !== null) {
+        while ((m = re.exec(adversarial)) !== null) {
           if (m.index > 0) break
         }
-      }, 2_000)
+      },
+      2_000
+    )
+    const doc = fixture('long-lines.md')
+    if (present && doc) {
+      time(
+        'math block scan, 4 MB long lines',
+        () => {
+          const re = /\$\$([\s\S]*?)\$\$/g
+          let m: RegExpExecArray | null
+          while ((m = re.exec(doc)) !== null) {
+            if (m.index > 0) break
+          }
+        },
+        2_000
+      )
     }
   })
 

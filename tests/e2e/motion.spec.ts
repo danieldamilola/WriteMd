@@ -201,8 +201,9 @@ test.describe('Motion preference', () => {
       const button = topBar?.querySelector<HTMLElement>('writemd-icon-button[title="Split view"]')
       const editor = app_?.querySelector('writemd-editor')?.shadowRoot
       if (!button || !editor) return null
-      const pane = () => editor.querySelector('writemd-panel.pane-in') as HTMLElement | null
-      const left = () => editor.querySelectorAll<HTMLElement>('writemd-panel.pane')[0]
+      const pane = (): HTMLElement | null =>
+        editor.querySelector('writemd-panel.pane-in') as HTMLElement | null
+      const left = (): HTMLElement => editor.querySelectorAll<HTMLElement>('writemd-panel.pane')[0]
       const samples: Array<{ opacity: number | null; leftWidth: number }> = []
       button.click()
       const started = performance.now()

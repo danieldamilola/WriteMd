@@ -2,7 +2,7 @@ import { execFile } from 'child_process'
 import { access, readFile, stat } from 'fs/promises'
 import { constants } from 'fs'
 import { homedir } from 'os'
-import { join, delimiter } from 'path'
+import { join, delimiter, isAbsolute } from 'path'
 
 export interface OpencodeFound {
   path: string
@@ -140,6 +140,29 @@ export interface OpencodeAttempt {
   detail: string
 }
 
+/**
+ * Why a renderer-supplied CLI path was refused.
+ *
+ * `ai.opencodeCliPath` is written by `settings:set` with no user gesture behind
+ * it, and whatever it names gets executed with this process's privileges and
+ * full inherited environment. `path-guard.ts` puts "one compromised renderer"
+ * inside the threat model, so the basename check alone was not a boundary: a UNC
+ * path such as `\\attacker\share\opencode.cmd` passes a basename test and then
+ * runs a program the renderer chose.
+ */
+export function rejectCustomOpencodePath(custom: string): string | null {
+  if (!isAbsolute(custom)) return 'not an absolute path'
+  // A UNC path or a device path is remote or not-a-file at all, and neither is
+  // something a Browse pick should ever have produced.
+  //
+  // Deliberately no metacharacter check here: `psCommand` single-quotes the
+  // binary and `execFile` passes an argv array, so quoting already covers that,
+  // and a rule broad enough to catch `&` would also reject a real install under
+  // something like `C:\Program Files\R&D`.
+  if (/^\\\\|^\\/i.test(custom)) return 'not a local file path'
+  return null
+}
+
 export async function resolveOpencodeBinary(
   customPath?: string
 ): Promise<{ found: OpencodeFound | null; attempts: OpencodeAttempt[] }> {
@@ -155,7 +178,10 @@ export async function resolveOpencodeBinary(
     if (p && !candidates.includes(p)) candidates.push(p)
   }
   const custom = customPath?.trim() || undefined
-  if (custom && !/(^|[\\/])opencode[^\\/]*$/i.test(custom)) {
+  const customRejection = custom ? rejectCustomOpencodePath(custom) : null
+  if (custom && customRejection) {
+    attempts.push({ path: custom, ok: false, detail: customRejection })
+  } else if (custom && !/(^|[\\/])opencode[^\\/]*$/i.test(custom)) {
     // A stale Browse pick (e.g. another tool's shim) must not masquerade as
     // the opencode CLI: its --version would succeed and poison everything
     // downstream. Skip it loudly instead of trusting it.

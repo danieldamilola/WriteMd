@@ -37,8 +37,13 @@ function hasFocus(this: EditorView): boolean {
   // DOM could in theory cycle, and this runs on every selection update.
   for (let depth = 0; depth < 8; depth++) {
     if (activeIn(root, this.contentDOM)) return true
-    if (!(root instanceof ShadowRoot)) break
-    const hostRoot = root.host.getRootNode()
+    // `host` is what distinguishes a shadow root, and reading the property keeps
+    // this off the `ShadowRoot` global. An `instanceof` against it throws a
+    // ReferenceError wherever that global is not defined, which takes the whole
+    // focus check down rather than merely answering it wrongly.
+    const host = (root as ShadowRoot).host
+    if (!host) break
+    const hostRoot = host.getRootNode()
     if (hostRoot === root) break
     root = hostRoot as Document | ShadowRoot
   }

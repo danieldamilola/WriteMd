@@ -936,8 +936,8 @@ export class SettingsModal extends LitElement {
     // Descriptions and option values are not in the row index (the system
     // prompt has no row at all), so fall back to section titles and index
     // labels before giving up.
-    const titles = Array.from(panel.querySelectorAll<HTMLElement>('.section-title')).filter(
-      (el) => tokens.every((t) => `${el.textContent ?? ''}`.toLowerCase().includes(t))
+    const titles = Array.from(panel.querySelectorAll<HTMLElement>('.section-title')).filter((el) =>
+      tokens.every((t) => `${el.textContent ?? ''}`.toLowerCase().includes(t))
     )
     if (titles.length > 0) return titles
     const labels = searchSettingsRows(this.searchQuery)
@@ -961,9 +961,9 @@ export class SettingsModal extends LitElement {
     this.paintHits()
   }
 
-private hitRows: HTMLElement[] = []
-private hitIndex = 0
-private lastHitKey = ''
+  private hitRows: HTMLElement[] = []
+  private hitIndex = 0
+  private lastHitKey = ''
   private paintedHits: HTMLElement[] = []
 
   private paintHits(): void {
@@ -985,8 +985,8 @@ private lastHitKey = ''
     this.hitRows[this.hitIndex]?.scrollIntoView({ block: 'center', behavior: 'smooth' })
   }
 
-/** Sections the search box has not filtered out. */
-private get visibleTabs(): SettingsTab[] {
+  /** Sections the search box has not filtered out. */
+  private get visibleTabs(): SettingsTab[] {
     return this.matchingTabs()
   }
 
@@ -1572,9 +1572,8 @@ private get visibleTabs(): SettingsTab[] {
               this.updateSetting('appearance.motion', (e.target as HTMLSelectElement).value)}
           >
             ${MOTION_PREFERENCES.map(
-              (p) => html`<option value=${p} ?selected=${p === this.motion}>
-                ${MOTION_LABELS[p]}
-              </option>`
+              (p) =>
+                html`<option value=${p} ?selected=${p === this.motion}>${MOTION_LABELS[p]}</option>`
             )}
           </select>
         </div>

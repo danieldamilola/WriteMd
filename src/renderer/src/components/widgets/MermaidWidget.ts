@@ -8,7 +8,7 @@ import { createLinkInterceptor } from '../extensions/safe-links'
 // diagrams follow an in-app theme switch rather than the OS setting.
 const DARK_THEMES = new Set(['dark', 'graphite', 'midnight', 'dracula', 'nord'])
 
-type MermaidApi = typeof import('mermaid')['default']
+type MermaidApi = (typeof import('mermaid'))['default']
 
 /**
  * Mermaid is loaded on first diagram, not at startup.

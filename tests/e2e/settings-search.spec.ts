@@ -29,9 +29,7 @@ test.describe('Settings search', () => {
     const search = modal.getByLabel('Search settings')
 
     await search.fill('auto auto save')
-    await expect
-      .poll(() => modal.locator('.content-panel').getAttribute('data-tab'))
-      .toBe('files')
+    await expect.poll(() => modal.locator('.content-panel').getAttribute('data-tab')).toBe('files')
 
     const hit = modal.locator('.setting-row.search-hit', { hasText: 'Auto-save' })
     await expect(hit).toHaveCount(1)
@@ -47,7 +45,9 @@ test.describe('Settings search', () => {
     await expect
       .poll(() => modal.locator('.content-panel').getAttribute('data-tab'))
       .toBe('advanced')
-    await expect(modal.locator('.setting-row.search-hit', { hasText: 'PDF page size' })).toHaveCount(1)
+    await expect(
+      modal.locator('.setting-row.search-hit', { hasText: 'PDF page size' })
+    ).toHaveCount(1)
 
     // "pdf" hits three rows in Advanced; ArrowDown walks them.
     await search.fill('pdf')

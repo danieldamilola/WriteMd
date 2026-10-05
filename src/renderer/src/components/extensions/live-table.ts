@@ -5,7 +5,9 @@ import {
   TableRow,
   TableWidget,
   cellSourceRange,
-  renderInlineMarkdown
+  escapeCellPipes,
+  isPlainCellSource,
+  renderCell
 } from '../widgets/TableWidget'
 import { readOnlyFacet } from './read-only'
 import { treeGrowthEffect } from './tree-progress'
@@ -70,10 +72,22 @@ export const liveTableField = StateField.define<DecorationSet>({
   provide: (f) => EditorView.decorations.from(f)
 })
 
-/** Collapse runs of line breaks: a table row is one line, always. */
+/**
+ * A cell is one line of one source row, so line breaks collapse. Pipes have to
+ * be escaped: the cell is split on unescaped pipes, and a bare one typed into a
+ * cell silently added a column.
+ */
 function sanitizeCellText(text: string): string {
-  return text.replace(/[\r\n]+/g, ' ')
+  return escapeCellPipes(text.replace(/[\r\n]+/g, ' '))
 }
+
+/**
+ * What a cell was showing when its edit began. A commit that finds this
+ * unchanged has nothing to write, which is the common case: clicking a cell and
+ * clicking away again is not an edit, and treating it as one is how a cell's
+ * markup ended up rewritten by a user who never typed.
+ */
+const editStartHtml = new WeakMap<HTMLElement, string>()
 
 function cellFromEvent(e: Event): HTMLElement | null {
   const el = e.target instanceof Element ? e.target : null
@@ -120,6 +134,18 @@ function beginCellEdit(
     (dest ? findCell(view, dest.line, dest.cell) : null) ?? (cell.isConnected ? cell : null)
   if (!target) return
   const el = target
+  // A cell whose source is not its own displayed text edits its source, so what
+  // the user types and what goes back into the file are the same thing. Editing
+  // the rendered form instead would mean writing `bold` over `**bold**`, and a
+  // link would lose its URL.
+  const src = dest ? cellSource(view, dest.line, dest.cell) : null
+  if (src && !isPlainCellSource(src.original)) el.textContent = src.original.trim()
+  editStartHtml.set(el, el.innerHTML)
+  // Put CodeMirror's own selection on the cell as well. The handler claims the
+  // mousedown, so without this the view's selection stayed wherever it was,
+  // usually 0, and the `view.focus()` that follows a commit dropped the caret
+  // at the top of the document instead of in the table.
+  if (src) view.dispatch({ selection: { anchor: src.lineFrom + src.start } })
   el.contentEditable = 'plaintext-only'
   el.spellcheck = false
   el.classList.add('cm-live-table-editing')
@@ -171,32 +197,52 @@ function cellSource(
   }
 }
 
+/** Redraw a cell from the document, undoing anything the edit put in its DOM. */
+function restoreCell(
+  view: EditorView,
+  cell: HTMLElement,
+  coords: { line: number; cell: number }
+): void {
+  const src = cellSource(view, coords.line, coords.cell)
+  if (!src) return
+  const lineText = view.state.doc.line(coords.line).text
+  cell.innerHTML = renderCell(lineText.slice(src.start, src.end))
+}
+
 function commitCellEdit(view: EditorView, cell: HTMLElement, refocus: boolean): void {
   const coords = cellCoords(cell)
+  const startHtml = editStartHtml.get(cell)
+  editStartHtml.delete(cell)
   endCellEdit(cell)
   if (!coords) {
     if (refocus) view.focus()
     return
   }
   const src = cellSource(view, coords.line, coords.cell)
-  if (!src) {
+  // Nothing in the cell changed, so there is nothing to write. Bailing here is
+  // what makes clicking a cell and clicking away again harmless.
+  if (!src || startHtml === undefined || startHtml === cell.innerHTML) {
+    restoreCell(view, cell, coords)
     if (refocus) view.focus()
     return
   }
-  const next = sanitizeCellText(cell.innerText ?? '')
-  // Compare trimmed: the rendered cell never carries the source padding, so
-  // a raw compare reports a phantom edit on every blur and strips the row's
-  // spacing for nothing. Spacing-only differences are meaningless in tables.
-  if (next.trim() === src.original.trim()) {
+  // Compare after escaping, so a cell showing `a | b` for the source `a \| b`
+  // reads as unchanged instead of rewriting itself on every blur.
+  const body = sanitizeCellText(cell.innerText ?? '').trim()
+  if (body === src.original.trim()) {
+    restoreCell(view, cell, coords)
     if (refocus) view.focus()
     return
   }
   // Keep the row's padding so edits don't reflow the source aesthetics.
   const leading = src.original.slice(0, src.original.length - src.original.trimStart().length)
   const trailing = src.original.slice(src.original.trimEnd().length)
-  const insert = `${leading}${next.trim()}${trailing}`
   view.dispatch({
-    changes: { from: src.lineFrom + src.start, to: src.lineFrom + src.end, insert }
+    changes: {
+      from: src.lineFrom + src.start,
+      to: src.lineFrom + src.end,
+      insert: `${leading}${body}${trailing}`
+    }
   })
   // Never steal focus back on blur-commits (e.g. the user clicked away to
   // another app); callers moving within the table focus explicitly.
@@ -205,14 +251,9 @@ function commitCellEdit(view: EditorView, cell: HTMLElement, refocus: boolean): 
 
 function cancelCellEdit(view: EditorView, cell: HTMLElement): void {
   const coords = cellCoords(cell)
+  editStartHtml.delete(cell)
   // Restore the rendered cell from the (unchanged) document.
-  if (coords) {
-    const src = cellSource(view, coords.line, coords.cell)
-    if (src) {
-      const lineText = view.state.doc.line(coords.line).text
-      cell.innerHTML = renderInlineMarkdown(lineText.slice(src.start, src.end))
-    }
-  }
+  if (coords) restoreCell(view, cell, coords)
   endCellEdit(cell)
   view.focus()
 }

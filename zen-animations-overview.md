@@ -28,18 +28,18 @@ Compact bounce in `src/zen/compact-mode/sidebar.inc.css:159`:
 
 File: `src/zen/common/styles/zen-animations.css:7-134`
 
-| Keyframe | Lines | Motion | Used in |
-|---|---|---|---|
-| `library-badge-download` | 7-17 | `translateY 0 > 12px > 0`, `0.4s ease` | `zen-library-widget.css:50` download badge bounce |
-| `zen-library-sprite-hover / unhover` | 19-37 | `background-position-x 0% <-> 100%`, `0.3s steps(36)` | `zen-library-widget.css:33,36` 36-frame sprite |
-| `zen-back-and-forth-text` | 39-57 | `translateX marquee`, `10s infinite ease-in-out` | `zen-media-controls.css:89` overflow label on hover |
-| `zen-urlbar-searchmode` | 60-69 | `box-shadow 20px > 250px`, `1s ease-out forwards` | `zen-omnibox.css:309` search-mode glow flash |
-| `zen-dialog-fade-in` | 71-81 | `opacity 0>1 + translateY(-10px>0)`, `0.3s ease-out` | `zen-panels/dialog.css:14` `.dialogBox` |
-| `zen-dialog-fade-in-shifted` | 83-93 | same but preserves `-10%` centering | `dialog.css:19` `.content-prompt-dialog` |
-| `zen-text-gradient` | 95-102 | `background-position 0% > -400%`, `5s / 2s linear infinite` | `zen-single-components.css:700`, `zen-sidebar-notification.css:7` shimmer |
-| `zen-progress-bar-pulse` | 104-114 | `scale .85>.95 + opacity .6>1`, `1s alternate infinite` | `zen-single-components.css:770` loading bar |
-| `zen-progress-bar-long-load` | 116-126 | `left -100% > 100%`, `1s infinite delay .3s` | indeterminate sweep, width 75% |
-| `zen-progress-bar-settle` | 128-134 | `scale(1) + width:10rem`, `.3s ease-out forwards` | settle state when `long-load=true` |
+| Keyframe                             | Lines   | Motion                                                      | Used in                                                                   |
+| ------------------------------------ | ------- | ----------------------------------------------------------- | ------------------------------------------------------------------------- |
+| `library-badge-download`             | 7-17    | `translateY 0 > 12px > 0`, `0.4s ease`                      | `zen-library-widget.css:50` download badge bounce                         |
+| `zen-library-sprite-hover / unhover` | 19-37   | `background-position-x 0% <-> 100%`, `0.3s steps(36)`       | `zen-library-widget.css:33,36` 36-frame sprite                            |
+| `zen-back-and-forth-text`            | 39-57   | `translateX marquee`, `10s infinite ease-in-out`            | `zen-media-controls.css:89` overflow label on hover                       |
+| `zen-urlbar-searchmode`              | 60-69   | `box-shadow 20px > 250px`, `1s ease-out forwards`           | `zen-omnibox.css:309` search-mode glow flash                              |
+| `zen-dialog-fade-in`                 | 71-81   | `opacity 0>1 + translateY(-10px>0)`, `0.3s ease-out`        | `zen-panels/dialog.css:14` `.dialogBox`                                   |
+| `zen-dialog-fade-in-shifted`         | 83-93   | same but preserves `-10%` centering                         | `dialog.css:19` `.content-prompt-dialog`                                  |
+| `zen-text-gradient`                  | 95-102  | `background-position 0% > -400%`, `5s / 2s linear infinite` | `zen-single-components.css:700`, `zen-sidebar-notification.css:7` shimmer |
+| `zen-progress-bar-pulse`             | 104-114 | `scale .85>.95 + opacity .6>1`, `1s alternate infinite`     | `zen-single-components.css:770` loading bar                               |
+| `zen-progress-bar-long-load`         | 116-126 | `left -100% > 100%`, `1s infinite delay .3s`                | indeterminate sweep, width 75%                                            |
+| `zen-progress-bar-settle`            | 128-134 | `scale(1) + width:10rem`, `.3s ease-out forwards`           | settle state when `long-load=true`                                        |
 
 ---
 

@@ -898,16 +898,15 @@ export class Editor extends LitElement {
       // the primary catches up by itself once the merge closes.
       const mergeActive = Boolean(s.secondaryDoc?.isDiff)
 
-      if (
-        this.editorView &&
-        docChanged &&
-        !mergeActive &&
-        s.content !== this.viewContent
-      ) {
-        this.viewContent = s.content
-        this.editorView.dispatch({
-          changes: { from: 0, to: this.editorView.state.doc.length, insert: s.content }
-        })
+      if (this.editorView && docChanged && !mergeActive && s.content !== this.viewContent) {
+        if (pathChanged) {
+          this.swapPrimaryDocument(s.content, s.path)
+        } else {
+          this.viewContent = s.content
+          this.editorView.dispatch({
+            changes: { from: 0, to: this.editorView.state.doc.length, insert: s.content }
+          })
+        }
       }
 
       if (this.editorView && pathChanged) {
@@ -922,14 +921,18 @@ export class Editor extends LitElement {
         secondaryDocChanged &&
         s.secondaryDoc.content !== this.secondaryViewContent
       ) {
-        this.secondaryViewContent = s.secondaryDoc.content
-        this.secondaryEditorView.dispatch({
-          changes: {
-            from: 0,
-            to: this.secondaryEditorView.state.doc.length,
-            insert: s.secondaryDoc.content
-          }
-        })
+        if (secondaryPathChanged) {
+          this.swapSecondaryDocument(s.secondaryDoc.content, s.secondaryDoc.path)
+        } else {
+          this.secondaryViewContent = s.secondaryDoc.content
+          this.secondaryEditorView.dispatch({
+            changes: {
+              from: 0,
+              to: this.secondaryEditorView.state.doc.length,
+              insert: s.secondaryDoc.content
+            }
+          })
+        }
       }
 
       if (this.secondaryEditorView && s.secondaryDoc && secondaryPathChanged) {
@@ -1136,7 +1139,7 @@ export class Editor extends LitElement {
         }
       }
 
-      // Custom instructions from Settings Ã¢â€ â€™ AI Assistant, with live file context appended
+      // Custom instructions from Settings > AI Assistant, with live file context appended
       const customPrompt =
         this.settingsStore.get('ai.systemPrompt', DEFAULT_AI_SYSTEM_PROMPT) ||
         DEFAULT_AI_SYSTEM_PROMPT
@@ -1570,15 +1573,6 @@ ${searchContext}`
           // retargeted, but the merge doc is the resolved content and still
           // needs to reach the file.
           this.fileState.setSecondaryContent(update.state.doc.toString())
-        } else if (
-          isSecondary &&
-          this.secondaryDoc?.isDiff &&
-          update.transactions.some((tr) => hasOriginalDocUpdate(tr))
-        ) {
-          // Accept in the diff view: no document change, only the original
-          // retargeted, but the merge doc is the resolved content and still
-          // needs to reach the file.
-          this.fileState.setSecondaryContent(update.state.doc.toString())
         }
         if (this.findOpen && (update.docChanged || update.selectionSet)) {
           this.findPanelEl?.refreshCounts()
@@ -1591,6 +1585,47 @@ ${searchContext}`
     }
 
     return exts
+  }
+
+  /**
+   * Point the primary view at a different file.
+   *
+   * `EditorState.create` rather than a dispatched replace. One view is reused
+   * across every tab, so its single undo stack accumulated every file's edits:
+   * opening a note and pressing Ctrl+Z applied the *previous* note's inverse
+   * change to this one. Announcing the load as non-history was not enough on its
+   * own, because the earlier document's events were still on the stack waiting
+   * behind it, and `isolateHistory` only stops adjacent events merging, not undo
+   * walking across the boundary. A new state is the boundary that holds.
+   *
+   * Selection and scroll restart with the document, which is what a new file
+   * wants anyway.
+   */
+  private swapPrimaryDocument(content: string, path: string | null): void {
+    const view = this.editorView
+    if (!view) return
+    this.viewContent = content
+    view.setState(
+      EditorState.create({
+        doc: content,
+        extensions: this.getBaseExtensions(false, this.viewMode, path)
+      })
+    )
+    view.requestMeasure()
+  }
+
+  /** Secondary-pane counterpart of `swapPrimaryDocument`. */
+  private swapSecondaryDocument(content: string, path: string | null): void {
+    const view = this.secondaryEditorView
+    if (!view || !this.secondaryDoc) return
+    this.secondaryViewContent = content
+    view.setState(
+      EditorState.create({
+        doc: content,
+        extensions: this.getBaseExtensions(true, this.secondaryDoc.viewMode, path)
+      })
+    )
+    view.requestMeasure()
   }
 
   private initEditor(): void {
@@ -1964,7 +1999,7 @@ ${searchContext}`
       if (result && !result.canceled && result.filePaths[0]) {
         const fileContent = await api()?.file?.read?.(result.filePaths[0])
         if (fileContent) {
-          this.fileState.openSecondaryFile(result.filePaths[0], fileContent.content)
+          await this.fileState.openSecondaryFile(result.filePaths[0], fileContent.content)
         }
       }
     } else {
@@ -2128,7 +2163,7 @@ ${searchContext}`
 
           <!-- split view - 2 (Right Pane, only when splitActive is true) -->
           ${
-            (this.splitActive || this.splitLeaving)
+            this.splitActive || this.splitLeaving
               ? html`
                   <div
                     class="resizer ${this.isDraggingResizer ? 'dragging' : ''}"

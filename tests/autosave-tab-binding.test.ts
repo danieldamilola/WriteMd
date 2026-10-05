@@ -111,8 +111,11 @@ describe('autosave debounce is bound to one tab', () => {
   })
 
   // The regression: a switch inside the debounce window used to redirect the
-  // write to the newly-active tab, silently discarding the original edit.
-  it('does not write tab B when the user switched away from tab A mid-debounce', async () => {
+  // write to the newly-active tab, silently discarding the original edit. It
+  // also used to simply drop the timer, which left the edit sitting dirty in a
+  // buffer with nothing scheduled to save it. So the write has to happen, and it
+  // has to be A's content going to A's path.
+  it('writes tab A to its own path when the user switches away mid-debounce', async () => {
     installApi()
     const idxA = openAt(files, 'C:/vault/switch-a.md')
     const idxB = openAt(files, 'C:/vault/switch-b.md')
@@ -120,11 +123,22 @@ describe('autosave debounce is bound to one tab', () => {
     files.setContent('edit made in A only')
     files.switchTab(idxB)
     await tick(200)
-    expect(writes).toEqual([])
-    // A's edit survives in the buffer, still dirty, waiting for its own save.
+    expect(writes).toEqual([{ path: 'C:/vault/switch-a.md', content: 'edit made in A only' }])
+    // The invariant this test exists for: B's path is never written.
+    expect(writes.some((w) => w.path === 'C:/vault/switch-b.md')).toBe(false)
     const tabA = files.getState().tabs[idxA]
     expect(tabA.content).toBe('edit made in A only')
-    expect(tabA.dirty).toBe(true)
+    expect(tabA.dirty).toBe(false)
+  })
+
+  it('writes nothing when switching a clean tab', async () => {
+    installApi()
+    const idxA = openAt(files, 'C:/vault/clean-a.md')
+    const idxB = openAt(files, 'C:/vault/clean-b.md')
+    files.switchTab(idxA)
+    files.switchTab(idxB)
+    await tick(200)
+    expect(writes).toEqual([])
   })
 
   // The user dismissed the confirm, so the tab stays open and dirty. The

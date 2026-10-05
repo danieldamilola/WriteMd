@@ -249,7 +249,11 @@ function getFrontmatterDecorations(state: EditorState): DecorationSet {
     let endMatch = text.indexOf('\n---\n', 4)
     let endLen = 5
     if (endMatch === -1) {
-      if (text.endsWith('\n---')) {
+      // Only meaningful when the window is the whole document. On a longer note
+      // `text` stops at the scan limit, so a `\n---` sitting exactly on that
+      // boundary is body text, and treating it as the close would replace 64 KB
+      // of the note with a Properties card.
+      if (state.doc.length <= text.length && text.endsWith('\n---')) {
         endMatch = text.length - 4
         endLen = 4
       }

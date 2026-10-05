@@ -37,9 +37,7 @@ const QUERY = '(prefers-reduced-motion: reduce)'
 let preference: MotionPreference = 'system'
 
 function systemWantsLess(): boolean {
-  return (
-    typeof window.matchMedia === 'function' && window.matchMedia(QUERY).matches === true
-  )
+  return typeof window.matchMedia === 'function' && window.matchMedia(QUERY).matches === true
 }
 
 /** What the preference resolves to right now. */
@@ -129,12 +127,7 @@ export function animate(
   options: MotionOptions = {}
 ): Promise<void> {
   if (!el) return Promise.resolve()
-  const {
-    duration = DURATION.base,
-    easing = EASING.out,
-    delay = 0,
-    fill = false
-  } = options
+  const { duration = DURATION.base, easing = EASING.out, delay = 0, fill = false } = options
   if (reducedMotionNow()) {
     return new Promise((resolve) => requestAnimationFrame(() => resolve()))
   }

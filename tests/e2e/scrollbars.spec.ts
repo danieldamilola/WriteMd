@@ -15,7 +15,10 @@ test.describe('Auto-hide scrollbars', () => {
   let window: Page
 
   test.beforeAll(async () => {
-    const lines = Array.from({ length: 200 }, (_, i) => `line ${i} with enough words to wrap around`)
+    const lines = Array.from(
+      { length: 200 },
+      (_, i) => `line ${i} with enough words to wrap around`
+    )
     writeFileSync(notePath, `${lines.join('\n')}\n`, 'utf-8')
     writeFileSync(
       join(fixture.userData, 'config.json'),

@@ -283,9 +283,9 @@ export class TextMenu extends LitElement {
   }
 
   /**
-   * Insert a website link `[label](https://Ã¢â‚¬Â¦)`:
-   * - clipboard holds a URL Ã¢â€ â€™ use it (selection becomes the label)
-   * - selection itself is a URL Ã¢â€ â€™ linkify in place as `[url](url)`
+   * Insert a website link `[label](https://…)`:
+   * - clipboard holds a URL: use it, with the selection as the label
+   * - selection itself is a URL: linkify in place as `[url](url)`
    * - otherwise insert `[label](https://)` with the URL selected for typing
    */
   private async insertExternalLink(sel: string): Promise<void> {

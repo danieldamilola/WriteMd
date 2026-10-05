@@ -236,7 +236,7 @@ export class VaultExplorer extends LitElement {
     try {
       const fileContent = await api()?.file?.read?.(path)
       if (fileContent) {
-        this.fileState.openSecondaryFile(path, fileContent.content)
+        await this.fileState.openSecondaryFile(path, fileContent.content)
       }
     } catch (e) {
       console.error(`Failed to open ${path}:`, e)

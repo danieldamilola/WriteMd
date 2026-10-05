@@ -25,7 +25,8 @@ export const SETTINGS_SEARCH_INDEX: Record<SettingsTab, string> = {
   editor: 'editor font family size word wrap line numbers source mode highlight active line',
   files: 'files vault location path storage folder recent tabs open disk',
   shortcuts: 'shortcuts keyboard keys bindings commands rebind reset',
-  advanced: 'advanced features mermaid diagrams export pdf page size theme margin paper a4 letter legal danger reset preferences factory defaults',
+  advanced:
+    'advanced features mermaid diagrams export pdf page size theme margin paper a4 letter legal danger reset preferences factory defaults',
   ai: 'ai assistant provider model api key system prompt instructions web search opencode cli console login managed server nvidia ollama grok',
   about: 'about version updates release notes whats new auto check download restart install'
 }
@@ -152,7 +153,14 @@ export const SETTINGS_ROW_INDEX: SettingsRowEntry[] = [
 
 /** Split a query into words, ignoring punctuation and repeats. */
 export function searchTokens(query: string): string[] {
-  return [...new Set(query.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean))]
+  return [
+    ...new Set(
+      query
+        .toLowerCase()
+        .split(/[^a-z0-9]+/)
+        .filter(Boolean)
+    )
+  ]
 }
 
 function includesAll(haystack: string, tokens: string[]): boolean {
@@ -175,9 +183,7 @@ export function searchSettingsTabs(query: string): SettingsTab[] {
 export function searchSettingsRows(query: string): SettingsRowEntry[] {
   const tokens = searchTokens(query)
   if (tokens.length === 0) return []
-  const rows = SETTINGS_ROW_INDEX.filter((r) =>
-    includesAll(`${r.label} ${r.terms}`, tokens)
-  )
+  const rows = SETTINGS_ROW_INDEX.filter((r) => includesAll(`${r.label} ${r.terms}`, tokens))
   const byLabel = rows.filter((r) => includesAll(r.label, tokens))
   return [...byLabel, ...rows.filter((r) => !byLabel.includes(r))]
 }
