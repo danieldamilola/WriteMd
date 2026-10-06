@@ -57,7 +57,15 @@ export interface ConflictInfo {
   diskMtime: number
 }
 
+export interface TabGroup {
+  id: string
+  label: string
+  color?: string
+  collapsed: boolean
+}
+
 export interface TabDoc {
+  id?: string
   path: string | null
   content: string
   originalContent: string
@@ -68,6 +76,8 @@ export interface TabDoc {
   lastWritten: string | null
   /** Content currently being written to disk, to prevent watcher race conditions. */
   pendingWrite: string | null
+  isPinned?: boolean
+  groupId?: string | null
 }
 
 /**
@@ -107,6 +117,7 @@ export interface FileStateData {
   conflict: ConflictInfo | null
   tabs: TabDoc[]
   activeTab: number
+  tabGroups?: TabGroup[]
 }
 
 export class FileState {
@@ -125,7 +136,8 @@ export class FileState {
     secondaryDoc: null,
     conflict: null,
     tabs: [],
-    activeTab: 0
+    activeTab: 0,
+    tabGroups: []
   }
   private listeners = new Set<(state: FileStateData) => void>()
   private autoSaveTimer: ReturnType<typeof setTimeout> | null = null
@@ -195,12 +207,28 @@ export class FileState {
       this.state.tabs.map((t) => t.path)
     )
     this.settingsStore.set('files.activeTabPath', this.activeTabDoc()?.path ?? null)
+    this.settingsStore.set(
+      'files.pinnedTabs',
+      this.state.tabs.filter((t) => t.isPinned && t.path).map((t) => t.path as string)
+    )
+    const groupData = {
+      groups: this.state.tabGroups,
+      assignments: this.state.tabs
+        .filter((t) => t.path && t.groupId)
+        .map((t) => ({ path: t.path as string, groupId: t.groupId as string }))
+    }
+    this.settingsStore.set('files.tabGroups', JSON.stringify(groupData))
   }
 
   private openTab(tab: Omit<TabDoc, 'lastWritten' | 'pendingWrite'>): void {
+    const id =
+      tab.id ||
+      (typeof crypto !== 'undefined' && crypto.randomUUID
+        ? crypto.randomUUID()
+        : `tab-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`)
     this.state = {
       ...this.state,
-      tabs: [...this.state.tabs, { ...tab, lastWritten: null, pendingWrite: null }],
+      tabs: [...this.state.tabs, { ...tab, id, lastWritten: null, pendingWrite: null }],
       activeTab: this.state.tabs.length
     }
     this.syncMirror()
@@ -213,6 +241,27 @@ export class FileState {
     if (!api()) return false
     const paths = this.settingsStore.get<string[]>('files.openTabs', [])
     const activePath = this.settingsStore.get<string | null>('files.activeTabPath', null)
+    const pinnedPaths = new Set(this.settingsStore.get<string[]>('files.pinnedTabs', []))
+    let restoredGroups: TabGroup[] = []
+    const groupAssignments = new Map<string, string>()
+    try {
+      const raw = this.settingsStore.get<string>('files.tabGroups', '[]')
+      if (raw) {
+        const parsed = JSON.parse(raw)
+        if (Array.isArray(parsed)) {
+          restoredGroups = parsed
+        } else if (parsed && parsed.groups) {
+          restoredGroups = parsed.groups
+          if (Array.isArray(parsed.assignments)) {
+            for (const item of parsed.assignments) {
+              groupAssignments.set(item.path, item.groupId)
+            }
+          }
+        }
+      }
+    } catch {
+      // Fallback on corrupt group metadata
+    }
     const vaultPath = await api()
       ?.vault?.getPath?.()
       .catch(() => undefined)
@@ -228,12 +277,18 @@ export class FileState {
         if (!result) continue
         seen.add(p)
         restored.push({
+          id:
+            typeof crypto !== 'undefined' && crypto.randomUUID
+              ? crypto.randomUUID()
+              : `tab-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
           path: p,
           content: result.content,
           originalContent: result.content,
           mtime: result.mtime,
           dirty: false,
           isVaultFile: Boolean(vaultPath && p.startsWith(vaultPath)),
+          isPinned: pinnedPaths.has(p),
+          groupId: groupAssignments.get(p) ?? null,
           lastWritten: null,
           pendingWrite: null
         })
@@ -253,11 +308,243 @@ export class FileState {
     this.state = {
       ...this.state,
       tabs,
-      activeTab: idx >= 0 ? idx : this.state.tabs.length + restored.length - 1
+      activeTab: idx >= 0 ? idx : this.state.tabs.length + restored.length - 1,
+      tabGroups: restoredGroups.length > 0 ? restoredGroups : this.state.tabGroups
     }
     this.syncMirror()
     this.notify()
     return true
+  }
+
+  /**
+   * Reorder tabs within the tab list.
+   * Flushes active tab edits before modifying indices to protect autosave bindings.
+   */
+  moveTab(fromIndex: number, toIndex: number): void {
+    if (fromIndex < 0 || fromIndex >= this.state.tabs.length) return
+    if (toIndex < 0 || toIndex >= this.state.tabs.length) return
+    if (fromIndex === toIndex) return
+
+    this.flushActiveTab()
+    const tabs = [...this.state.tabs]
+    const [moved] = tabs.splice(fromIndex, 1)
+    tabs.splice(toIndex, 0, moved)
+
+    let newActive = this.state.activeTab
+    if (this.state.activeTab === fromIndex) {
+      newActive = toIndex
+    } else if (fromIndex < this.state.activeTab && toIndex >= this.state.activeTab) {
+      newActive--
+    } else if (fromIndex > this.state.activeTab && toIndex <= this.state.activeTab) {
+      newActive++
+    }
+
+    this.state = {
+      ...this.state,
+      tabs,
+      activeTab: newActive
+    }
+    this.syncMirror()
+    this.persistTabs()
+    this.notify()
+  }
+
+  /**
+   * Pin a tab to the top pinned section.
+   */
+  pinTab(index: number): void {
+    if (index < 0 || index >= this.state.tabs.length) return
+    const tab = this.state.tabs[index]
+    if (tab.isPinned) return
+
+    this.flushActiveTab()
+    let lastPinnedIndex = -1
+    for (let i = 0; i < this.state.tabs.length; i++) {
+      if (this.state.tabs[i].isPinned) lastPinnedIndex = i
+    }
+    const targetIndex = lastPinnedIndex + 1
+
+    const tabs = [...this.state.tabs]
+    const updatedTab: TabDoc = { ...tab, isPinned: true, groupId: null }
+    tabs.splice(index, 1)
+    tabs.splice(targetIndex, 0, updatedTab)
+
+    let newActive = this.state.activeTab
+    if (this.state.activeTab === index) {
+      newActive = targetIndex
+    } else if (index < this.state.activeTab && targetIndex >= this.state.activeTab) {
+      newActive--
+    } else if (index > this.state.activeTab && targetIndex <= this.state.activeTab) {
+      newActive++
+    }
+
+    this.state = { ...this.state, tabs, activeTab: newActive }
+    this.syncMirror()
+    this.persistTabs()
+    this.notify()
+  }
+
+  /**
+   * Unpin a tab, placing it at the start of the unpinned list.
+   */
+  unpinTab(index: number): void {
+    if (index < 0 || index >= this.state.tabs.length) return
+    const tab = this.state.tabs[index]
+    if (!tab.isPinned) return
+
+    this.flushActiveTab()
+    let lastPinnedIndex = -1
+    for (let i = 0; i < this.state.tabs.length; i++) {
+      if (this.state.tabs[i].isPinned) lastPinnedIndex = i
+    }
+
+    const tabs = [...this.state.tabs]
+    const updatedTab: TabDoc = { ...tab, isPinned: false }
+    tabs.splice(index, 1)
+    const targetIndex = Math.max(0, lastPinnedIndex)
+    tabs.splice(targetIndex, 0, updatedTab)
+
+    let newActive = this.state.activeTab
+    if (this.state.activeTab === index) {
+      newActive = targetIndex
+    } else if (index < this.state.activeTab && targetIndex >= this.state.activeTab) {
+      newActive--
+    } else if (index > this.state.activeTab && targetIndex <= this.state.activeTab) {
+      newActive++
+    }
+
+    this.state = { ...this.state, tabs, activeTab: newActive }
+    this.syncMirror()
+    this.persistTabs()
+    this.notify()
+  }
+
+  /**
+   * Create a new tab group and optionally assign tabs to it.
+   */
+  createTabGroup(label: string, color?: string, tabIndices: number[] = []): string {
+    const currentGroups = this.state.tabGroups ?? []
+    const id = `group-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`
+    const groupColors = ['#f24e1e', '#3b82f6', '#10b981', '#f59e0b', '#8b5cf6', '#ec4899', '#06b6d4']
+    const assignedColor = color ?? groupColors[currentGroups.length % groupColors.length]
+    const newGroup: TabGroup = {
+      id,
+      label: label.trim() || 'New Group',
+      color: assignedColor,
+      collapsed: false
+    }
+
+    const indicesSet = new Set(tabIndices)
+    const tabs = this.state.tabs.map((tab, idx) => {
+      if (indicesSet.has(idx)) {
+        return { ...tab, groupId: id, isPinned: false }
+      }
+      return tab
+    })
+
+    this.state = {
+      ...this.state,
+      tabGroups: [...currentGroups, newGroup],
+      tabs
+    }
+    this.persistTabs()
+    this.notify()
+    return id
+  }
+
+  /**
+   * Update properties on an existing tab group.
+   */
+  updateTabGroup(groupId: string, patch: Partial<TabGroup>): void {
+    const currentGroups = this.state.tabGroups ?? []
+    const tabGroups = currentGroups.map((g) => (g.id === groupId ? { ...g, ...patch } : g))
+    this.state = { ...this.state, tabGroups }
+    this.persistTabs()
+    this.notify()
+  }
+
+  /**
+   * Delete a tab group. If closeTabs is true, member tabs are closed; otherwise ungrouped.
+   */
+  deleteTabGroup(groupId: string, closeTabs = false): void {
+    const currentGroups = this.state.tabGroups ?? []
+    if (closeTabs) {
+      const remainingTabs = this.state.tabs.filter((t) => t.groupId !== groupId)
+      let activeTab = this.state.activeTab
+      if (activeTab >= remainingTabs.length) {
+        activeTab = Math.max(0, remainingTabs.length - 1)
+      }
+      this.state = {
+        ...this.state,
+        tabs: remainingTabs,
+        activeTab,
+        tabGroups: currentGroups.filter((g) => g.id !== groupId)
+      }
+      this.syncMirror()
+    } else {
+      const tabs = this.state.tabs.map((t) => (t.groupId === groupId ? { ...t, groupId: null } : t))
+      this.state = {
+        ...this.state,
+        tabs,
+        tabGroups: currentGroups.filter((g) => g.id !== groupId)
+      }
+    }
+    this.persistTabs()
+    this.notify()
+  }
+
+  /**
+   * Toggle collapsed/expanded state of a tab group.
+   */
+  toggleTabGroupCollapse(groupId: string): void {
+    const currentGroups = this.state.tabGroups ?? []
+    const tabGroups = currentGroups.map((g) =>
+      g.id === groupId ? { ...g, collapsed: !g.collapsed } : g
+    )
+    this.state = { ...this.state, tabGroups }
+    this.persistTabs()
+    this.notify()
+  }
+
+  /**
+   * Assign or unassign a tab to a tab group.
+   */
+  setTabGroup(tabIndex: number, groupId: string | null): void {
+    if (tabIndex < 0 || tabIndex >= this.state.tabs.length) return
+    const tabs = this.state.tabs.map((t, i) =>
+      i === tabIndex ? { ...t, groupId, isPinned: groupId ? false : t.isPinned } : t
+    )
+    this.state = { ...this.state, tabs }
+    this.persistTabs()
+    this.notify()
+  }
+
+  /**
+   * Reorder tab groups.
+   */
+  reorderTabGroups(fromIndex: number, toIndex: number): void {
+    const currentGroups = this.state.tabGroups ?? []
+    if (fromIndex < 0 || fromIndex >= currentGroups.length) return
+    if (toIndex < 0 || toIndex >= currentGroups.length) return
+    if (fromIndex === toIndex) return
+
+    const tabGroups = [...currentGroups]
+    const [moved] = tabGroups.splice(fromIndex, 1)
+    tabGroups.splice(toIndex, 0, moved)
+
+    this.state = { ...this.state, tabGroups }
+    this.persistTabs()
+    this.notify()
+  }
+
+  /**
+   * Move tab relative to its current index (e.g. for keyboard Alt+Up/Down shortcuts).
+   */
+  moveTabRelative(tabIndex: number, delta: -1 | 1): void {
+    const targetIndex = tabIndex + delta
+    if (targetIndex >= 0 && targetIndex < this.state.tabs.length) {
+      this.moveTab(tabIndex, targetIndex)
+    }
   }
 
   switchTab(index: number): void {
