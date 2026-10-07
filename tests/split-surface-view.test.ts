@@ -143,4 +143,15 @@ describe('secondary view mode goes through the store', () => {
     expect(files.getState().secondaryDoc?.viewMode).toBe('live')
     files.closeSecondaryFile()
   })
+
+  it('allows navigating between launcher and tool surfaces', () => {
+    files.setSplitSurface('ai')
+    expect(files.getState().splitSurface).toBe('ai')
+    files.setSplitSurface('launcher')
+    expect(files.getState().splitSurface).toBe('launcher')
+    files.setSplitSurface('files')
+    expect(files.getState().splitSurface).toBe('files')
+    files.setSplitSurface('launcher')
+    expect(files.getState().splitSurface).toBe('launcher')
+  })
 })

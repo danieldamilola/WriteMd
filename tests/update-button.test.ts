@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 // Side-effect import: registers <writemd-update-button>.
 import '../src/renderer/src/components/UpdateButton'
 import type { WriteMdUpdateButton } from '../src/renderer/src/components/UpdateButton'
@@ -48,8 +48,8 @@ const updater = {
     error: ''
   }),
   check: async () => ({ updateInfo: { version: VERSION } }),
-  download: async () => [] as string[],
-  install: () => undefined,
+  download: vi.fn(async () => [] as string[]),
+  install: vi.fn(() => undefined),
   onUpdateAvailable: sub('available'),
   onUpdateNotAvailable: sub('notAvailable'),
   onUpdateDownloaded: sub('downloaded'),
@@ -91,8 +91,9 @@ function emit(status: Status, percent = 0): void {
   for (const fn of listeners[key]) fn(info)
 }
 
-async function mount(): Promise<WriteMdUpdateButton> {
+async function mount(sidebar = false): Promise<WriteMdUpdateButton> {
   const el = document.createElement('writemd-update-button') as WriteMdUpdateButton
+  el.sidebar = sidebar
   document.body.appendChild(el)
   await el.updateComplete
   return el
@@ -121,6 +122,7 @@ describe('writemd-update-button', () => {
   beforeEach(() => {
     document.body.innerHTML = ''
     installBridge()
+    vi.clearAllMocks()
   })
 
   afterEach(() => {
@@ -130,6 +132,41 @@ describe('writemd-update-button', () => {
   it('renders nothing while idle, so the toolbar stays quiet', async () => {
     const el = await mount()
     expect(wrap(el)).toBeNull()
+  })
+
+  it('sidebar update moves from download to progress to restart through the existing bridge', async () => {
+    const el = await mount(true)
+    expect(el.shadowRoot?.querySelector('.sidebar-action')).toBeNull()
+    emit('available')
+    await settle(el)
+    const button = el.shadowRoot!.querySelector<HTMLButtonElement>('.sidebar-action')!
+    expect(button.textContent).toContain('Update available')
+    expect(button.title).toContain(VERSION)
+    button.click()
+    await settle(el)
+    expect(updater.download).toHaveBeenCalledOnce()
+    emit('downloading', 43)
+    await settle(el)
+    expect(button.textContent).toContain('Downloading 43%')
+    expect(button.disabled).toBe(true)
+    emit('downloaded')
+    await settle(el)
+    expect(button.textContent).toContain('Restart to update')
+    expect(button.disabled).toBe(false)
+    button.click()
+    expect(updater.install).toHaveBeenCalledOnce()
+    emit('idle')
+    await settle(el)
+    expect(el.shadowRoot?.querySelector('.sidebar-action')).toBeNull()
+  })
+
+  it('sidebar variant does not show a toolbar icon or floating card', async () => {
+    const el = await mount(true)
+    emit('downloaded')
+    await settle(el)
+    expect(el.shadowRoot?.querySelector('writemd-icon-button')).toBeNull()
+    expect(card(el)).toBeNull()
+    expect(el.shadowRoot?.querySelector('svg[data-icon="refresh"]')).not.toBeNull()
   })
 
   it('shows the red dot for a waiting update', async () => {

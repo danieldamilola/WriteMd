@@ -58,7 +58,7 @@ async function run(orientation: Orientation): Promise<void> {
           openTabs: [notePath],
           activeTabPath: notePath
         },
-        appearance: { theme: 'graphite', panelOrientation: orientation }
+        appearance: { designVersion: 1, theme: 'graphite', panelOrientation: orientation }
       },
       null,
       2
@@ -169,7 +169,7 @@ test.describe('Draggable table toolbar', () => {
             openTabs: [notePath],
             activeTabPath: notePath
           },
-          appearance: { theme: 'graphite', panelOrientation: 'horizontal' }
+          appearance: { designVersion: 1, theme: 'graphite', panelOrientation: 'horizontal' }
         },
         null,
         2
@@ -241,7 +241,7 @@ test.describe('Draggable table toolbar', () => {
             openTabs: [notePath],
             activeTabPath: notePath
           },
-          appearance: { theme: 'graphite', panelOrientation: 'vertical' }
+          appearance: { designVersion: 1, theme: 'graphite', panelOrientation: 'vertical' }
         },
         null,
         2

@@ -24,6 +24,20 @@ describe('SettingsStore', () => {
     document.documentElement.removeAttribute('style')
   })
 
+  it('uses a contrasting theme surface for monochrome accent controls', () => {
+    store.set('appearance.accentColor', '#ffffff')
+    applySettingsToDOM(store)
+    expect(document.documentElement.style.getPropertyValue('--accent')).toBe('var(--text)')
+    expect(document.documentElement.style.getPropertyValue('--accent-text')).toBe(
+      'var(--bg-elevated)'
+    )
+    store.set('appearance.accentColor', '#f2994a')
+    applySettingsToDOM(store)
+    expect(document.documentElement.style.getPropertyValue('--accent-text')).toBe(
+      'var(--accent-ink-dark)'
+    )
+  })
+
   describe('get', () => {
     it('defaults to the Graphite theme with the red accent', () => {
       expect(store.get('appearance.theme', '')).toBe('graphite')

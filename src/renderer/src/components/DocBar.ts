@@ -1,11 +1,17 @@
 import { html, css, LitElement } from 'lit'
 import { customElement, property, state } from 'lit/decorators.js'
 import { menuStyles, menuIcon, menuCheck } from './menu-styles'
-import { FileState, type ViewMode } from '../state/file-state'
+import {
+  FileState,
+  type ViewMode,
+  type FileStateData,
+  type SecondaryDocState
+} from '../state/file-state'
 import { api } from '../api'
 import { displayPath, displayTitle } from '../utils/links'
 import { showConfirm } from '../services/confirm'
 import { emit } from '../events/bus'
+import './ContextMenu'
 
 /**
  * Document strip: parent/file path left, renameable title center,
@@ -29,7 +35,9 @@ export class DocBar extends LitElement {
         flex: 1;
       }
       .sub-header {
-        display: flex;
+        position: relative;
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
         align-items: center;
         justify-content: space-between;
         height: 49px;
@@ -37,8 +45,8 @@ export class DocBar extends LitElement {
         padding: 0 20px;
         flex-shrink: 0;
         user-select: none;
-        font-family: 'Geist Mono', monospace;
-        font-size: 14px;
+        font-family: var(--font-ui);
+        font-size: 13px;
         box-sizing: border-box;
       }
       .sub-header-left {
@@ -60,6 +68,10 @@ export class DocBar extends LitElement {
         flex: 1;
         overflow: hidden;
         white-space: nowrap;
+        min-width: 0;
+        width: 100%;
+        max-width: 240px;
+        justify-self: center;
       }
       input.title-input {
         background: transparent;
@@ -86,6 +98,7 @@ export class DocBar extends LitElement {
         gap: 8px;
         justify-content: flex-end;
         flex: 1;
+        min-width: 0;
       }
       .icon-action {
         display: flex;
@@ -113,40 +126,16 @@ export class DocBar extends LitElement {
         width: 14px;
         height: 14px;
       }
-      .icon-action.faint {
-        opacity: 0.35;
-      }
-      .icon-action.faint:hover {
-        opacity: 1;
-      }
       .menu-wrap {
         position: relative;
       }
-      .menu-backdrop {
-        position: fixed;
-        inset: 0;
-        z-index: 90;
-      }
       .m-panel.note-menu {
-        /* Fixed so the menu escapes the top bar's overflow:hidden slot. */
-        position: fixed;
+        width: max-content;
         min-width: 230px;
-        z-index: 200;
-        transform-origin: top right;
-        animation: menu-in var(--motion-fast) var(--motion-ease);
-      }
-
-      @keyframes menu-in {
-        from {
-          opacity: 0;
-          transform: translateY(-4px) scale(0.97);
-        }
+        pointer-events: auto;
       }
 
       :host-context([data-motion='reduced']) {
-        .m-panel.note-menu {
-          animation: none;
-        }
         .icon-action {
           transition: none;
         }
@@ -155,12 +144,25 @@ export class DocBar extends LitElement {
         }
       }
       :host([compact]) .sub-header {
-        height: 28px;
-        /* Left offset aligns path/title with the inner panel below:
-           rail (20 padding + 196 width + 12 margin = 228) minus
-           top-bar leading (28 padding + 94 buttons + 21 slot margin = 143),
-           plus the standard 12px gutter. */
-        padding: 0 12px 0 97px;
+        height: var(--shell-header-height);
+        padding: 0 24px;
+      }
+      :host([compact]) .sub-header-left {
+        display: flex;
+        font-size: 12px;
+        min-width: 0;
+      }
+      :host([compact]) .sub-header-right {
+        flex: 0 0 auto;
+        padding-right: var(--document-caption-inset, 0px);
+        pointer-events: auto;
+      }
+      :host([compact]) .sub-header-center {
+        width: calc(100% - 80px);
+        pointer-events: auto;
+      }
+      :host([compact]) .sub-header-left {
+        pointer-events: auto;
       }
       :host([compact]) .icon-action svg {
         width: 18px;
@@ -172,23 +174,33 @@ export class DocBar extends LitElement {
   @state() private filePath: string | null = null
   @state() private viewMode: ViewMode = 'live'
   @state() private showMoreMenu = false
-  @state() private menuPos: { x: number; y: number } | null = null
+  private menuAnchor: HTMLElement | null = null
   @property({ type: Boolean, reflect: true }) compact = false
+  @property({ type: Boolean, reflect: true }) secondary = false
   private fileState = FileState.getInstance()
   private unsubscribe: (() => void) | null = null
+  private get document(): FileStateData | SecondaryDocState | null {
+    const state = this.fileState.getState()
+    return this.secondary ? state.secondaryDoc : state
+  }
+  private setMode(mode: ViewMode): void {
+    if (this.secondary) this.fileState.setSecondaryViewMode(mode)
+    else this.fileState.setExplicitMode(mode)
+  }
 
   connectedCallback(): void {
     super.connectedCallback()
-    const s = this.fileState.getState()
-    this.filePath = s.path
-    this.viewMode = s.viewMode === 'wysiwyg' ? 'live' : s.viewMode
-    this.unsubscribe = this.fileState.subscribe((fs) => {
+    const sync = (): void => {
+      const fs = this.document
+      if (!fs) return
       const mode = fs.viewMode === 'wysiwyg' ? 'live' : fs.viewMode
       if (this.filePath !== fs.path || this.viewMode !== mode) {
         this.filePath = fs.path
         this.viewMode = mode
       }
-    })
+    }
+    sync()
+    this.unsubscribe = this.fileState.subscribe(sync)
   }
 
   disconnectedCallback(): void {
@@ -230,7 +242,12 @@ export class DocBar extends LitElement {
         checked: this.viewMode === 'reading'
       },
       { id: 'source', label: 'Source mode', icon: 'code', checked: this.viewMode === 'source' },
-      { id: 'split', label: 'Split right', icon: 'split', dividerBefore: true },
+      {
+        id: this.secondary ? 'close' : 'split',
+        label: this.secondary ? 'Close split pane' : 'Split right',
+        icon: 'split',
+        dividerBefore: true
+      },
       { id: 'rename', label: 'Rename', icon: 'pencil', dividerBefore: true },
       { id: 'move', label: 'Move file to', icon: 'folder' },
       { id: 'pdf', label: 'Export to PDF', icon: 'file', dividerBefore: true },
@@ -241,22 +258,17 @@ export class DocBar extends LitElement {
       { id: 'reveal-explorer', label: 'Show in system explorer', icon: 'external' },
       { id: 'reveal-nav', label: 'Reveal file in navigation', icon: 'reveal' },
       { id: 'delete', label: 'Delete file', icon: 'trash', dividerBefore: true, danger: true }
-    ]
+    ].filter((item) => !this.secondary || item.id !== 'backlinks')
   }
 
   private toggleMoreMenu(e: Event): void {
     e.stopPropagation()
     if (this.showMoreMenu) {
       this.showMoreMenu = false
-      this.menuPos = null
+      this.menuAnchor = null
       return
     }
-    const btn = e.currentTarget as HTMLElement
-    const rect = btn.getBoundingClientRect()
-    this.menuPos = {
-      x: Math.max(8, rect.right - 230),
-      y: rect.bottom + 4
-    }
+    this.menuAnchor = e.currentTarget as HTMLElement
     this.showMoreMenu = true
   }
 
@@ -267,29 +279,25 @@ export class DocBar extends LitElement {
     ;(e.currentTarget as HTMLElement).click()
   }
 
-  /** Enter/Space on a menu row. */
-  private handleMenuKey = (e: KeyboardEvent): void => {
-    if (e.key !== 'Enter' && e.key !== ' ') return
-    e.preventDefault()
-    const id = (e.currentTarget as HTMLElement).dataset['id']
-    if (id) void this.handleNoteAction(id)
-  }
-
   private async handleNoteAction(id: string): Promise<void> {
     this.showMoreMenu = false
-    this.menuPos = null
+    this.menuAnchor = null
+    await this.updateComplete
     switch (id) {
       case 'backlinks':
         this.fileState.setSplitSurface('backlinks')
         break
       case 'reading':
-        this.fileState.setExplicitMode('reading')
+        this.setMode('reading')
         break
       case 'source':
-        this.fileState.setExplicitMode('source')
+        this.setMode('source')
         break
       case 'split':
         this.fileState.toggleSplitView(true)
+        break
+      case 'close':
+        this.fileState.closeSecondaryFile()
         break
       case 'rename': {
         const input = this.shadowRoot?.querySelector('.title-input') as HTMLInputElement | null
@@ -298,7 +306,7 @@ export class DocBar extends LitElement {
         break
       }
       case 'move':
-        await this.fileState.moveActiveFile()
+        await this.fileState.moveActiveFile(this.secondary)
         break
       case 'pdf':
       case 'docx':
@@ -306,10 +314,10 @@ export class DocBar extends LitElement {
         break
       case 'find':
       case 'replace':
-        emit('find:open', { mode: id })
+        emit('find:open', { mode: id, pane: this.secondary ? 'secondary' : 'primary' })
         break
       case 'copy-path': {
-        const path = this.fileState.getState().path
+        const path = this.document?.path
         if (path) {
           try {
             await navigator.clipboard.writeText(path)
@@ -320,7 +328,7 @@ export class DocBar extends LitElement {
         break
       }
       case 'reveal-explorer': {
-        const path = this.fileState.getState().path
+        const path = this.document?.path
         if (path) {
           await api()
             ?.shell?.showInFolder?.(path)
@@ -332,7 +340,7 @@ export class DocBar extends LitElement {
         this.fileState.setSplitSurface('files')
         break
       case 'delete': {
-        const path = this.fileState.getState().path
+        const path = this.document?.path
         if (!path) break
         const base = path.split(/[/\\]/).pop() ?? path
         if (!(await showConfirm(`Move ${base} to trash?`, 'Delete file'))) break
@@ -341,6 +349,8 @@ export class DocBar extends LitElement {
           alert('Could not delete file')
           break
         }
+        if (this.fileState.getState().secondaryDoc?.path === path)
+          this.fileState.closeSecondaryFile()
         const idx = this.fileState.getState().tabs.findIndex((t) => t.path === path)
         if (idx >= 0) await this.fileState.closeTab(idx)
         break
@@ -354,7 +364,8 @@ export class DocBar extends LitElement {
       alert('Export is unavailable. Restart the app to load the latest version.')
       return
     }
-    const s = this.fileState.getState()
+    const s = this.document
+    if (!s) return
     try {
       const result = await bridge[kind](s.content, s.path)
       if (!result.ok && result.reason !== 'canceled') {
@@ -374,7 +385,7 @@ export class DocBar extends LitElement {
       input.blur()
       return
     }
-    await this.fileState.renameFile(newName, false)
+    await this.fileState.renameFile(newName, this.secondary)
   }
 
   private handleRenameKeyDown(e: KeyboardEvent): void {
@@ -399,7 +410,7 @@ export class DocBar extends LitElement {
           <input
             type="text"
             class="title-input"
-            aria-label="Document title"
+            aria-label=${this.secondary ? 'Split pane document title' : 'Document title'}
             .value=${displayTitle(this.filePath)}
             @blur=${(e: Event) => void this.handleRename(e)}
             @keydown=${this.handleRenameKeyDown}
@@ -412,14 +423,14 @@ export class DocBar extends LitElement {
             tabindex="0"
             aria-label="Toggle Reading / Live Mode"
             title="Toggle Reading / Live Mode"
-            @click=${() => this.fileState.quickToggle()}
+            @click=${() => (this.secondary ? this.setMode(this.viewMode === 'reading' ? 'live' : 'reading') : this.fileState.quickToggle())}
             @keydown=${this.handleIconKey}
           >
             ${this.renderToggleIcon(this.viewMode)}
           </div>
           <div class="menu-wrap">
             <div
-              class="icon-action faint"
+              class="icon-action"
               role="button"
               tabindex="0"
               aria-label="More Options"
@@ -438,45 +449,42 @@ export class DocBar extends LitElement {
             ${
               this.showMoreMenu
                 ? html`
-                    <div
-                      class="menu-backdrop"
-                      @click=${() => {
+                    <writemd-context-menu
+                      .anchor=${this.menuAnchor}
+                      placement="bottom-end"
+                      @menu-dismiss=${() => {
                         this.showMoreMenu = false
-                        this.menuPos = null
+                        this.menuAnchor = null
                       }}
-                    ></div>
-                    <div
-                      class="m-panel note-menu"
-                      role="menu"
-                      aria-label="Document options"
-                      style="left: ${this.menuPos?.x ?? 0}px; top: ${this.menuPos?.y ?? 0}px;"
                     >
-                      ${this.noteMenuItems().map(
-                        (item) => html`
-                          ${
-                            item.dividerBefore
-                              ? html`<div class="m-divider" role="separator"></div>`
-                              : ''
-                          }
-                          <div
-                            class=${item.danger ? 'm-item danger' : 'm-item'}
-                            role="menuitem"
-                            tabindex="0"
-                            data-id=${item.id}
-                            @click=${() => void this.handleNoteAction(item.id)}
-                            @keydown=${this.handleMenuKey}
-                          >
-                            ${menuIcon(item.icon)}
-                            <span>${item.label}</span>
-                            ${item.checked ? menuCheck() : ''}
-                          </div>
-                        `
-                      )}
-                    </div>
+                      <div class="m-panel note-menu" role="menu" aria-label="Document options">
+                        ${this.noteMenuItems().map(
+                          (item) => html`
+                            ${
+                              item.dividerBefore
+                                ? html`<div class="m-divider" role="separator"></div>`
+                                : ''
+                            }
+                            <div
+                              class=${item.danger ? 'm-item danger' : 'm-item'}
+                              role="menuitem"
+                              tabindex="-1"
+                              data-id=${item.id}
+                              @click=${() => void this.handleNoteAction(item.id)}
+                            >
+                              ${menuIcon(item.icon)}
+                              <span>${item.label}</span>
+                              ${item.checked ? menuCheck() : ''}
+                            </div>
+                          `
+                        )}
+                      </div>
+                    </writemd-context-menu>
                   `
                 : ''
             }
           </div>
+          ${this.secondary ? html`<div class="icon-action" role="button" tabindex="0" aria-label="Close split pane" title="Close split pane" @click=${() => this.fileState.closeSecondaryFile()} @keydown=${this.handleIconKey}>${menuIcon('x')}</div>` : ''}
         </div>
       </div>
     `

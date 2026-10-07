@@ -42,8 +42,7 @@ export function makeFixture(
   }
   // Point the app at the fixture vault. Without this it falls back to
   // ~/Documents/WriteMd Vault, which is exactly the leak these specs had.
-  // openTabs seeds the editor, because `writemd-top-bar` only exists once a
-  // document is open; the welcome screen renders its own top bar.
+  // openTabs seeds the editor; home and documents share the same shell and top bar.
   writeFileSync(
     join(userData, 'config.json'),
     JSON.stringify(
@@ -54,7 +53,7 @@ export function makeFixture(
           openTabs: [join(vault, 'README.md')],
           activeTabPath: join(vault, 'README.md')
         },
-        appearance: { theme: 'dark', panelOrientation: 'horizontal' }
+        appearance: { designVersion: 1, theme: 'dark', panelOrientation: 'horizontal' }
       },
       null,
       2
@@ -94,4 +93,24 @@ export async function firstWindow(app: ElectronApplication): Promise<Page> {
   if (!window) throw new Error('No app window opened')
   await window.waitForLoadState('domcontentloaded')
   return window
+}
+
+/**
+ * The title bar is intentionally bare (no Menu/Settings icons), so specs open
+ * settings through its keyboard shortcut instead of a button that no longer
+ * exists. Waits for the modal element; callers assert visibility.
+ */
+export async function openSettings(window: Page): Promise<void> {
+  await window.keyboard.press('Control+,')
+  await window.locator('writemd-settings-modal').waitFor({ state: 'attached', timeout: 15000 })
+}
+
+export async function chooseSettingsOption(
+  window: Page,
+  label: string,
+  value: string
+): Promise<void> {
+  const select = window.locator(`writemd-settings-modal wa-select[aria-label="${label}"]`)
+  await select.click()
+  await select.locator(`wa-option[value="${value}"]`).click()
 }

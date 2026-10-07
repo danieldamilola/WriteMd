@@ -21,6 +21,8 @@ files:
   - out/preload/**/*
   - out/renderer/**/*
   - package.json
+  - THIRD_PARTY_NOTICES.md
+  - licenses/**
   - '!**/.vscode/*'
   - '!src/*'
   - '!electron.vite.config.{js,ts,mjs,cjs}'

@@ -48,7 +48,7 @@ test.describe('AI panel', () => {
           openTabs: [join(fixture.vault, 'README.md')],
           activeTabPath: join(fixture.vault, 'README.md')
         },
-        appearance: { theme: 'dark', panelOrientation: 'horizontal' },
+        appearance: { designVersion: 1, theme: 'dark', panelOrientation: 'horizontal' },
         ai: { provider: 'Ollama', model: 'stub-model' }
       }),
       'utf-8'

@@ -11,14 +11,14 @@ export class ModeMenu extends LitElement {
       position: absolute;
       bottom: calc(100% + 8px);
       right: 0;
-      width: 110px;
+      width: 160px;
       background: var(--menu-bg);
       border: 1px solid var(--border);
       border-radius: 6px;
       padding: 4px;
       box-shadow: var(--shadow-3);
       z-index: 100;
-      font-family: 'Geist Mono', monospace;
+      font-family: var(--font-ui);
       box-sizing: border-box;
       user-select: none;
       transform-origin: bottom right;

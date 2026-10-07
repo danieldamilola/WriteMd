@@ -121,12 +121,15 @@ export interface MotionOptions {
  * the promise resolves on the next frame, so callers do not need their own
  * branch and there is still one paint between the decision and the change.
  */
+const activeAnimations = new WeakMap<Element, Animation>()
+
 export function animate(
   el: Element | null | undefined,
   keyframes: Keyframe[],
   options: MotionOptions = {}
 ): Promise<void> {
   if (!el) return Promise.resolve()
+  activeAnimations.get(el)?.cancel()
   const { duration = DURATION.base, easing = EASING.out, delay = 0, fill = false } = options
   if (reducedMotionNow()) {
     return new Promise((resolve) => requestAnimationFrame(() => resolve()))
@@ -137,10 +140,12 @@ export function animate(
     delay,
     fill: fill === true ? 'forwards' : fill === false ? 'none' : fill
   })
+  activeAnimations.set(el, animation)
   return animation.finished
     .then(() => {
       if (fill) animation.commitStyles?.()
       animation.cancel()
+      if (activeAnimations.get(el) === animation) activeAnimations.delete(el)
     })
     .catch(() => {
       /* cancelled: a newer animation for the same element took over */

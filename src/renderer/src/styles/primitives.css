@@ -1,0 +1,106 @@
+:root {
+  --caption-button-width: 46px;
+  --workspace-gutter: 5px;
+  --workspace-divider: color-mix(in srgb, var(--border-subtle) 55%, transparent);
+  --dialog-backdrop: color-mix(in srgb, var(--bg-frame) 40%, transparent);
+  --background-mask-solid: #000;
+  --space-small: var(--spacing-2);
+  --radius-small: var(--radius-sm);
+  --surface-opacity: 100;
+  --accent-choice-0: var(--text);
+  --accent-choice-1: #2a7de1;
+  --accent-choice-2: #9b51e0;
+  --accent-choice-3: #f24e1e;
+  --accent-choice-4: #00b87c;
+  --accent-choice-5: #f2994a;
+  --accent-choice-6: #f26419;
+  --accent-choice-7: #00c4cc;
+  --editor-surface: color-mix(
+    in srgb,
+    var(--bg-elevated) calc(var(--surface-opacity, 100) * 1%),
+    transparent
+  );
+  --background-blur: 12px;
+  --surface-blur: 0px;
+  --frame-surface: var(--bg-frame);
+  --wa-font-family-body: var(--font-ui);
+  --wa-font-family-heading: var(--font-ui);
+  --wa-color-surface-default: var(--bg-elevated);
+  --wa-color-surface-raised: var(--bg-elevated);
+  --wa-color-surface-lowered: var(--bg-hover);
+  --wa-color-surface-border: var(--border-subtle);
+  --wa-color-text-normal: var(--text);
+  --wa-color-text-quiet: var(--text-muted);
+  --wa-color-text-link: var(--accent);
+  --wa-color-neutral-fill-normal: var(--bg-hover);
+  --wa-color-neutral-fill-quiet: var(--bg-hover);
+  --wa-color-neutral-fill-loud: var(--bg-active);
+  --wa-color-neutral-on-normal: var(--text);
+  --wa-color-neutral-on-quiet: var(--text-secondary);
+  --wa-color-neutral-on-loud: var(--text);
+  --wa-color-neutral-border-normal: var(--border-subtle);
+  --wa-color-brand-fill-loud: var(--accent);
+  --wa-color-brand-on-loud: var(--accent-text);
+  --wa-color-brand-border-loud: var(--accent);
+  --wa-color-focus: var(--border-focus);
+  --wa-border-radius-s: var(--radius-sm);
+  --wa-border-radius-m: var(--radius-md);
+  --wa-border-radius-l: var(--radius-lg);
+  --wa-transition-fast: var(--motion-fast);
+  --wa-transition-normal: var(--motion-base);
+  --preview-dark-base: #111;
+  --preview-dark-raised: #1a1a1a;
+  --preview-graphite-base: #1e1e1e;
+  --preview-graphite-raised: #252526;
+  --preview-nord-base: #2e3440;
+  --preview-nord-raised: #3b4252;
+  --preview-midnight-base: #0f1419;
+  --preview-midnight-raised: #151d25;
+  --preview-light-base: #fff;
+  --preview-light-raised: #fafafa;
+  --preview-paper-base: #fefbf3;
+  --preview-paper-raised: #fdf6e3;
+  --preview-dracula-base: #282a36;
+  --preview-dracula-raised: #343746;
+}
+
+html[data-window-material='mica'],
+html[data-window-material='acrylic'] {
+  --frame-surface: color-mix(
+    in srgb,
+    var(--bg-frame) calc(var(--surface-opacity) * 1%),
+    transparent
+  );
+}
+html[data-window-material='mica'] body,
+html[data-window-material='acrylic'] body {
+  background: transparent;
+}
+
+.writemd-drag-preview {
+  position: fixed;
+  inset: 0 auto auto 0;
+  z-index: 10000;
+  pointer-events: none;
+  border-radius: var(--radius-sm);
+  background: var(--bg-elevated);
+  box-shadow: var(--shadow-3);
+  color: var(--text);
+  font: 13px var(--font-ui);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  will-change: transform;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}

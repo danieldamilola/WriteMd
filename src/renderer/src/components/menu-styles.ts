@@ -16,6 +16,20 @@ export const menuStyles = css`
     padding: 4px;
     z-index: 100;
   }
+  writemd-context-menu > .m-panel {
+    position: relative;
+    left: auto !important;
+    top: auto !important;
+    max-width: calc(100vw - 16px);
+    max-height: min(85vh, var(--auto-size-available-height, 85vh));
+    box-sizing: border-box;
+    overflow-y: auto;
+  }
+  .m-item:focus-visible {
+    outline: none;
+    background: var(--bg-active);
+    color: var(--text);
+  }
   .m-item {
     position: relative;
     display: flex;

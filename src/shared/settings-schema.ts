@@ -23,17 +23,31 @@ export interface WriteMdSettings {
     tableToolbarOffset: { x: number; y: number }
   }
   appearance: {
+    designVersion: number
+    themeHue: number
+    themeSaturation: number
+    themeDarkLightness: number
     theme: string
     accentColor: string
     panelOrientation: 'horizontal' | 'vertical'
     /** Full-screen settings shell. Off restores the centered popup dialog. */
-    newSettingsDesign: boolean
     /**
      * `system` follows the OS animation setting, `full` animates regardless of
      * it, `reduced` never animates. Written onto `<html>` as `data-motion`, which
      * is what every animated surface tests.
      */
     motion: 'system' | 'full' | 'reduced'
+    paneWidth: number
+    railWidth: number
+    backgroundId: string
+    backgroundEffect: 'none' | 'haze' | 'dither' | 'ascii' | 'halftone' | 'scanlines'
+    backgroundTarget: 'workspace' | 'ai'
+    backgroundShowOn: 'all' | 'empty'
+    backgroundEmptyOpacity: number
+    backgroundContentOpacity: number
+    backgroundBlur: number
+    surfaceOpacity: number
+    windowMaterial: 'none' | 'mica' | 'acrylic'
   }
   files: {
     vaultPath: string
@@ -119,11 +133,25 @@ export const DEFAULT_SETTINGS: WriteMdSettings = {
     tableToolbarOffset: { x: 0, y: 0 }
   },
   appearance: {
+    designVersion: 1,
+    themeHue: 240,
+    themeSaturation: 0,
+    themeDarkLightness: 9,
     theme: 'graphite',
     accentColor: '#f24e1e',
-    panelOrientation: 'horizontal',
-    newSettingsDesign: true,
-    motion: 'system'
+    panelOrientation: 'vertical',
+    motion: 'system',
+    paneWidth: 600,
+    railWidth: 208,
+    backgroundId: '',
+    backgroundEffect: 'none',
+    backgroundTarget: 'workspace',
+    backgroundShowOn: 'all',
+    backgroundEmptyOpacity: 31,
+    backgroundContentOpacity: 19,
+    backgroundBlur: 12,
+    surfaceOpacity: 100,
+    windowMaterial: 'none'
   },
   files: {
     vaultPath: '',
@@ -202,7 +230,25 @@ const ARRAY_ELEMENT_TYPES: Record<string, 'string' | 'number' | 'boolean'> = {
  * like it had been set.
  */
 const STRING_UNIONS: Record<string, readonly string[]> = {
-  'appearance.motion': ['system', 'full', 'reduced']
+  'appearance.motion': ['system', 'full', 'reduced'],
+  'appearance.panelOrientation': ['horizontal', 'vertical'],
+  'appearance.backgroundEffect': ['none', 'haze', 'dither', 'ascii', 'halftone', 'scanlines'],
+  'appearance.backgroundTarget': ['workspace', 'ai'],
+  'appearance.backgroundShowOn': ['all', 'empty'],
+  'appearance.windowMaterial': ['none', 'mica', 'acrylic']
+}
+
+const NUMBER_BOUNDS: Record<string, readonly [number, number]> = {
+  'appearance.designVersion': [1, 1],
+  'appearance.themeHue': [0, 360],
+  'appearance.themeSaturation': [0, 100],
+  'appearance.themeDarkLightness': [0, 30],
+  'appearance.paneWidth': [320, 10000],
+  'appearance.railWidth': [160, 360],
+  'appearance.backgroundEmptyOpacity': [0, 100],
+  'appearance.backgroundContentOpacity': [0, 100],
+  'appearance.surfaceOpacity': [0, 100],
+  'appearance.backgroundBlur': [0, 40]
 }
 
 /**
@@ -248,6 +294,16 @@ export function validatePatch(patch: unknown): {
       }
       if (value === null || value === undefined) continue
       const fallback = (defaults as Record<string, unknown>)[key]
+      const bounds = NUMBER_BOUNDS[dotted]
+      if (
+        typeof value === 'number' &&
+        (!Number.isFinite(value) || (bounds && (value < bounds[0] || value > bounds[1])))
+      ) {
+        problems.push(
+          `${dotted} must be a finite number${bounds ? ` between ${bounds[0]} and ${bounds[1]}` : ''}`
+        )
+        continue
+      }
       if (Array.isArray(fallback)) {
         const element = ARRAY_ELEMENT_TYPES[dotted]
         if (!element) {

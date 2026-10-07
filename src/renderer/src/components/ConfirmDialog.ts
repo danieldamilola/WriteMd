@@ -1,3 +1,5 @@
+import './Modal'
+import { nativeModalAvailable } from './Modal'
 import { html, css, LitElement } from 'lit'
 import { customElement, property } from 'lit/decorators.js'
 import { settleConfirm } from '../services/confirm'
@@ -13,8 +15,7 @@ export { showConfirm } from '../services/confirm'
 export class WriteMdConfirm extends LitElement {
   static styles = css`
     .overlay {
-      position: fixed;
-      inset: 0;
+      position: relative;
       background: var(--scrim, rgba(0, 0, 0, 0.5));
       display: flex;
       align-items: center;
@@ -22,8 +23,8 @@ export class WriteMdConfirm extends LitElement {
       z-index: 1000;
     }
     .dialog {
-      background: var(--bg-elevated, #212226);
-      border: 1px solid var(--border, #333);
+      background: var(--bg-elevated);
+      border: 1px solid var(--border);
       border-radius: var(--radius-lg, 12px);
       padding: 24px;
       width: 320px;
@@ -33,12 +34,12 @@ export class WriteMdConfirm extends LitElement {
       margin: 0 0 12px 0;
       font-size: 15px;
       font-weight: 600;
-      color: var(--text, #e8e8e8);
+      color: var(--text);
     }
     p {
       margin: 0 0 24px 0;
       font-size: 13px;
-      color: var(--text-secondary, #a3a3a3);
+      color: var(--text-secondary);
       line-height: 1.5;
     }
     .actions {
@@ -48,8 +49,8 @@ export class WriteMdConfirm extends LitElement {
     }
     button {
       background: transparent;
-      border: 1px solid var(--border, #333);
-      color: var(--text, #e8e8e8);
+      border: 1px solid var(--border);
+      color: var(--text);
       padding: 6px 16px;
       border-radius: var(--radius-sm, 4px);
       cursor: pointer;
@@ -58,18 +59,18 @@ export class WriteMdConfirm extends LitElement {
       transition: background 0.15s;
     }
     button:hover {
-      background: var(--bg-hover, #2d2d2d);
+      background: var(--bg-hover);
     }
     button.primary {
-      background: var(--accent, #ffffff);
-      border-color: var(--accent, #ffffff);
-      color: var(--accent-text, #000000);
+      background: var(--accent);
+      border-color: var(--accent);
+      color: var(--accent-text);
     }
     button.primary:hover {
       filter: brightness(1.1);
     }
     button:focus-visible {
-      outline: 2px solid var(--border-focus, #4a9eff);
+      outline: 2px solid var(--border-focus);
       outline-offset: 2px;
     }
   `
@@ -88,9 +89,10 @@ export class WriteMdConfirm extends LitElement {
   }
 
   private handleKeydown = (e: KeyboardEvent): void => {
+    if (nativeModalAvailable()) return
     if (!this.open) return
     if (e.key === 'Escape') {
-      e.stopPropagation()
+      e.stopImmediatePropagation()
       e.preventDefault()
       this.handleClose(false)
     }
@@ -151,16 +153,18 @@ export class WriteMdConfirm extends LitElement {
     // buttons in the tab order forever.
     if (!this.open) return html``
     return html`
-      <div class="overlay open" @keydown=${this.handleOverlayKeydown}>
-        <div class="dialog" role="dialog" aria-modal="true" aria-label=${this.titleText}>
-          <h2>${this.titleText}</h2>
-          <p>${this.message}</p>
-          <div class="actions">
-            <button @click=${() => this.handleClose(false)}>Cancel</button>
-            <button class="primary" @click=${() => this.handleClose(true)}>OK</button>
+      <writemd-modal .label=${this.titleText} @modal-dismiss=${() => this.handleClose(false)}>
+        <div class="overlay open" @keydown=${this.handleOverlayKeydown}>
+          <div class="dialog" role="dialog" aria-modal="true" aria-label=${this.titleText}>
+            <h2>${this.titleText}</h2>
+            <p>${this.message}</p>
+            <div class="actions">
+              <button @click=${() => this.handleClose(false)}>Cancel</button>
+              <button class="primary" @click=${() => this.handleClose(true)}>OK</button>
+            </div>
           </div>
         </div>
-      </div>
+      </writemd-modal>
     `
   }
 }

@@ -192,4 +192,38 @@ describe('stream chunk extraction', () => {
     for (const frame of parser.feed(wire)) text += openai.extractStreamChunk(frame)
     expect(text).toBe('Hello')
   })
+
+  it('isolates multi-session stream cancellation', () => {
+    const activeStreams = new Map<string, AbortController>()
+    const cancelChat = (senderId: number, sessionId?: string): void => {
+      if (sessionId) {
+        const key = `${senderId}:${sessionId}`
+        activeStreams.get(key)?.abort()
+        activeStreams.delete(key)
+      } else {
+        const prefix = `${senderId}:`
+        for (const [key, controller] of activeStreams.entries()) {
+          if (key === `${senderId}` || key.startsWith(prefix)) {
+            controller.abort()
+            activeStreams.delete(key)
+          }
+        }
+      }
+    }
+
+    const c1 = new AbortController()
+    const c2 = new AbortController()
+    activeStreams.set('1:session-a', c1)
+    activeStreams.set('1:session-b', c2)
+
+    cancelChat(1, 'session-a')
+    expect(c1.signal.aborted).toBe(true)
+    expect(c2.signal.aborted).toBe(false)
+    expect(activeStreams.has('1:session-a')).toBe(false)
+    expect(activeStreams.has('1:session-b')).toBe(true)
+
+    cancelChat(1)
+    expect(c2.signal.aborted).toBe(true)
+    expect(activeStreams.size).toBe(0)
+  })
 })

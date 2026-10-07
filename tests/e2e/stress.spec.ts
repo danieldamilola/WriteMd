@@ -2,7 +2,7 @@ import { test, expect, type ElectronApplication, type Page } from '@playwright/t
 import { mkdirSync, statSync, writeFileSync } from 'fs'
 import { homedir } from 'os'
 import { join } from 'path'
-import { makeFixture, launch, firstWindow } from './fixtures'
+import { makeFixture, launch, firstWindow, openSettings } from './fixtures'
 
 /**
  * Full-app stress sweep against the real vault.
@@ -118,7 +118,7 @@ test.describe('Stress sweep', () => {
             openTabs,
             activeTabPath: openTabs[0]
           },
-          appearance: { theme: 'dark', panelOrientation: 'horizontal' },
+          appearance: { designVersion: 1, theme: 'dark', panelOrientation: 'horizontal' },
           editor: { autoSave: false }
         },
         null,
@@ -518,7 +518,7 @@ test.describe('Stress sweep', () => {
   test('switching theme redraws the 6 MB note without stalling', async () => {
     await openNote('huge-single.md')
     const m = await measure('switch theme on 6 MB', async () => {
-      await window.locator('writemd-icon-button[title="Settings"]').click()
+      await openSettings(window)
       const modal = window.locator('writemd-settings-modal')
       await expect(modal).toBeVisible()
       await modal.locator('.nav-btn', { hasText: 'Appearance' }).click()
@@ -532,7 +532,7 @@ test.describe('Stress sweep', () => {
 
   test('auto-save writes the 6 MB note without a false conflict', async () => {
     await openNote('huge-single.md')
-    await window.locator('writemd-icon-button[title="Settings"]').click()
+    await openSettings(window)
     const modal = window.locator('writemd-settings-modal')
     await expect(modal).toBeVisible()
     await modal.locator('.nav-btn', { hasText: 'Files' }).click()
@@ -608,7 +608,7 @@ test.describe('Stress sweep', () => {
             openTabs: manyNotes,
             activeTabPath: manyNotes[0]
           },
-          appearance: { theme: 'dark', panelOrientation: 'horizontal' },
+          appearance: { designVersion: 1, theme: 'dark', panelOrientation: 'horizontal' },
           editor: { autoSave: false }
         },
         null,

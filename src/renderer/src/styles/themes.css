@@ -46,8 +46,8 @@
   --accent-wash-alpha: 12%;
 
   /* Text steps down from ink on dark themes, up on light ones. */
-  --ramp-text-secondary: 0.18;
-  --ramp-text-muted: 0.44;
+  --ramp-text-secondary: 0.16;
+  --ramp-text-muted: 0.25;
 
   /* Shadows scale with a per-theme strength; light themes need far less. */
   --shadow-strength: 1;
@@ -113,9 +113,13 @@
 
   --border: color-mix(in oklab, var(--seed-ink) var(--border-alpha), transparent);
   --border-subtle: color-mix(in oklab, var(--seed-ink) var(--border-subtle-alpha), transparent);
+  /* Chrome alias: shell dividers and the split gutter share the standard border. */
+  --color-stroke: var(--border);
 
   --border-focus: var(--accent);
   --accent-text: var(--accent-text-seed, #ffffff);
+  --accent-ink-dark: #111111;
+  --accent-ink-light: #ffffff;
   --selection: color-mix(in oklab, var(--accent) var(--selection-alpha), transparent);
 
   --danger-bg: color-mix(in oklab, var(--danger) var(--danger-wash-alpha), var(--seed-bg));

@@ -11,6 +11,10 @@ playwright-report/
 blob-report/
 playwright/.cache/
 
+# Local UI review logs, reference snapshots, and scratch scripts.
+# Curated visual evidence belongs in docs/screenshots/.
+/artifacts/
+
 # Local env files. electron-builder.yml already excludes these from the
 # package, so the expectation exists; the ignore rule was missing.
 .env

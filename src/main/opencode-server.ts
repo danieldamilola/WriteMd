@@ -140,6 +140,11 @@ export class OpencodeStreamAssembler {
   private messageByPart = new Map<string, string>()
   private messageRole = new Map<string, string>()
   private full = ''
+  private readonly targetSessionId?: string
+
+  constructor(targetSessionId?: string) {
+    this.targetSessionId = targetSessionId
+  }
 
   get fullText(): string {
     return this.full
@@ -153,6 +158,13 @@ export class OpencodeStreamAssembler {
 
     if (ev.type === 'message.updated') {
       const info = (props.info ?? {}) as Record<string, unknown>
+      if (
+        this.targetSessionId &&
+        typeof info.sessionID === 'string' &&
+        info.sessionID !== this.targetSessionId
+      ) {
+        return ''
+      }
       if (typeof info.id === 'string' && (info.role === 'assistant' || info.role === 'user')) {
         this.messageRole.set(info.id, info.role)
         if (info.role === 'assistant') return this.flushMessage(info.id)
@@ -161,6 +173,13 @@ export class OpencodeStreamAssembler {
     }
     if (ev.type === 'message.part.updated') {
       const part = (props.part ?? {}) as Record<string, unknown>
+      if (
+        this.targetSessionId &&
+        typeof part.sessionID === 'string' &&
+        part.sessionID !== this.targetSessionId
+      ) {
+        return ''
+      }
       if (part.type !== 'text' || typeof part.text !== 'string') return ''
       const id = typeof part.id === 'string' ? part.id : null
       if (!id) return ''
@@ -432,13 +451,15 @@ function clientFor(baseUrl: string, directory: string): OpencodeServerClient {
   return { baseUrl, directory }
 }
 
-/** Reused session per directory (WriteMd sends full history each turn). */
+/** Reused session per directory/sessionId (WriteMd sends full history each turn). */
 async function sessionFor(
   baseUrl: string,
   directory: string,
+  sessionId?: string,
   signal?: AbortSignal
 ): Promise<string> {
-  const cached = sessionsByDir.get(directory)
+  const key = sessionId ? `${directory}:${sessionId}` : directory
+  const cached = sessionsByDir.get(key)
   if (cached) return cached
   const created = await serverRequest<OpenCodeSession>(
     clientFor(baseUrl, directory),
@@ -447,12 +468,13 @@ async function sessionFor(
     { permission: [{ permission: '*', pattern: '*', action: 'deny' }] },
     signal
   )
-  sessionsByDir.set(directory, created.id)
+  sessionsByDir.set(key, created.id)
   return created.id
 }
 
-export function dropOpencodeSession(directory: string): void {
-  sessionsByDir.delete(directory)
+export function dropOpencodeSession(directory: string, sessionId?: string): void {
+  const key = sessionId ? `${directory}:${sessionId}` : directory
+  sessionsByDir.delete(key)
 }
 
 export interface OpencodePromptInput {
@@ -462,6 +484,7 @@ export interface OpencodePromptInput {
   model?: string
   prompt: string
   signal?: AbortSignal
+  sessionId?: string
 }
 
 /** Blocking prompt; returns the assistant text. */
@@ -483,15 +506,15 @@ export async function opencodeChat(input: OpencodePromptInput): Promise<string> 
       },
       input.signal
     )
-  let sessionId = await sessionFor(baseUrl, input.directory, input.signal)
+  let sessionId = await sessionFor(baseUrl, input.directory, input.sessionId, input.signal)
   let data: unknown
   try {
     data = await run(sessionId)
   } catch (e) {
     // Sessions do not survive a server restart; retry once on a fresh one.
     if (e instanceof Error && /404|not found|no such session/i.test(e.message)) {
-      dropOpencodeSession(input.directory)
-      sessionId = await sessionFor(baseUrl, input.directory, input.signal)
+      dropOpencodeSession(input.directory, input.sessionId)
+      sessionId = await sessionFor(baseUrl, input.directory, input.sessionId, input.signal)
       data = await run(sessionId)
     } else {
       throw e
@@ -543,8 +566,8 @@ interface SseEventPayload {
 export async function opencodeChatStream(input: OpencodeStreamInput): Promise<string> {
   const baseUrl = await ensureOpencodeServer(input.bin, input.version)
   const client = clientFor(baseUrl, input.directory)
-  const sessionId = await sessionFor(baseUrl, input.directory, input.signal)
-  const assembler = new OpencodeStreamAssembler()
+  const sessionId = await sessionFor(baseUrl, input.directory, input.sessionId, input.signal)
+  const assembler = new OpencodeStreamAssembler(sessionId)
   const model = parseOpenCodeModelSlug(input.model)
 
   const eventsUrl = urlFor(client, '/event')
@@ -641,8 +664,8 @@ export async function opencodeChatStream(input: OpencodeStreamInput): Promise<st
     input.signal
   ).catch(async (e: unknown) => {
     if (e instanceof Error && /404|not found|no such session/i.test(e.message)) {
-      dropOpencodeSession(input.directory)
-      await sessionFor(baseUrl, input.directory, input.signal)
+      dropOpencodeSession(input.directory, input.sessionId)
+      await sessionFor(baseUrl, input.directory, input.sessionId, input.signal)
       // Session id is captured; restart the whole stream on a fresh session.
       throw new OpencodeRetryWith()
     }

@@ -3,6 +3,7 @@ import { applyConflictReview, applyConflictReload, applyConflictDismiss } from '
 import { api } from '../api'
 import { showConfirm } from '../services/confirm'
 import { sameFilePath } from '../utils/paths'
+import { placeTab, type TabDestination } from './tab-order'
 
 /**
  * Modes the primary pane can render.
@@ -166,6 +167,48 @@ export class FileState {
     }
   }
 
+  subscribeSelector<T>(
+    select: (state: Readonly<FileStateData>) => T,
+    listener: (value: T, state: FileStateData) => void,
+    equals: (a: T, b: T) => boolean = Object.is
+  ): () => void {
+    let previous = select(this.state)
+    return this.subscribe((snapshot) => {
+      const next = select(snapshot)
+      if (equals(previous, next)) return
+      previous = next
+      listener(next, snapshot)
+    })
+  }
+
+  dropTab(id: string, destination: TabDestination): void {
+    if (
+      destination.section === 'group' &&
+      !this.state.tabGroups?.some((group) => group.id === destination.groupId)
+    )
+      return
+    this.flushActiveTab()
+    const active = this.activeTabDoc()
+    const tabs = placeTab(this.state.tabs, id, destination)
+    const unchanged = tabs.every((tab, i) => {
+      const old = this.state.tabs[i]
+      return (
+        tab.id === old?.id &&
+        !!tab.isPinned === !!old?.isPinned &&
+        (tab.groupId ?? null) === (old?.groupId ?? null)
+      )
+    })
+    if (unchanged) return
+    const activeTab = Math.max(
+      0,
+      tabs.findIndex((tab) => tab.id === active?.id)
+    )
+    this.state = { ...this.state, tabs, activeTab }
+    this.syncMirror()
+    this.persistTabs()
+    this.notify()
+  }
+
   private notify(): void {
     const snapshot = this.getState()
     this.listeners.forEach((cb) => cb(snapshot))
@@ -202,22 +245,22 @@ export class FileState {
   }
 
   private persistTabs(): void {
-    this.settingsStore.set(
-      'files.openTabs',
-      this.state.tabs.map((t) => t.path)
-    )
-    this.settingsStore.set('files.activeTabPath', this.activeTabDoc()?.path ?? null)
-    this.settingsStore.set(
-      'files.pinnedTabs',
-      this.state.tabs.filter((t) => t.isPinned && t.path).map((t) => t.path as string)
-    )
     const groupData = {
       groups: this.state.tabGroups,
       assignments: this.state.tabs
         .filter((t) => t.path && t.groupId)
         .map((t) => ({ path: t.path as string, groupId: t.groupId as string }))
     }
-    this.settingsStore.set('files.tabGroups', JSON.stringify(groupData))
+    this.settingsStore.setMany({
+      'files.openTabs': this.state.tabs
+        .map((tab) => tab.path)
+        .filter((path): path is string => path !== null),
+      'files.activeTabPath': this.activeTabDoc()?.path ?? null,
+      'files.pinnedTabs': this.state.tabs
+        .filter((tab) => tab.isPinned && tab.path)
+        .map((tab) => tab.path as string),
+      'files.tabGroups': JSON.stringify(groupData)
+    })
   }
 
   private openTab(tab: Omit<TabDoc, 'lastWritten' | 'pendingWrite'>): void {
@@ -425,7 +468,15 @@ export class FileState {
   createTabGroup(label: string, color?: string, tabIndices: number[] = []): string {
     const currentGroups = this.state.tabGroups ?? []
     const id = `group-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`
-    const groupColors = ['#f24e1e', '#3b82f6', '#10b981', '#f59e0b', '#8b5cf6', '#ec4899', '#06b6d4']
+    const groupColors = [
+      '#f24e1e',
+      '#3b82f6',
+      '#10b981',
+      '#f59e0b',
+      '#8b5cf6',
+      '#ec4899',
+      '#06b6d4'
+    ]
     const assignedColor = color ?? groupColors[currentGroups.length % groupColors.length]
     const newGroup: TabGroup = {
       id,
@@ -805,44 +856,40 @@ export class FileState {
   }
 
   async renameFile(newName: string, isSecondary = false): Promise<boolean> {
-    if (isSecondary) {
-      const doc = this.state.secondaryDoc
-      if (!doc || !doc.path) return false
-      const newPath = this.buildRenamedPath(doc.path, newName)
-      if (newPath === doc.path) return true
-      const exists = await api()?.file?.exists?.(doc.path)
-      if (exists) {
-        const success = await api()?.file?.rename?.(doc.path, newPath)
-        if (!success) return false
-      }
-      this.state = {
-        ...this.state,
-        secondaryDoc: { ...doc, path: newPath }
-      }
-      this.notify()
-      return true
+    const doc = isSecondary ? this.state.secondaryDoc : this.activeTabDoc()
+    if (!doc?.path) return false
+    const newPath = this.buildRenamedPath(doc.path, newName)
+    if (newPath === doc.path) return true
+    const exists = await api()?.file?.exists?.(doc.path)
+    if (exists && !(await api()?.file?.rename?.(doc.path, newPath))) return false
+    return this.updateDocumentPath(doc.path, newPath)
+  }
+
+  private updateDocumentPath(previousPath: string, nextPath: string): boolean {
+    const primaryMatches = sameFilePath(this.state.path, previousPath)
+    const secondary = this.state.secondaryDoc
+    const secondaryMatches = secondary !== null && sameFilePath(secondary.path, previousPath)
+    const tabs = this.state.tabs.map((tab) =>
+      sameFilePath(tab.path, previousPath) ? { ...tab, path: nextPath } : tab
+    )
+    if (!secondaryMatches && tabs.every((tab, index) => tab === this.state.tabs[index]))
+      return false
+    this.state = {
+      ...this.state,
+      tabs,
+      secondaryDoc: secondaryMatches ? { ...secondary!, path: nextPath } : secondary
     }
-
-    const tab = this.activeTabDoc()
-    if (!tab || !tab.path) return false
-    const newPath = this.buildRenamedPath(tab.path, newName)
-    if (newPath === tab.path) return true
-
-    const exists = await api()?.file?.exists?.(tab.path)
-    if (exists) {
-      const success = await api()?.file?.rename?.(tab.path, newPath)
-      if (!success) return false
-    }
-
-    // Resolve by the original path: two awaits have passed, so
-    // this.state.activeTab may no longer point at the tab being renamed.
-    const idx = this.state.tabs.findIndex((t) => t.path === tab.path)
-    if (idx < 0) return false
-    const tabs = this.state.tabs.map((t, i) => (i === idx ? { ...t, path: newPath } : t))
-    this.state = { ...this.state, tabs }
     this.syncMirror()
     this.persistTabs()
-    this.addRecentFile(newPath)
+    this.addRecentFile(nextPath)
+    void api()
+      ?.file?.unwatch?.(previousPath)
+      .catch(() => undefined)
+    void api()
+      ?.file?.watch?.(nextPath)
+      .catch(() => undefined)
+    if (primaryMatches) this.scheduleAutoSave()
+    if (secondaryMatches) this.scheduleSecondaryAutoSave()
     this.notify()
     return true
   }
@@ -854,9 +901,9 @@ export class FileState {
     return parts.length > 0 ? parts.join('/') + '/' + finalName : finalName
   }
 
-  /** Move the active tab's file into another directory. Returns false when cancelled. */
-  async moveActiveFile(): Promise<boolean> {
-    const tab = this.activeTabDoc()
+  /** Move the selected pane's file into another directory. Returns false when cancelled. */
+  async moveActiveFile(isSecondary = false): Promise<boolean> {
+    const tab = isSecondary ? this.state.secondaryDoc : this.activeTabDoc()
     if (!tab || !tab.path) return false
     const result = await api()?.dialog?.showOpenDialog?.({
       properties: ['openDirectory', 'createDirectory']
@@ -870,21 +917,7 @@ export class FileState {
       alert(`Could not move file to ${newPath}`)
       return false
     }
-    await api()
-      ?.file?.unwatch?.(tab.path)
-      .catch(() => undefined)
-    await api()
-      ?.file?.watch?.(newPath)
-      .catch(() => undefined)
-    const idx = this.state.tabs.findIndex((t) => t.path === tab.path)
-    if (idx < 0) return false
-    const tabs = this.state.tabs.map((t, i) => (i === idx ? { ...t, path: newPath } : t))
-    this.state = { ...this.state, tabs }
-    this.syncMirror()
-    this.persistTabs()
-    this.addRecentFile(newPath)
-    this.notify()
-    return true
+    return this.updateDocumentPath(tab.path, newPath)
   }
 
   setContent(content: string): void {

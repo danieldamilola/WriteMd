@@ -142,6 +142,54 @@ describe('split pane persistence', () => {
     expect(writes).toEqual([{ path: B, content: 'edited in the pane' }])
   })
 
+  it('renames the split document without changing a different primary document', async () => {
+    const index = openAt(files, A, 'primary')
+    files.switchTab(index)
+    await files.openSecondaryFile(B, 'secondary')
+    const bridge = window.electronAPI!
+    bridge.file.exists = vi.fn(async () => true)
+    bridge.file.rename = vi.fn(async () => true)
+    expect(await files.renameFile('renamed-pane', true)).toBe(true)
+    expect(files.getState().path).toBe(A)
+    expect(files.getState().secondaryDoc?.path).toBe('C:/vault/renamed-pane.md')
+    expect(bridge.file.rename).toHaveBeenCalledWith(B, 'C:/vault/renamed-pane.md')
+    expect(watched).toContain('C:/vault/renamed-pane.md')
+  })
+
+  it('renaming a shared document updates both panes and preserves later save targets', async () => {
+    const index = openAt(files, A, 'shared')
+    files.switchTab(index)
+    await files.openSecondaryFile(A, 'shared')
+    window.electronAPI!.file.exists = vi.fn(async () => true)
+    window.electronAPI!.file.rename = vi.fn(async () => true)
+    expect(await files.renameFile('shared-renamed', true)).toBe(true)
+    expect(files.getState().path).toBe('C:/vault/shared-renamed.md')
+    expect(files.getState().secondaryDoc?.path).toBe('C:/vault/shared-renamed.md')
+    files.setSecondaryContent('edited after rename')
+    await files.save()
+    expect(writes).toContainEqual({
+      path: 'C:/vault/shared-renamed.md',
+      content: 'edited after rename'
+    })
+  })
+
+  it('moves the secondary file using the chosen directory while keeping primary edits', async () => {
+    const index = openAt(files, A, 'primary')
+    files.switchTab(index)
+    await files.openSecondaryFile(B, 'secondary')
+    files.setContent('primary edits')
+    const bridge = window.electronAPI!
+    bridge.dialog = {
+      ...bridge.dialog,
+      showOpenDialog: vi.fn(async () => ({ canceled: false, filePaths: ['C:/destination'] }))
+    }
+    bridge.file.rename = vi.fn(async () => true)
+    expect(await files.moveActiveFile(true)).toBe(true)
+    expect(files.getState().path).toBe(A)
+    expect(files.getState().content).toBe('primary edits')
+    expect(files.getState().secondaryDoc?.path).toBe(`C:/destination/${B.split('/').at(-1)}`)
+  })
+
   it('asks before discarding a dirty split document, and keeps it when refused', async () => {
     openAt(files, A, 'original')
     await files.openSecondaryFile(B, 'pane content')

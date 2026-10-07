@@ -23,6 +23,13 @@ describe('searchSettingsTabs', () => {
     expect(searchSettingsTabs('short')).toEqual(['shortcuts'])
   })
 
+  it('finds renamed categories and keeps the previous General search term', () => {
+    expect(searchTargetTab('new notes')).toBe('general')
+    expect(searchTargetTab('general')).toBe('general')
+    expect(searchTargetTab('keyboard shortcuts')).toBe('shortcuts')
+    expect(searchTargetTab('about writemd')).toBe('about')
+  })
+
   it('matches keywords without matching everything', () => {
     const tabs = searchSettingsTabs('mermaid')
     expect(tabs).toEqual(['advanced'])
@@ -77,7 +84,8 @@ describe('searchSettingsRows', () => {
     expect(labels).toBe(0)
     expect(searchSettingsRows('word wrap')[0].tab).toBe('editor')
     expect(searchSettingsRows('vault')[0].tab).toBe('files')
-    expect(searchSettingsRows('beta')[0].tab).toBe('appearance')
+    expect(searchSettingsRows('motion')[0].tab).toBe('appearance')
+    expect(searchSettingsRows('beta')).toEqual([])
     expect(searchSettingsRows('system prompt')[0].tab).toBe('ai')
     expect(searchSettingsRows('release notes')[0].tab).toBe('about')
   })

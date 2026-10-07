@@ -3,15 +3,21 @@ export type SettingsTab =
 
 /** Human labels used both by the nav buttons and by search filtering. */
 export const TAB_LABELS: Record<SettingsTab, string> = {
-  general: 'General',
+  general: 'New notes',
   appearance: 'Appearance',
   editor: 'Editor',
-  files: 'Files',
-  shortcuts: 'Shortcuts',
+  files: 'Files & vault',
+  shortcuts: 'Keyboard shortcuts',
   advanced: 'Advanced',
   ai: 'AI Assistant',
-  about: 'About'
+  about: 'About WriteMd'
 }
+
+export const SETTINGS_NAV_GROUPS: { label: string; tabs: SettingsTab[] }[] = [
+  { label: 'Writing', tabs: ['general', 'editor', 'files'] },
+  { label: 'Workspace', tabs: ['appearance', 'shortcuts'] },
+  { label: 'Application', tabs: ['ai', 'advanced', 'about'] }
+]
 
 /**
  * Section keywords: words that mean "this section is worth a look" even when
@@ -21,7 +27,7 @@ export const TAB_LABELS: Record<SettingsTab, string> = {
 export const SETTINGS_SEARCH_INDEX: Record<SettingsTab, string> = {
   general: 'general new files default file name untitled workspace',
   appearance:
-    'appearance theme dark graphite nord midnight light paper dracula accent color font panel orientation horizontal vertical tabs side rail top bar design layout window full screen shell classic popup dialog modal beta',
+    'appearance theme dark graphite nord midnight light paper dracula accent color panel orientation horizontal vertical tabs side rail top bar layout window full screen shell',
   editor: 'editor font family size word wrap line numbers source mode highlight active line',
   files: 'files vault location path storage folder recent tabs open disk',
   shortcuts: 'shortcuts keyboard keys bindings commands rebind reset',
@@ -54,13 +60,13 @@ export const SETTINGS_ROW_INDEX: SettingsRowEntry[] = [
   },
   {
     tab: 'appearance',
-    label: 'Vertical tabs',
-    terms: 'side rail top bar panel orientation layout'
+    label: 'Panel orientation',
+    terms: 'vertical horizontal side rail top bar layout'
   },
   {
     tab: 'appearance',
-    label: 'New Design',
-    terms: 'beta settings window full screen shell classic popup dialog modal'
+    label: 'Motion',
+    terms: 'animations behavior system reduced full'
   },
   {
     tab: 'editor',
@@ -168,6 +174,14 @@ function includesAll(haystack: string, tokens: string[]): boolean {
   return tokens.every((t) => h.includes(t))
 }
 
+/** A named category takes precedence over incidental words in row descriptions. */
+export function exactSettingsTab(query: string): SettingsTab | undefined {
+  const normalized = searchTokens(query).join(' ')
+  return (Object.keys(TAB_LABELS) as SettingsTab[]).find(
+    (tab) => searchTokens(TAB_LABELS[tab]).join(' ') === normalized
+  )
+}
+
 /** Tabs whose label or keywords contain every word of the query. */
 export function searchSettingsTabs(query: string): SettingsTab[] {
   const all = Object.keys(TAB_LABELS) as SettingsTab[]
@@ -190,5 +204,7 @@ export function searchSettingsRows(query: string): SettingsRowEntry[] {
 
 /** The tab a query should open, preferring a matching row over a section. */
 export function searchTargetTab(query: string): SettingsTab | undefined {
-  return searchSettingsRows(query)[0]?.tab ?? searchSettingsTabs(query)[0]
+  return (
+    exactSettingsTab(query) ?? searchSettingsRows(query)[0]?.tab ?? searchSettingsTabs(query)[0]
+  )
 }

@@ -1,5 +1,6 @@
 import { html, css, LitElement } from 'lit'
-import { customElement } from 'lit/decorators.js'
+import { customElement, property } from 'lit/decorators.js'
+import './Background'
 import { scrollbarStyles } from './scrollbars'
 
 @customElement('writemd-panel')
@@ -12,8 +13,10 @@ export class WriteMdPanel extends LitElement {
       min-width: 0;
       min-height: 0;
       position: relative;
-      border-radius: 10px;
-      background: var(--bg-elevated);
+      border-radius: 0;
+      isolation: isolate;
+      background: var(--editor-surface);
+      backdrop-filter: blur(var(--surface-blur, 0px));
       overflow: hidden;
       box-sizing: border-box;
       container-type: size;
@@ -32,8 +35,11 @@ export class WriteMdPanel extends LitElement {
     ${scrollbarStyles}
   `
 
+  @property({ type: Boolean }) empty = false
+
   render(): unknown {
     return html`
+      <writemd-background target="workspace" .empty=${this.empty}></writemd-background>
       <div class="content">
         <slot></slot>
       </div>

@@ -35,7 +35,7 @@ test.describe('Tab strip overflow', () => {
           activeTabPath: join(fixture.vault, FILES[FILES.length - 1]),
           recentFiles: FILES.map((n) => join(fixture.vault, n))
         },
-        appearance: { theme: 'dark', panelOrientation: 'horizontal' }
+        appearance: { designVersion: 1, theme: 'dark', panelOrientation: 'horizontal' }
       }),
       'utf-8'
     )
@@ -64,7 +64,7 @@ test.describe('Tab strip overflow', () => {
     expect(metrics.scrollWidth).toBeGreaterThan(metrics.clientWidth)
 
     // The add button lives outside the scroll container, so it can never be clipped.
-    await expect(window.locator('.tab-add')).toBeVisible()
+    await expect(window.locator('.tab-add[aria-label="Open file in new tab"]')).toBeVisible()
 
     // Newest tab is active and is scrolled into view, not stranded past the edge.
     const active = strip.locator('writemd-tab[active]')

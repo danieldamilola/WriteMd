@@ -9,6 +9,12 @@ function onChannel(channel: string, callback: (...args: unknown[]) => void): () 
 
 // Custom APIs for renderer
 const writemdAPI = {
+  appearance: {
+    importBackground: () => ipcRenderer.invoke('appearance:import-background'),
+    getBackground: (id: string) => ipcRenderer.invoke('appearance:get-background', id),
+    removeBackground: (id: string) => ipcRenderer.invoke('appearance:remove-background', id),
+    materialSupport: () => ipcRenderer.invoke('appearance:material-support')
+  },
   app: {
     getVersion: () => ipcRenderer.invoke('app:get-version'),
     getPath: (name: 'home' | 'documents' | 'downloads' | 'temp') =>
@@ -86,21 +92,34 @@ const writemdAPI = {
       apiKey: string,
       messages: ChatMessage[],
       onChunk: (delta: string) => void,
-      systemPrompt?: string
+      systemPrompt?: string,
+      sessionId?: string
     ): Promise<string> => {
-      // The channel is live only for the duration of this call. Leaving it
-      // attached would hand every later stream's deltas to this callback too.
+      // If sessionId is provided, listen on a session-specific channel so
+      // concurrent streams across tabs never mix deltas. Also listen on the
+      // default channel for backward compatibility with un-scoped streams.
+      const specificChannel = sessionId ? `net:chat-chunk:${sessionId}` : null
       const listener = (_e: Electron.IpcRendererEvent, delta: string): void => onChunk(delta)
-      ipcRenderer.on('net:chat-chunk', listener)
+      if (specificChannel) {
+        ipcRenderer.on(specificChannel, listener)
+      } else {
+        ipcRenderer.on('net:chat-chunk', listener)
+      }
       return ipcRenderer
-        .invoke('net:chat-stream', provider, model, apiKey, messages, systemPrompt)
-        .finally(() => ipcRenderer.removeListener('net:chat-chunk', listener))
+        .invoke('net:chat-stream', provider, model, apiKey, messages, systemPrompt, sessionId)
+        .finally(() => {
+          if (specificChannel) {
+            ipcRenderer.removeListener(specificChannel, listener)
+          } else {
+            ipcRenderer.removeListener('net:chat-chunk', listener)
+          }
+        })
     },
     /**
      * Abort the stream this renderer started. Resolves with the text that had
      * already arrived, so the partial answer is kept rather than lost.
      */
-    cancelChat: () => ipcRenderer.invoke('net:chat-cancel')
+    cancelChat: (sessionId?: string) => ipcRenderer.invoke('net:chat-cancel', sessionId)
   },
   chat: {
     createSession: (docPath: string | null) => ipcRenderer.invoke('chat:create', docPath),

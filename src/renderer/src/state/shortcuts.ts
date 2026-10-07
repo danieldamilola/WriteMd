@@ -46,7 +46,13 @@ export const COMMANDS: CommandDef[] = [
   },
   { id: 'split-ai', title: 'Show AI Panel', category: 'View', defaultBinding: 'Ctrl+Alt+A' },
   { id: 'open-settings', title: 'Open Settings', category: 'App', defaultBinding: 'Ctrl+,' },
-  { id: 'command-palette', title: 'Command Palette', category: 'App', defaultBinding: 'Ctrl+P' },
+  {
+    id: 'command-palette',
+    title: 'Command Palette',
+    category: 'App',
+    defaultBinding: 'Ctrl+P',
+    aliases: ['Ctrl+K']
+  },
   {
     id: 'zoom-in',
     title: 'Zoom In',

@@ -30,7 +30,7 @@ test.describe('Auto-hide scrollbars', () => {
             openTabs: [notePath],
             activeTabPath: notePath
           },
-          appearance: { theme: 'dark', panelOrientation: 'horizontal' }
+          appearance: { designVersion: 1, theme: 'dark', panelOrientation: 'horizontal' }
         },
         null,
         2

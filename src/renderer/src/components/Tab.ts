@@ -1,5 +1,6 @@
 import { html, css, LitElement } from 'lit'
 import { customElement, property } from 'lit/decorators.js'
+import { chromeIcon } from '../design/icons'
 
 @customElement('writemd-tab')
 export class WriteMdTab extends LitElement {
@@ -29,8 +30,8 @@ export class WriteMdTab extends LitElement {
       box-sizing: border-box;
       background: none;
       border: none;
-      font-family: 'Geist Mono', monospace;
-      font-size: 14px;
+      font-family: var(--font-ui);
+      font-size: 13px;
       line-height: 18px;
       color: var(--text-muted);
       font-weight: 400;
@@ -44,9 +45,9 @@ export class WriteMdTab extends LitElement {
     }
 
     :host([active]) .tab-btn {
-      background: var(--bg-hover);
+      background: var(--bg-active);
       color: var(--text);
-      font-weight: 600;
+      font-weight: 500;
     }
 
     .tab-btn:focus-visible {
@@ -69,16 +70,6 @@ export class WriteMdTab extends LitElement {
     :host([vertical]) .separator,
     :host([pinned]) .separator {
       display: none;
-    }
-
-    .pin-icon {
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      width: 12px;
-      height: 12px;
-      flex-shrink: 0;
-      color: var(--text-muted);
     }
 
     .label {
@@ -164,6 +155,20 @@ export class WriteMdTab extends LitElement {
     // Ignore key events bubbled from child controls (e.g. the close button
     // keeps its native Enter/Space activation).
     if (e.target !== e.currentTarget) return
+    if ((e.shiftKey && e.key === 'F10') || e.key === 'ContextMenu') {
+      e.preventDefault()
+      const box = this.getBoundingClientRect()
+      this.dispatchEvent(
+        new MouseEvent('contextmenu', {
+          bubbles: true,
+          composed: true,
+          cancelable: true,
+          clientX: box.left + 10,
+          clientY: box.bottom
+        })
+      )
+      return
+    }
     if (e.key === 'Enter' || e.key === ' ') {
       e.preventDefault()
       this.handleSelect()
@@ -173,7 +178,10 @@ export class WriteMdTab extends LitElement {
     // Keyboard reorder: Alt+ArrowUp/Down/Left/Right
     if (
       e.altKey &&
-      (e.key === 'ArrowUp' || e.key === 'ArrowLeft' || e.key === 'ArrowDown' || e.key === 'ArrowRight')
+      (e.key === 'ArrowUp' ||
+        e.key === 'ArrowLeft' ||
+        e.key === 'ArrowDown' ||
+        e.key === 'ArrowRight')
     ) {
       e.preventDefault()
       const delta = e.key === 'ArrowUp' || e.key === 'ArrowLeft' ? -1 : 1
@@ -185,14 +193,19 @@ export class WriteMdTab extends LitElement {
 
     const isPrev = e.key === 'ArrowLeft' || e.key === 'ArrowUp'
     const isNext = e.key === 'ArrowRight' || e.key === 'ArrowDown'
-    if (!isPrev && !isNext) return
+    if (!isPrev && !isNext && e.key !== 'Home' && e.key !== 'End') return
     e.preventDefault()
     // Move along the strip, matching the standard tablist pattern.
     const root = this.getRootNode() as ParentNode
     const tabs = Array.from(root.querySelectorAll('writemd-tab')) as WriteMdTab[]
     if (tabs.length === 0) return
     const i = tabs.indexOf(this)
-    const next = tabs[(i + (isNext ? 1 : -1) + tabs.length) % tabs.length]
+    const next =
+      e.key === 'Home'
+        ? tabs[0]
+        : e.key === 'End'
+          ? tabs.at(-1)
+          : tabs[(i + (isNext ? 1 : -1) + tabs.length) % tabs.length]
     next?.focus()
     next?.handleSelect()
   }
@@ -204,29 +217,11 @@ export class WriteMdTab extends LitElement {
         class="tab-btn"
         role="tab"
         aria-selected=${this.active ? 'true' : 'false'}
-        tabindex="0"
+        tabindex=${this.active ? '0' : '-1'}
         @click=${this.handleSelect}
         @keydown=${this.handleKeyDown}
       >
-        ${this.pinned
-          ? html`
-              <span class="pin-icon" title="Pinned tab">
-                <svg
-                  width="10"
-                  height="10"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="2"
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                >
-                  <line x1="12" y1="17" x2="12" y2="22"></line>
-                  <path d="M5 17h14v-2l-2-2V5h1V3H6v2h1v8l-2 2v2z"></path>
-                </svg>
-              </span>
-            `
-          : ''}
+        ${this.vertical ? chromeIcon('file-text', 14) : ''}
         <span class="label">${this.label}</span>
         ${this.dirty ? html`<span class="dirty-dot" title="Unsaved changes"></span>` : ''}
         ${
@@ -235,6 +230,7 @@ export class WriteMdTab extends LitElement {
                 <button
                   class="close-btn"
                   type="button"
+                  tabindex=${this.active ? '0' : '-1'}
                   @click=${this.handleClose}
                   aria-label=${`Close ${this.label}`}
                 >

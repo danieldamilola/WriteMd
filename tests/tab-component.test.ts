@@ -72,14 +72,16 @@ describe('writemd-tab', () => {
     expect(tabs[1].hasAttribute('active')).toBe(true)
   })
 
-  it('gives every tab a focusable target so the strip is keyboard reachable', async () => {
+  it('keeps only the selected tab in the Tab sequence', async () => {
     const el = host()
     el.labels = ['a.md', 'b.md']
     await flush(el)
     for (const tab of Array.from(
       el.shadowRoot?.querySelectorAll('writemd-tab') ?? []
     ) as WriteMdTab[]) {
-      expect(tab.shadowRoot?.querySelector('.tab-btn')?.getAttribute('tabindex')).toBe('0')
+      expect(tab.shadowRoot?.querySelector('.tab-btn')?.getAttribute('tabindex')).toBe(
+        tab.active ? '0' : '-1'
+      )
     }
   })
 
@@ -188,6 +190,27 @@ describe('writemd-tab', () => {
 
     btn(tabs[1])?.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }))
     expect(tabs[0].shadowRoot?.activeElement).not.toBeNull()
+  })
+
+  it('supports Home/End navigation and opens the context menu from the keyboard', async () => {
+    const el = host()
+    el.labels = ['a.md', 'b.md', 'c.md']
+    el.active = 1
+    await flush(el)
+    const tabs = Array.from(el.shadowRoot?.querySelectorAll('writemd-tab') ?? []) as WriteMdTab[]
+    const middle = tabs[1].shadowRoot!.querySelector('.tab-btn')!
+    middle.dispatchEvent(new KeyboardEvent('keydown', { key: 'Home', bubbles: true }))
+    expect(tabs[0].shadowRoot?.activeElement).not.toBeNull()
+    middle.dispatchEvent(new KeyboardEvent('keydown', { key: 'End', bubbles: true }))
+    expect(tabs[2].shadowRoot?.activeElement).not.toBeNull()
+    let menus = 0
+    el.addEventListener('contextmenu', () => {
+      menus++
+    })
+    middle.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'F10', shiftKey: true, bubbles: true })
+    )
+    expect(menus).toBe(1)
   })
 
   it('shows a dirty dot only for dirty documents', async () => {
