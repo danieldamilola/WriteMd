@@ -1,4 +1,4 @@
-import { html, css, LitElement } from 'lit'
+import { html, css, LitElement, type TemplateResult } from 'lit'
 import { customElement, state } from 'lit/decorators.js'
 import './TopBar'
 import './Tab'
@@ -9,11 +9,12 @@ import './SettingsModal'
 import './WelcomeScreen'
 import './ConflictDialog'
 import './CommandPalette'
+import { menuStyles, menuIcon } from './menu-styles'
 import { api } from '../api'
 import { emit, on } from '../events/bus'
 import { showConfirm } from '../services/confirm'
 import { SettingsStore } from '../state/settings'
-import { FileState, type ConflictInfo } from '../state/file-state'
+import { FileState, type ConflictInfo, type TabDoc, type TabGroup } from '../state/file-state'
 import { COMMANDS, bindingFromEvent, bindingsEqual, effectiveBindings } from '../state/shortcuts'
 import { initAutoHideScrollbars } from '../utils/auto-hide-scrollbars'
 import {
@@ -24,9 +25,50 @@ import {
   type MotionPreference
 } from '../utils/motion'
 
+const PRESET_COLORS = [
+  'transparent',
+  '#f24e1e',
+  '#3b82f6',
+  '#10b981',
+  '#f59e0b',
+  '#8b5cf6',
+  '#ec4899',
+  '#06b6d4'
+]
+
+interface HorizontalDragState {
+  type: 'tab' | 'group'
+  tabIndex: number
+  tabId: string
+  groupId: string | null
+  label: string
+  startX: number
+  startY: number
+  currentX: number
+  currentY: number
+  active: boolean
+  pointerId: number
+  dropTarget: {
+    section: 'pinned' | 'group' | 'ungrouped'
+    targetIndex: number
+    groupId?: string | null
+    position: 'before' | 'after' | 'inside'
+  } | null
+}
+
+interface HorizontalContextMenuState {
+  type: 'tab' | 'group'
+  index?: number
+  groupId?: string
+  x: number
+  y: number
+}
+
 @customElement('writemd-app')
 export class WriteMdApp extends LitElement {
-  static styles = css`
+  static styles = [
+    menuStyles,
+    css`
     :host {
       display: flex;
       flex-direction: column;
@@ -128,7 +170,166 @@ export class WriteMdApp extends LitElement {
       color: var(--text);
       background: var(--bg-hover);
     }
+
+    .h-group-wrap {
+      display: inline-flex;
+      align-items: center;
+      gap: 2px;
+      -webkit-app-region: no-drag;
+      position: relative;
+    }
+    .h-group-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      height: 26px;
+      padding: 0 8px 0 6px;
+      border-radius: 5px;
+      cursor: pointer;
+      color: var(--text-secondary);
+      font-family: 'Geist Mono', monospace;
+      font-size: 12px;
+      font-weight: 500;
+      -webkit-app-region: no-drag;
+      user-select: none;
+      transition:
+        background 100ms ease,
+        color 100ms ease;
+    }
+    .h-group-pill:hover {
+      color: var(--text);
+      background: var(--bg-hover);
+    }
+    .h-group-pill.drag-over {
+      outline: 1px dashed var(--accent-primary, #f24e1e);
+    }
+    .h-group-chevron {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 12px;
+      height: 12px;
+      color: var(--text-muted);
+      transition: transform 140ms ease;
+    }
+    .h-group-chevron.collapsed {
+      transform: rotate(-90deg);
+    }
+    .h-group-color {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+    .h-group-label {
+      max-width: 120px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-size: 12px;
+    }
+    .h-group-rename-input {
+      width: 90px;
+      min-width: 0;
+      box-sizing: border-box;
+      background: var(--bg-active);
+      border: 1px solid var(--border-focus);
+      border-radius: 3px;
+      color: var(--text);
+      font-family: inherit;
+      font-size: 12px;
+      padding: 1px 4px;
+      outline: none;
+    }
+    .h-tab-item {
+      display: inline-flex;
+      align-items: center;
+      touch-action: none;
+      -webkit-app-region: no-drag;
+      position: relative;
+    }
+    .h-tab-item.dragging {
+      opacity: 0.35;
+    }
+    .h-drop-indicator {
+      width: 2px;
+      height: 22px;
+      background: var(--accent-primary, #f24e1e);
+      border-radius: 1px;
+      margin: 0 2px;
+      flex-shrink: 0;
+      box-shadow: 0 0 4px var(--accent-primary, #f24e1e);
+      -webkit-app-region: no-drag;
+      pointer-events: none;
+    }
+    .h-pinned-divider {
+      width: 1px;
+      height: 16px;
+      background: var(--border-subtle);
+      margin: 0 4px;
+      flex-shrink: 0;
+    }
+    .h-drag-ghost {
+      position: fixed;
+      pointer-events: none;
+      z-index: 1000;
+      padding: 4px 10px;
+      border-radius: 5px;
+      background: var(--menu-bg, var(--bg-hover));
+      color: var(--text);
+      border: 1px solid var(--border-focus);
+      box-shadow: 0 8px 20px rgba(0, 0, 0, 0.4);
+      font-size: 11px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      opacity: 0.95;
+      transform: translate3d(-9999px, -9999px, 0);
+      will-change: transform;
+    }
+    .color-palette {
+      display: flex;
+      gap: 6px;
+      padding: 4px 10px;
+    }
+    .color-dot-btn {
+      width: 14px;
+      height: 14px;
+      border-radius: 50%;
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      cursor: pointer;
+      transition: transform 100ms ease;
+      box-sizing: border-box;
+    }
+    .color-dot-btn:hover {
+      transform: scale(1.2);
+    }
+    .color-dot-btn.none-color {
+      background: transparent !important;
+      border: 1px dashed var(--text-muted);
+      position: relative;
+    }
+    .color-dot-btn.none-color::after {
+      content: '';
+      position: absolute;
+      top: 50%;
+      left: 1px;
+      right: 1px;
+      height: 1px;
+      background: var(--text-muted);
+      transform: rotate(-45deg);
+    }
+    .context-menu-backdrop {
+      position: fixed;
+      inset: 0;
+      z-index: 95;
+    }
+    .m-panel {
+      position: fixed;
+      z-index: 100;
+    }
   `
+  ]
 
   @state() private showWelcome = true
   @state() private showSettings = false
@@ -145,11 +346,16 @@ export class WriteMdApp extends LitElement {
    * could play and the panel would simply vanish.
    */
   @state() private verticalPanelLeaving = false
-  @state() private tabs: Array<{ path: string | null; dirty: boolean }> = []
+  @state() private tabs: TabDoc[] = []
+  @state() private tabGroups: TabGroup[] = []
   @state() private activeTab = 0
   @state() private secondaryPath: string | null = null
   @state() private secondaryDirty = false
   @state() private conflict: ConflictInfo | null = null
+  @state() private hDragState: HorizontalDragState | null = null
+  @state() private hContextMenu: HorizontalContextMenuState | null = null
+  @state() private renamingGroupId: string | null = null
+  private hWasDragging = false
   private settingsStore = SettingsStore.getInstance()
   private fileState = FileState.getInstance()
   private unsubscribeFileState: (() => void) | null = null
@@ -206,6 +412,562 @@ export class WriteMdApp extends LitElement {
     void this.openFileDialog()
   }
 
+  // --- Horizontal Tab Drag & Drop ---
+
+  private handleHorizontalPointerDownTab(e: PointerEvent, tabIndex: number, tabId: string): void {
+    if (e.button !== 0) return
+
+    const label = this.tabs[tabIndex]?.path?.split(/[/\\]/).pop() ?? 'Untitled.md'
+    this.hDragState = {
+      type: 'tab',
+      tabIndex,
+      tabId,
+      groupId: this.tabs[tabIndex]?.groupId ?? null,
+      label,
+      startX: e.clientX,
+      startY: e.clientY,
+      currentX: e.clientX,
+      currentY: e.clientY,
+      active: false,
+      pointerId: e.pointerId,
+      dropTarget: null
+    }
+  }
+
+  private handleHorizontalPointerDownGroup(e: PointerEvent, groupId: string): void {
+    if (e.button !== 0) return
+
+    const group = this.tabGroups.find((g) => g.id === groupId)
+    this.hDragState = {
+      type: 'group',
+      tabIndex: -1,
+      tabId: groupId,
+      groupId,
+      label: group?.label ?? 'Group',
+      startX: e.clientX,
+      startY: e.clientY,
+      currentX: e.clientX,
+      currentY: e.clientY,
+      active: false,
+      pointerId: e.pointerId,
+      dropTarget: null
+    }
+  }
+
+  private handleHorizontalPointerMove = (e: PointerEvent): void => {
+    if (!this.hDragState || this.hDragState.pointerId !== e.pointerId) return
+    const dx = e.clientX - this.hDragState.startX
+    const dy = e.clientY - this.hDragState.startY
+    if (!this.hDragState.active && Math.hypot(dx, dy) > 4) {
+      this.hDragState = { ...this.hDragState, active: true }
+      const target = e.currentTarget as HTMLElement | null
+      try {
+        target?.setPointerCapture?.(e.pointerId)
+      } catch {
+        // ignore
+      }
+    }
+    if (!this.hDragState.active) return
+
+    this.hDragState = {
+      ...this.hDragState,
+      currentX: e.clientX,
+      currentY: e.clientY
+    }
+
+    const strip = this.tabStrip
+    if (strip) {
+      const rect = strip.getBoundingClientRect()
+      const threshold = 36
+      const maxSpeed = 8
+      if (e.clientX < rect.left + threshold) {
+        const ratio = 1 - Math.max(0, e.clientX - rect.left) / threshold
+        strip.scrollLeft -= maxSpeed * ratio
+      } else if (e.clientX > rect.right - threshold) {
+        const ratio = 1 - Math.max(0, rect.right - e.clientX) / threshold
+        strip.scrollLeft += maxSpeed * ratio
+      }
+    }
+
+    this.computeHorizontalDropTarget(e.clientX)
+  }
+
+  private computeHorizontalDropTarget(clientX: number): void {
+    if (!this.hDragState || !this.hDragState.active) return
+    const strip = this.tabStrip
+    if (!strip) return
+
+    if (this.hDragState.type === 'tab') {
+      const groupPills = Array.from(strip.querySelectorAll('.h-group-pill')) as HTMLElement[]
+      for (const gp of groupPills) {
+        const box = gp.getBoundingClientRect()
+        if (clientX >= box.left && clientX <= box.right) {
+          this.hDragState = {
+            ...this.hDragState,
+            dropTarget: {
+              section: 'group',
+              targetIndex: -1,
+              groupId: gp.dataset['groupId'] ?? null,
+              position: 'inside'
+            }
+          }
+          return
+        }
+      }
+
+      const tabItems = Array.from(
+        strip.querySelectorAll('.h-tab-item[data-tab-index]')
+      ) as HTMLElement[]
+      let closestTarget: {
+        section: 'pinned' | 'group' | 'ungrouped'
+        targetIndex: number
+        groupId?: string | null
+        position: 'before' | 'after' | 'inside'
+      } | null = null
+
+      for (let i = 0; i < tabItems.length; i++) {
+        const box = tabItems[i].getBoundingClientRect()
+        const tabIdx = Number(tabItems[i].dataset['tabIndex'])
+        const gid = tabItems[i].dataset['groupId'] || null
+        const isPinned = tabItems[i].dataset['pinned'] === 'true'
+
+        if (clientX < box.left + box.width / 2) {
+          closestTarget = {
+            section: isPinned ? 'pinned' : gid ? 'group' : 'ungrouped',
+            targetIndex: tabIdx,
+            groupId: gid,
+            position: 'before'
+          }
+          break
+        }
+        if (i === tabItems.length - 1) {
+          closestTarget = {
+            section: isPinned ? 'pinned' : gid ? 'group' : 'ungrouped',
+            targetIndex: tabIdx + 1,
+            groupId: gid,
+            position: 'after'
+          }
+        }
+      }
+      this.hDragState = { ...this.hDragState, dropTarget: closestTarget }
+    } else {
+      const groupWraps = Array.from(strip.querySelectorAll('.h-group-wrap')) as HTMLElement[]
+      let targetIdx = this.tabGroups.length
+      for (let i = 0; i < groupWraps.length; i++) {
+        const box = groupWraps[i].getBoundingClientRect()
+        if (clientX < box.left + box.width / 2) {
+          targetIdx = i
+          break
+        }
+      }
+      this.hDragState = {
+        ...this.hDragState,
+        dropTarget: { section: 'group', targetIndex: targetIdx, position: 'before' }
+      }
+    }
+  }
+
+  private handleHorizontalPointerUp = (e: PointerEvent): void => {
+    if (!this.hDragState || this.hDragState.pointerId !== e.pointerId) return
+    const target = e.currentTarget as HTMLElement | null
+    try {
+      if (target?.hasPointerCapture?.(e.pointerId)) {
+        target.releasePointerCapture(e.pointerId)
+      }
+    } catch {
+      // ignore
+    }
+
+    if (this.hDragState.active) {
+      this.hWasDragging = true
+      setTimeout(() => {
+        this.hWasDragging = false
+      }, 50)
+      if (this.hDragState.dropTarget) {
+        const { dropTarget, tabIndex, type, groupId } = this.hDragState
+        if (type === 'tab') {
+          const sourceTab = this.tabs[tabIndex]
+          if (sourceTab) {
+            if (dropTarget.section === 'pinned') {
+              if (!sourceTab.isPinned) {
+                this.fileState.pinTab(tabIndex)
+              } else {
+                const clamped = Math.max(0, Math.min(dropTarget.targetIndex, this.tabs.length - 1))
+                this.fileState.moveTab(tabIndex, clamped)
+              }
+            } else if (dropTarget.section === 'group') {
+              if (dropTarget.position === 'inside' && dropTarget.groupId) {
+                this.fileState.setTabGroup(tabIndex, dropTarget.groupId)
+              } else {
+                if (sourceTab.isPinned) this.fileState.unpinTab(tabIndex)
+                const clamped = Math.max(0, Math.min(dropTarget.targetIndex, this.tabs.length - 1))
+                this.fileState.moveTab(tabIndex, clamped)
+                if (dropTarget.groupId) {
+                  this.fileState.setTabGroup(clamped, dropTarget.groupId)
+                }
+              }
+            } else {
+              if (sourceTab.isPinned) this.fileState.unpinTab(tabIndex)
+              if (sourceTab.groupId) this.fileState.setTabGroup(tabIndex, null)
+              const clamped = Math.max(0, Math.min(dropTarget.targetIndex, this.tabs.length - 1))
+              this.fileState.moveTab(tabIndex, clamped)
+            }
+          }
+        } else if (type === 'group' && groupId) {
+          const sourceGroupIdx = this.tabGroups.findIndex((g) => g.id === groupId)
+          if (sourceGroupIdx >= 0 && dropTarget.targetIndex !== sourceGroupIdx) {
+            this.fileState.reorderTabGroups(sourceGroupIdx, dropTarget.targetIndex)
+          }
+        }
+      }
+    }
+    this.hDragState = null
+  }
+
+  private focusRenameInputHorizontal(groupId: string): void {
+    this.requestUpdate()
+    setTimeout(() => {
+      const input = this.renderRoot?.querySelector(
+        `[data-group-id="${groupId}"] .h-group-rename-input`
+      ) as HTMLInputElement | null
+      input?.focus({ preventScroll: true })
+      input?.select()
+    }, 50)
+  }
+
+  private handleCreateGroupHorizontal = (): void => {
+    const defaultLabel = `Group ${(this.tabGroups?.length ?? 0) + 1}`
+    const id = this.fileState.createTabGroup(defaultLabel)
+    this.renamingGroupId = id
+    this.focusRenameInputHorizontal(id)
+  }
+
+  private handleCreateGroupWithTabHorizontal(index: number): void {
+    this.hContextMenu = null
+    const defaultLabel = `Group ${(this.tabGroups?.length ?? 0) + 1}`
+    const id = this.fileState.createTabGroup(defaultLabel, undefined, [index])
+    this.renamingGroupId = id
+    this.focusRenameInputHorizontal(id)
+  }
+
+  private handleRenameGroupSubmit(groupId: string, newName: string): void {
+    if (newName.trim()) {
+      this.fileState.updateTabGroup(groupId, { label: newName.trim() })
+    }
+    this.renamingGroupId = null
+  }
+
+  private handleHorizontalTabContextMenu(e: MouseEvent, index: number): void {
+    e.preventDefault()
+    e.stopPropagation()
+    this.hContextMenu = {
+      type: 'tab',
+      index,
+      x: Math.min(e.clientX, window.innerWidth - 220),
+      y: Math.min(e.clientY, window.innerHeight - 200)
+    }
+  }
+
+  private handleHorizontalGroupContextMenu(e: MouseEvent, groupId: string): void {
+    e.preventDefault()
+    e.stopPropagation()
+    this.hContextMenu = {
+      type: 'group',
+      groupId,
+      x: Math.min(e.clientX, window.innerWidth - 220),
+      y: Math.min(e.clientY, window.innerHeight - 240)
+    }
+  }
+
+  private renderHorizontalTabItem(t: TabDoc, i: number): TemplateResult {
+    const isDraggingThis = this.hDragState?.active && this.hDragState.tabIndex === i
+    const isDropIndicatorTarget =
+      this.hDragState?.active &&
+      this.hDragState.dropTarget &&
+      this.hDragState.dropTarget.targetIndex === i
+
+    return html`
+      ${isDropIndicatorTarget && this.hDragState?.dropTarget?.position === 'before'
+        ? html`<div class="h-drop-indicator"></div>`
+        : ''}
+      <div
+        class="h-tab-item ${isDraggingThis ? 'dragging' : ''}"
+        data-tab-index=${i}
+        data-tab-id=${t.id ?? `tab-${i}`}
+        data-pinned=${t.isPinned ? 'true' : 'false'}
+        data-group-id=${t.groupId ?? ''}
+        @click=${() => {
+          if (this.hDragState?.active || this.hWasDragging) return
+          this.fileState.switchTab(i)
+        }}
+        @pointerdown=${(e: PointerEvent) =>
+          this.handleHorizontalPointerDownTab(e, i, t.id ?? `tab-${i}`)}
+        @pointermove=${this.handleHorizontalPointerMove}
+        @pointerup=${this.handleHorizontalPointerUp}
+        @pointercancel=${this.handleHorizontalPointerUp}
+        @contextmenu=${(e: MouseEvent) => this.handleHorizontalTabContextMenu(e, i)}
+      >
+        <writemd-tab
+          ?pinned=${Boolean(t.isPinned)}
+          label=${t.path?.split(/[/\\]/).pop() ?? 'Untitled.md'}
+          ?active=${i === this.activeTab}
+          .dirty=${t.dirty}
+          @select=${() => this.fileState.switchTab(i)}
+          @close=${() => void this.fileState.closeTab(i)}
+          @reorder-tab=${(e: CustomEvent<{ delta: -1 | 1 }>) =>
+            this.fileState.moveTabRelative(i, e.detail.delta)}
+        ></writemd-tab>
+      </div>
+      ${isDropIndicatorTarget && this.hDragState?.dropTarget?.position === 'after'
+        ? html`<div class="h-drop-indicator"></div>`
+        : ''}
+    `
+  }
+
+  private renderHorizontalGroup(g: TabGroup): TemplateResult {
+    const memberTabs = this.tabs
+      .map((t, i) => ({ t, i }))
+      .filter(({ t }) => !t.isPinned && t.groupId === g.id)
+
+    const isHoveredGroup =
+      this.hDragState?.active &&
+      this.hDragState.dropTarget?.section === 'group' &&
+      this.hDragState.dropTarget.groupId === g.id
+
+    return html`
+      <div
+        class="h-group-wrap"
+        data-group-id=${g.id}
+      >
+        <div
+          class="h-group-pill ${isHoveredGroup ? 'drag-over' : ''}"
+          data-group-id=${g.id}
+          @click=${() => {
+            if (this.hDragState?.active || this.hWasDragging) return
+            if (this.renamingGroupId === g.id) return
+            this.fileState.toggleTabGroupCollapse(g.id)
+          }}
+          @pointerdown=${(e: PointerEvent) => this.handleHorizontalPointerDownGroup(e, g.id)}
+          @pointermove=${this.handleHorizontalPointerMove}
+          @pointerup=${this.handleHorizontalPointerUp}
+          @pointercancel=${this.handleHorizontalPointerUp}
+          @contextmenu=${(e: MouseEvent) => this.handleHorizontalGroupContextMenu(e, g.id)}
+        >
+          <div
+            class="h-group-chevron ${g.collapsed ? 'collapsed' : ''}"
+            @click=${(e: MouseEvent) => {
+              e.stopPropagation()
+              if (this.hDragState?.active || this.hWasDragging) return
+              this.fileState.toggleTabGroupCollapse(g.id)
+            }}
+          >
+            <svg
+              width="10"
+              height="10"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2.5"
+            >
+              <polyline points="6 9 12 15 18 9"></polyline>
+            </svg>
+          </div>
+          ${g.color && g.color !== 'transparent'
+            ? html`<span
+                class="h-group-color"
+                style="background-color: ${g.color};"
+              ></span>`
+            : ''}
+          ${this.renamingGroupId === g.id
+            ? html`
+                <input
+                  type="text"
+                  class="h-group-rename-input"
+                  .value=${g.label}
+                  @blur=${(e: Event) =>
+                    this.handleRenameGroupSubmit(
+                      g.id,
+                      (e.target as HTMLInputElement).value
+                    )}
+                  @keydown=${(e: KeyboardEvent) => {
+                    if (e.key === 'Enter') {
+                      this.handleRenameGroupSubmit(
+                        g.id,
+                        (e.target as HTMLInputElement).value
+                      )
+                    } else if (e.key === 'Escape') {
+                      this.renamingGroupId = null
+                    }
+                  }}
+                  @click=${(e: MouseEvent) => e.stopPropagation()}
+                />
+              `
+            : html`
+                <span
+                  class="h-group-label"
+                  @dblclick=${(e: MouseEvent) => {
+                    e.stopPropagation()
+                    this.renamingGroupId = g.id
+                    this.focusRenameInputHorizontal(g.id)
+                  }}
+                  >${g.label}</span
+                >
+              `}
+        </div>
+        ${!g.collapsed ? memberTabs.map(({ t, i }) => this.renderHorizontalTabItem(t, i)) : ''}
+      </div>
+    `
+  }
+
+  private renderHorizontalContextMenu(): TemplateResult | string {
+    if (!this.hContextMenu) return ''
+    const { type, index, groupId, x, y } = this.hContextMenu
+
+    return html`
+      <div class="context-menu-backdrop" @click=${() => (this.hContextMenu = null)}></div>
+      <div
+        class="m-panel"
+        style="left: ${x}px; top: ${y}px;"
+        @click=${(e: MouseEvent) => e.stopPropagation()}
+      >
+        ${type === 'tab' && index !== undefined
+          ? html`
+              ${this.tabs[index]?.isPinned
+                ? html`
+                    <div
+                      class="m-item"
+                      @click=${() => {
+                        this.fileState.unpinTab(index)
+                        this.hContextMenu = null
+                      }}
+                    >
+                      ${menuIcon('unpin')}
+                      <span>Unpin tab</span>
+                    </div>
+                  `
+                : html`
+                    <div
+                      class="m-item"
+                      @click=${() => {
+                        this.fileState.pinTab(index)
+                        this.hContextMenu = null
+                      }}
+                    >
+                      ${menuIcon('pin')}
+                      <span>Pin tab</span>
+                    </div>
+                  `}
+              <div class="m-divider"></div>
+              ${this.tabGroups.map(
+                (g) => html`
+                  <div
+                    class="m-item"
+                    @click=${() => {
+                      this.fileState.setTabGroup(index, g.id)
+                      this.hContextMenu = null
+                    }}
+                  >
+                    ${g.color && g.color !== 'transparent'
+                      ? html`<span
+                          class="h-group-color"
+                          style="background-color: ${g.color}; margin-right: 4px;"
+                        ></span>`
+                      : ''}
+                    <span>Move to ${g.label}</span>
+                  </div>
+                `
+              )}
+              <div
+                class="m-item"
+                @click=${() => this.handleCreateGroupWithTabHorizontal(index)}
+              >
+                ${menuIcon('folder')}
+                <span>New group with tab</span>
+              </div>
+              ${this.tabs[index]?.groupId
+                ? html`
+                    <div
+                      class="m-item"
+                      @click=${() => {
+                        this.fileState.setTabGroup(index, null)
+                        this.hContextMenu = null
+                      }}
+                    >
+                      ${menuIcon('external')}
+                      <span>Remove from group</span>
+                    </div>
+                  `
+                : ''}
+              <div class="m-divider"></div>
+              <div
+                class="m-item danger"
+                @click=${() => {
+                  void this.fileState.closeTab(index)
+                  this.hContextMenu = null
+                }}
+              >
+                ${menuIcon('trash')}
+                <span>Close tab</span>
+              </div>
+            `
+          : ''}
+        ${type === 'group' && groupId
+          ? html`
+              <div
+                class="m-item"
+                @click=${() => {
+                  const gId = groupId
+                  this.renamingGroupId = gId
+                  this.hContextMenu = null
+                  this.focusRenameInputHorizontal(gId)
+                }}
+              >
+                ${menuIcon('pencil')}
+                <span>Rename group</span>
+              </div>
+              <div class="m-divider"></div>
+              <div class="color-palette">
+                ${PRESET_COLORS.map(
+                  (c) => html`
+                    <div
+                      class="color-dot-btn ${c === 'transparent' ? 'none-color' : ''}"
+                      style="background-color: ${c}"
+                      title=${c === 'transparent' ? 'No color' : c}
+                      @click=${() => {
+                        this.fileState.updateTabGroup(groupId, { color: c })
+                        this.hContextMenu = null
+                      }}
+                    ></div>
+                  `
+                )}
+              </div>
+              <div class="m-divider"></div>
+              <div
+                class="m-item"
+                @click=${() => {
+                  this.fileState.deleteTabGroup(groupId, false)
+                  this.hContextMenu = null
+                }}
+              >
+                ${menuIcon('external')}
+                <span>Ungroup tabs</span>
+              </div>
+              <div
+                class="m-item danger"
+                @click=${() => {
+                  this.fileState.deleteTabGroup(groupId, true)
+                  this.hContextMenu = null
+                }}
+              >
+                ${menuIcon('trash')}
+                <span>Close all tabs in group</span>
+              </div>
+            `
+          : ''}
+      </div>
+    `
+  }
+
   connectedCallback(): void {
     super.connectedCallback()
     // Listener registration happens before the first await. An async
@@ -257,6 +1019,7 @@ export class WriteMdApp extends LitElement {
     this.unsubscribeFileState = this.fileState.subscribe((s) => {
       this.splitActive = s.splitActive
       this.tabs = s.tabs
+      this.tabGroups = s.tabGroups ?? []
       this.activeTab = s.activeTab
       this.showWelcome = s.tabs.length === 0
       this.secondaryPath = s.secondaryDoc?.path ?? null
@@ -570,6 +1333,13 @@ export class WriteMdApp extends LitElement {
       ? (this.secondaryPath.split(/[/\\]/).pop() ?? 'Secondary.md')
       : null
 
+    const pinnedTabs = this.tabs
+      .map((t, i) => ({ t, i }))
+      .filter(({ t }) => t.isPinned)
+    const ungroupedTabs = this.tabs
+      .map((t, i) => ({ t, i }))
+      .filter(({ t }) => !t.isPinned && !t.groupId)
+
     return html`
       <div class="app-container">
         <writemd-top-bar
@@ -590,18 +1360,14 @@ export class WriteMdApp extends LitElement {
               this.panelOrientation === 'vertical'
                 ? html`<writemd-doc-bar compact></writemd-doc-bar>`
                 : html`
-                    <div class="tab-strip">
-                      ${this.tabs.map(
-                        (t, i) => html`
-                          <writemd-tab
-                            label=${t.path?.split(/[/\\]/).pop() ?? 'Untitled.md'}
-                            ?active=${i === this.activeTab}
-                            .dirty=${t.dirty}
-                            @select=${() => this.fileState.switchTab(i)}
-                            @close=${() => void this.fileState.closeTab(i)}
-                          ></writemd-tab>
-                        `
-                      )}
+                    <div class="tab-strip" role="tablist" aria-label="Open documents">
+                      ${pinnedTabs.map(({ t, i }) => this.renderHorizontalTabItem(t, i))}
+                      ${pinnedTabs.length > 0 ? html`<div class="h-pinned-divider"></div>` : ''}
+
+                      ${this.tabGroups.map((g) => this.renderHorizontalGroup(g))}
+
+                      ${ungroupedTabs.map(({ t, i }) => this.renderHorizontalTabItem(t, i))}
+
                       ${
                         secondaryName
                           ? html`
@@ -616,25 +1382,53 @@ export class WriteMdApp extends LitElement {
                       }
                     </div>
                     <div
-                      class="tab-add"
-                      role="button"
-                      tabindex="0"
-                      aria-label="Open file in new tab"
-                      title="Open file in new tab"
-                      @click=${() => void this.openFileDialog()}
-                      @keydown=${this.handleTabAddKey}
+                      class="rail-actions"
+                      style="display:flex;align-items:center;gap:3px;-webkit-app-region:no-drag;"
                     >
-                      <svg
-                        width="14"
-                        height="14"
-                        viewBox="0 0 14 14"
-                        fill="none"
-                        stroke="currentColor"
-                        stroke-width="1.5"
+                      <div
+                        class="tab-add"
+                        role="button"
+                        tabindex="0"
+                        aria-label="Create Tab Group"
+                        title="Create Tab Group"
+                        @click=${this.handleCreateGroupHorizontal}
                       >
-                        <line x1="7" y1="2" x2="7" y2="12" />
-                        <line x1="2" y1="7" x2="12" y2="7" />
-                      </svg>
+                        <svg
+                          width="12"
+                          height="12"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          stroke-width="2"
+                        >
+                          <path
+                            d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"
+                          ></path>
+                          <line x1="12" y1="11" x2="12" y2="17"></line>
+                          <line x1="9" y1="14" x2="15" y2="14"></line>
+                        </svg>
+                      </div>
+                      <div
+                        class="tab-add"
+                        role="button"
+                        tabindex="0"
+                        aria-label="Open file in new tab"
+                        title="Open file in new tab"
+                        @click=${() => void this.openFileDialog()}
+                        @keydown=${this.handleTabAddKey}
+                      >
+                        <svg
+                          width="14"
+                          height="14"
+                          viewBox="0 0 14 14"
+                          fill="none"
+                          stroke="currentColor"
+                          stroke-width="1.5"
+                        >
+                          <line x1="7" y1="2" x2="7" y2="12" />
+                          <line x1="2" y1="7" x2="12" y2="7" />
+                        </svg>
+                      </div>
                     </div>
                   `
             }
@@ -649,6 +1443,7 @@ export class WriteMdApp extends LitElement {
                   class=${this.verticalPanelLeaving ? 'leaving' : ''}
                   .tabs=${this.tabs}
                   .activeTab=${this.activeTab}
+                  .tabGroups=${this.tabGroups}
                   .secondaryPath=${this.secondaryPath}
                   .secondaryDirty=${this.secondaryDirty}
                   @select-tab=${(e: CustomEvent<{ index: number }>) =>
@@ -686,6 +1481,34 @@ export class WriteMdApp extends LitElement {
             ? html`<writemd-conflict-dialog .conflict=${this.conflict}></writemd-conflict-dialog>`
             : ''
         }
+        ${this.renderHorizontalContextMenu()}
+        ${this.hDragState?.active
+          ? html`
+              <div
+                class="h-drag-ghost"
+                style="transform: translate3d(${this.hDragState.currentX + 10}px, ${this
+                  .hDragState.currentY + 10}px, 0);"
+              >
+                <svg
+                  width="12"
+                  height="12"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                >
+                  ${this.hDragState.type === 'group'
+                    ? html`<path
+                        d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"
+                      ></path>`
+                    : html`<path
+                        d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"
+                      ></path>`}
+                </svg>
+                <span>${this.hDragState.label}</span>
+              </div>
+            `
+          : ''}
       </div>
     `
   }

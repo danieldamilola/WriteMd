@@ -65,8 +65,20 @@ export class WriteMdTab extends LitElement {
       border-radius: 1px;
     }
 
-    :host([active]) .separator {
+    :host([active]) .separator,
+    :host([vertical]) .separator,
+    :host([pinned]) .separator {
       display: none;
+    }
+
+    .pin-icon {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 12px;
+      height: 12px;
+      flex-shrink: 0;
+      color: var(--text-muted);
     }
 
     .label {
@@ -126,6 +138,8 @@ export class WriteMdTab extends LitElement {
   @property({ type: Boolean, reflect: true }) active = false
   @property({ type: Boolean }) showClose = true
   @property({ type: Boolean }) dirty = false
+  @property({ type: Boolean, reflect: true }) pinned = false
+  @property({ type: Boolean, reflect: true }) vertical = false
 
   private handleClose(e: MouseEvent): void {
     e.stopPropagation()
@@ -155,15 +169,30 @@ export class WriteMdTab extends LitElement {
       this.handleSelect()
       return
     }
-    if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return
+
+    // Keyboard reorder: Alt+ArrowUp/Down/Left/Right
+    if (
+      e.altKey &&
+      (e.key === 'ArrowUp' || e.key === 'ArrowLeft' || e.key === 'ArrowDown' || e.key === 'ArrowRight')
+    ) {
+      e.preventDefault()
+      const delta = e.key === 'ArrowUp' || e.key === 'ArrowLeft' ? -1 : 1
+      this.dispatchEvent(
+        new CustomEvent('reorder-tab', { detail: { delta }, bubbles: true, composed: true })
+      )
+      return
+    }
+
+    const isPrev = e.key === 'ArrowLeft' || e.key === 'ArrowUp'
+    const isNext = e.key === 'ArrowRight' || e.key === 'ArrowDown'
+    if (!isPrev && !isNext) return
     e.preventDefault()
-    // Left/right move along the strip, matching the standard tablist pattern.
-    // Without it every tab has to be tabbed through individually.
+    // Move along the strip, matching the standard tablist pattern.
     const root = this.getRootNode() as ParentNode
     const tabs = Array.from(root.querySelectorAll('writemd-tab')) as WriteMdTab[]
     if (tabs.length === 0) return
     const i = tabs.indexOf(this)
-    const next = tabs[(i + (e.key === 'ArrowRight' ? 1 : -1) + tabs.length) % tabs.length]
+    const next = tabs[(i + (isNext ? 1 : -1) + tabs.length) % tabs.length]
     next?.focus()
     next?.handleSelect()
   }
@@ -179,10 +208,29 @@ export class WriteMdTab extends LitElement {
         @click=${this.handleSelect}
         @keydown=${this.handleKeyDown}
       >
+        ${this.pinned
+          ? html`
+              <span class="pin-icon" title="Pinned tab">
+                <svg
+                  width="10"
+                  height="10"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                >
+                  <line x1="12" y1="17" x2="12" y2="22"></line>
+                  <path d="M5 17h14v-2l-2-2V5h1V3H6v2h1v8l-2 2v2z"></path>
+                </svg>
+              </span>
+            `
+          : ''}
         <span class="label">${this.label}</span>
         ${this.dirty ? html`<span class="dirty-dot" title="Unsaved changes"></span>` : ''}
         ${
-          this.showClose
+          this.showClose && !this.pinned
             ? html`
                 <button
                   class="close-btn"

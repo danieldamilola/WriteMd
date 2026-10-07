@@ -41,6 +41,8 @@ export interface WriteMdSettings {
     recentFiles: string[]
     openTabs: string[]
     activeTabPath: string | null
+    pinnedTabs: string[]
+    tabGroups: string
     defaultNewFileContent: string
     defaultNewFileName: string
   }
@@ -129,6 +131,8 @@ export const DEFAULT_SETTINGS: WriteMdSettings = {
     recentFiles: [],
     openTabs: [],
     activeTabPath: null,
+    pinnedTabs: [],
+    tabGroups: '[]',
     defaultNewFileContent: '',
     defaultNewFileName: 'Untitled.md'
   },
@@ -185,6 +189,7 @@ export function settingKeys(): string[] {
 const ARRAY_ELEMENT_TYPES: Record<string, 'string' | 'number' | 'boolean'> = {
   'files.recentFiles': 'string',
   'files.openTabs': 'string',
+  'files.pinnedTabs': 'string',
   'shortcuts.bindings': 'string'
 }
 
