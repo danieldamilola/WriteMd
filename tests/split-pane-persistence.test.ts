@@ -142,6 +142,90 @@ describe('split pane persistence', () => {
     expect(writes).toEqual([{ path: B, content: 'edited in the pane' }])
   })
 
+  it('cancels a dirty split document debounce while deletion is pending', async () => {
+    const index = openAt(files, A, 'primary')
+    files.switchTab(index)
+    settings.set('editor.autoSave', true)
+    await files.openSecondaryFile(B, 'secondary')
+    files.setContent('primary edits')
+    files.setSecondaryContent('secondary edits')
+    window.electronAPI!.file.delete = vi.fn(async () => {
+      await tick(80)
+      return true
+    })
+
+    expect(await files.deleteFile(B)).toBe(true)
+    await tick(60)
+
+    expect(writes).toEqual([{ path: A, content: 'primary edits' }])
+    expect(files.getState().path).toBe(A)
+    expect(files.getState().secondaryDoc).toBeNull()
+    expect(files.getState().splitActive).toBe(false)
+  })
+
+  it('removes a deleted shared file from both panes without flushing edits', async () => {
+    const index = openAt(files, A, 'shared')
+    files.switchTab(index)
+    settings.set('editor.autoSave', true)
+    await files.openSecondaryFile(A, 'shared')
+    files.setSecondaryContent('shared edits')
+    window.electronAPI!.file.delete = vi.fn(async () => true)
+
+    expect(await files.deleteFile(A)).toBe(true)
+    await tick(60)
+
+    expect(writes).toEqual([])
+    expect(files.getState().tabs.some((tab) => tab.path === A)).toBe(false)
+    expect(files.getState().secondaryDoc).toBeNull()
+  })
+
+  it('keeps the split document and restores autosave when deletion fails', async () => {
+    const index = openAt(files, A, 'primary')
+    files.switchTab(index)
+    settings.set('editor.autoSave', true)
+    await files.openSecondaryFile(B, 'secondary')
+    files.setSecondaryContent('keep after failed deletion')
+    window.electronAPI!.file.delete = vi.fn(async () => false)
+
+    expect(await files.deleteFile(B)).toBe(false)
+    expect(files.getState().secondaryDoc?.content).toBe('keep after failed deletion')
+    await tick(60)
+
+    expect(writes).toEqual([{ path: B, content: 'keep after failed deletion' }])
+  })
+
+  it('waits for an already running save before deleting its document', async () => {
+    const index = openAt(files, A, 'primary')
+    files.switchTab(index)
+    await files.openSecondaryFile(B, 'secondary')
+    files.setSecondaryContent('save already started')
+    let finishWrite: (() => void) | undefined
+    const bridge = window.electronAPI!
+    bridge.file.write = vi.fn(async (path, content) => {
+      await new Promise<void>((resolve) => {
+        finishWrite = resolve
+      })
+      writes.push({ path, content })
+      return { mtime: 1 }
+    })
+    bridge.file.delete = vi.fn(async () => {
+      expect(writes).toEqual([{ path: B, content: 'save already started' }])
+      return true
+    })
+
+    const saving = files.saveSecondary()
+    const deleting = files.deleteFile(B)
+    await Promise.resolve()
+    expect(bridge.file.delete).not.toHaveBeenCalled()
+    expect(await files.saveSecondary()).toBe(false)
+    finishWrite?.()
+
+    await saving
+    expect(await deleting).toBe(true)
+    expect(bridge.file.write).toHaveBeenCalledTimes(1)
+    expect(files.getState().secondaryDoc).toBeNull()
+  })
+
   it('renames the split document without changing a different primary document', async () => {
     const index = openAt(files, A, 'primary')
     files.switchTab(index)

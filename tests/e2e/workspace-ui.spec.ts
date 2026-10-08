@@ -59,6 +59,40 @@ test.describe('workspace UI', () => {
     await app?.close()
   })
 
+  for (const orientation of ['horizontal', 'vertical']) {
+    test(`closing a dirty group requires confirmation in ${orientation} tabs`, async () => {
+      await prefs(page, {
+        'appearance.panelOrientation': orientation,
+        'appearance.motion': 'reduced'
+      })
+      await page.evaluate(() => {
+        const state = (document.querySelector('writemd-app') as unknown as AppHost).fileState
+        state.createTabGroup('Unsaved group', undefined, [0, 1])
+        state.setContent('Unsaved group edits')
+      })
+      const before = await order(page)
+      const header = page.locator(orientation === 'vertical' ? '.group-header' : '.h-group-pill')
+      await header.click({ button: 'right' })
+      await page.locator('.m-item', { hasText: 'Close all tabs in group' }).click()
+      const confirmation = page.locator('writemd-confirm')
+      await expect(confirmation.locator('p')).toContainText('unsaved changes')
+      await confirmation.getByRole('button', { name: 'Cancel', exact: true }).click()
+      expect(await order(page)).toEqual(before)
+      expect(
+        await page.evaluate(
+          () =>
+            (document.querySelector('writemd-app') as unknown as AppHost).fileState.getState()
+              .content
+        )
+      ).toBe('Unsaved group edits')
+
+      await header.click({ button: 'right' })
+      await page.locator('.m-item', { hasText: 'Close all tabs in group' }).click()
+      await confirmation.getByRole('button', { name: 'OK', exact: true }).click()
+      await expect.poll(() => order(page)).toEqual(before.slice(2))
+    })
+  }
+
   test('dragging reorders by identity and Escape cancels without selecting or moving a neighbor', async () => {
     const before = await order(page)
     const source = await page.locator('.h-tab-item').nth(0).boundingBox()
@@ -313,6 +347,22 @@ test.describe('workspace UI', () => {
     await expect(auxiliaryImage).toHaveCSS('opacity', '0')
     await prefs(page, { 'appearance.backgroundShowOn': 'all' })
     await expect(auxiliaryImage).toHaveCSS('opacity', '0.19')
+    await prefs(page, { 'appearance.backgroundTarget': 'ai' })
+    await expect(auxiliaryImage).toHaveCSS('opacity', '0')
+    const aiImage = page.locator('writemd-ai-panel writemd-background img')
+    await expect(aiImage).toBeVisible()
+    await expect(aiImage).toHaveCSS('opacity', '0.19')
+    await prefs(page, { 'appearance.backgroundShowOn': 'empty' })
+    await expect(aiImage).toHaveCSS('opacity', '0')
+    await page.locator('writemd-editor').evaluate((element) => {
+      ;(element as unknown as { aiMessages: AiMessage[] }).aiMessages = []
+    })
+    await expect(aiImage).toHaveCSS('opacity', '0.31')
+    await page.screenshot({ path: 'artifacts/ui-review/pr23-fixed-ai-background.png' })
+    await prefs(page, {
+      'appearance.backgroundTarget': 'workspace',
+      'appearance.backgroundShowOn': 'all'
+    })
     await page.evaluate(() =>
       (document.querySelector('writemd-app') as unknown as AppHost).settingsStore.whenSaved()
     )

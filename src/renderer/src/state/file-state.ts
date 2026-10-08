@@ -4,6 +4,7 @@ import { api } from '../api'
 import { showConfirm } from '../services/confirm'
 import { sameFilePath } from '../utils/paths'
 import { placeTab, type TabDestination } from './tab-order'
+import type { FileWriteResult } from '../../../shared/electron-api'
 
 /**
  * Modes the primary pane can render.
@@ -143,6 +144,8 @@ export class FileState {
   private listeners = new Set<(state: FileStateData) => void>()
   private autoSaveTimer: ReturnType<typeof setTimeout> | null = null
   private secondaryAutoSaveTimer: ReturnType<typeof setTimeout> | null = null
+  private deletingPaths = new Set<string>()
+  private pendingWrites = new Map<Promise<FileWriteResult>, string>()
   private settingsStore = SettingsStore.getInstance()
 
   private constructor() {
@@ -517,27 +520,55 @@ export class FileState {
   /**
    * Delete a tab group. If closeTabs is true, member tabs are closed; otherwise ungrouped.
    */
-  deleteTabGroup(groupId: string, closeTabs = false): void {
-    const currentGroups = this.state.tabGroups ?? []
+  async deleteTabGroup(groupId: string, closeTabs = false): Promise<void> {
     if (closeTabs) {
-      const remainingTabs = this.state.tabs.filter((t) => t.groupId !== groupId)
-      let activeTab = this.state.activeTab
-      if (activeTab >= remainingTabs.length) {
-        activeTab = Math.max(0, remainingTabs.length - 1)
+      const active = this.activeTabDoc()
+      if (this.state.tabs.some((tab) => tab.groupId === groupId && tab.dirty)) {
+        if (active?.groupId === groupId) this.clearAutoSaveTimer()
+        const confirmed = await showConfirm(
+          'This group has unsaved changes. Close all tabs in the group anyway?'
+        )
+        if (!confirmed) {
+          if (active?.groupId === groupId && this.activeTabDoc()?.id === active.id)
+            this.scheduleAutoSave()
+          return
+        }
       }
+      const currentActive = this.activeTabDoc()
+      if (currentActive?.groupId === groupId) this.clearAutoSaveTimer()
+      const closedTabs = this.state.tabs.filter((tab) => tab.groupId === groupId)
+      const remainingTabs = this.state.tabs.filter((t) => t.groupId !== groupId)
+      const remainingActive = remainingTabs.findIndex((tab) => tab.id === currentActive?.id)
+      const activeTab = Math.max(
+        0,
+        remainingActive >= 0
+          ? remainingActive
+          : Math.min(this.state.activeTab, remainingTabs.length - 1)
+      )
       this.state = {
         ...this.state,
         tabs: remainingTabs,
         activeTab,
-        tabGroups: currentGroups.filter((g) => g.id !== groupId)
+        tabGroups: this.state.tabGroups?.filter((g) => g.id !== groupId)
       }
       this.syncMirror()
+      if (remainingActive >= 0) this.scheduleAutoSave()
+      for (const tab of closedTabs) {
+        if (
+          tab.path &&
+          !sameFilePath(tab.path, this.state.secondaryDoc?.path) &&
+          !remainingTabs.some((remaining) => sameFilePath(remaining.path, tab.path))
+        )
+          void api()
+            ?.file?.unwatch?.(tab.path)
+            .catch(() => undefined)
+      }
     } else {
       const tabs = this.state.tabs.map((t) => (t.groupId === groupId ? { ...t, groupId: null } : t))
       this.state = {
         ...this.state,
         tabs,
-        tabGroups: currentGroups.filter((g) => g.id !== groupId)
+        tabGroups: this.state.tabGroups?.filter((g) => g.id !== groupId)
       }
     }
     this.persistTabs()
@@ -641,6 +672,74 @@ export class FileState {
     this.syncMirror()
     this.persistTabs()
     this.notify()
+  }
+
+  /** Delete a document without letting pane teardown save it back to disk. */
+  async deleteFile(path: string): Promise<boolean> {
+    if (this.isDeleting(path)) return false
+    this.deletingPaths.add(path)
+    if (sameFilePath(this.state.path, path)) this.clearAutoSaveTimer()
+    if (sameFilePath(this.state.secondaryDoc?.path, path)) this.clearSecondaryAutoSaveTimer()
+    let deleted = false
+    try {
+      await Promise.allSettled(
+        [...this.pendingWrites]
+          .filter(([, target]) => sameFilePath(target, path))
+          .map(([write]) => write)
+      )
+      deleted = Boolean(await api()?.file?.delete?.(path))
+    } catch (error) {
+      console.error('Failed to delete file:', error)
+    }
+    if (!deleted) {
+      this.deletingPaths.delete(path)
+      if (sameFilePath(this.state.path, path)) this.scheduleAutoSave()
+      if (sameFilePath(this.state.secondaryDoc?.path, path)) this.scheduleSecondaryAutoSave()
+      return false
+    }
+    const active = this.activeTabDoc()
+    const tabs = this.state.tabs.filter((tab) => !sameFilePath(tab.path, path))
+    const remainingActive = tabs.findIndex((tab) => tab.id === active?.id)
+    if (sameFilePath(this.state.path, path)) this.clearAutoSaveTimer()
+    const secondaryMatches = sameFilePath(this.state.secondaryDoc?.path, path)
+    if (secondaryMatches) this.clearSecondaryAutoSaveTimer()
+    this.state = {
+      ...this.state,
+      tabs,
+      activeTab: Math.max(
+        0,
+        remainingActive >= 0 ? remainingActive : Math.min(this.state.activeTab, tabs.length - 1)
+      ),
+      ...(secondaryMatches
+        ? { splitActive: false, splitSurface: 'launcher', secondaryDoc: null }
+        : {}),
+      conflict: sameFilePath(this.state.conflict?.path, path) ? null : this.state.conflict
+    }
+    this.syncMirror()
+    if (remainingActive >= 0) this.scheduleAutoSave()
+    this.persistTabs()
+    this.notify()
+    void api()
+      ?.file?.unwatch?.(path)
+      .catch(() => undefined)
+    this.deletingPaths.delete(path)
+    return true
+  }
+
+  private isDeleting(path: string | null): boolean {
+    return [...this.deletingPaths].some((deletingPath) => sameFilePath(deletingPath, path))
+  }
+
+  private async writeDocument(path: string, content: string): Promise<FileWriteResult | undefined> {
+    if (this.isDeleting(path)) return undefined
+    const write = api()?.file?.write?.(path, content)
+    if (!write) return undefined
+    this.pendingWrites.set(write, path)
+    try {
+      return await write
+    } finally {
+      this.pendingWrites.delete(write)
+    }
   }
 
   async newFile(): Promise<void> {
@@ -777,6 +876,7 @@ export class FileState {
     const index = targetIndex ?? this.state.activeTab
     const tab = this.state.tabs[index] ?? null
     if (!tab) return false
+    if (this.isDeleting(tab.path)) return false
     if (!tab.path) return targetIndex === undefined ? this.saveAs() : false
     try {
       // Mark as pending to prevent watcher race conditions
@@ -787,7 +887,7 @@ export class FileState {
           i === index ? { ...t, pendingWrite: contentToSave } : t
         )
       }
-      const result = await api()?.file?.write?.(tab.path, contentToSave)
+      const result = await this.writeDocument(tab.path, contentToSave)
       // Re-resolve by path, not by this.state.activeTab. Switching tabs during
       // the write used to mark the wrong tab clean and clobber its
       // originalContent while leaving pendingWrite set on the tab that was
@@ -1220,8 +1320,9 @@ export class FileState {
   async saveSecondary(): Promise<boolean> {
     const secondary = this.state.secondaryDoc
     if (!secondary || secondary.isDiff || !secondary.dirty || !secondary.path) return false
+    if (this.isDeleting(secondary.path)) return false
     try {
-      const result = await api()?.file?.write?.(secondary.path, secondary.content)
+      const result = await this.writeDocument(secondary.path, secondary.content)
       if (!result) return false
       const current = this.state.secondaryDoc
       if (current && current.path === secondary.path && current.content === secondary.content) {
@@ -1251,8 +1352,9 @@ export class FileState {
    */
   async writeSecondary(path: string | null, content: string): Promise<boolean> {
     if (!path) return false
+    if (this.isDeleting(path)) return false
     try {
-      const result = await api()?.file?.write?.(path, content)
+      const result = await this.writeDocument(path, content)
       if (!result) return false
       const current = this.state.secondaryDoc
       if (current && sameFilePath(current.path, path)) {

@@ -1,14 +1,20 @@
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { FileState } from '../src/renderer/src/state/file-state'
+import { SettingsStore } from '../src/renderer/src/state/settings'
+
+const { confirm } = vi.hoisted(() => ({ confirm: vi.fn(async () => true) }))
+vi.mock('../src/renderer/src/services/confirm', () => ({ showConfirm: confirm }))
 
 describe('tab reordering, pinning, and grouping in FileState', () => {
   const fileState = FileState.getInstance()
 
   beforeEach(async () => {
+    confirm.mockReset().mockResolvedValue(true)
+    SettingsStore.getInstance().set('editor.autoSave', false)
     // Reset groups and tabs
     const groups = fileState.getState().tabGroups ?? []
     for (const g of [...groups]) {
-      fileState.deleteTabGroup(g.id, false)
+      await fileState.deleteTabGroup(g.id, false)
     }
     const current = fileState.getState().tabs
     for (let i = current.length - 1; i >= 0; i--) {
@@ -70,7 +76,7 @@ describe('tab reordering, pinning, and grouping in FileState', () => {
     expect(s3.tabs.some((t) => t.path === targetPath && !t.isPinned)).toBe(true)
   })
 
-  it('creates, collapses, updates and deletes tab groups', () => {
+  it('creates, collapses, updates and deletes tab groups', async () => {
     const groupId = fileState.createTabGroup('Project Notes', '#3b82f6', [0, 1])
     let s = fileState.getState()
     const groups = s.tabGroups ?? []
@@ -107,7 +113,7 @@ describe('tab reordering, pinning, and grouping in FileState', () => {
     expect(s.tabs[0].groupId ?? null).toBeNull()
 
     // Delete group without closing tabs
-    fileState.deleteTabGroup(groupId, false)
+    await fileState.deleteTabGroup(groupId, false)
     s = fileState.getState()
     expect((s.tabGroups ?? []).length).toBe(0)
     expect(s.tabs.every((t) => t.groupId === null)).toBe(true)
@@ -133,5 +139,46 @@ describe('tab reordering, pinning, and grouping in FileState', () => {
 
     fileState.moveTabRelative(0, 1) // Move down
     expect(fileState.getState().tabs[1].path).toBe(middlePath)
+  })
+
+  it('keeps every group tab and its edits when closing is cancelled', async () => {
+    const groupId = fileState.createTabGroup('Unsaved', undefined, [0, 2])
+    fileState.setContent('Keep these unsaved edits')
+    const before = fileState.getState()
+    confirm.mockClear().mockResolvedValue(false)
+
+    await fileState.deleteTabGroup(groupId, true)
+
+    expect(confirm).toHaveBeenCalledTimes(1)
+    expect(fileState.getState()).toEqual(before)
+  })
+
+  it('asks once before closing a dirty group and preserves the other active tab', async () => {
+    const groupId = fileState.createTabGroup('Unsaved', undefined, [0, 2])
+    fileState.setContent('Discard only after confirmation')
+    fileState.switchTab(1)
+    const activeId = fileState.getState().tabs[1].id
+    confirm.mockClear()
+
+    await fileState.deleteTabGroup(groupId, true)
+
+    expect(confirm).toHaveBeenCalledTimes(1)
+    const state = fileState.getState()
+    expect(state.tabs.map((tab) => tab.id)).toEqual([activeId])
+    expect(state.tabs[state.activeTab].id).toBe(activeId)
+    expect(state.tabGroups).toEqual([])
+  })
+
+  it('closes a clean group without prompting or changing the surviving document', async () => {
+    const groupId = fileState.createTabGroup('Clean', undefined, [0])
+    fileState.switchTab(1)
+    const activeId = fileState.getState().tabs[1].id
+    confirm.mockClear()
+
+    await fileState.deleteTabGroup(groupId, true)
+
+    expect(confirm).not.toHaveBeenCalled()
+    const state = fileState.getState()
+    expect(state.tabs[state.activeTab].id).toBe(activeId)
   })
 })

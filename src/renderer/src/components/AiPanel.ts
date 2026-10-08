@@ -1283,6 +1283,7 @@ export class AiPanel extends LitElement {
       `
     }
     return html`
+      <writemd-background target="ai" .empty=${this.messages.length === 0}></writemd-background>
       <div class="panel">
         <div class="chat-log" role="log" aria-live="polite" aria-label="Assistant conversation">
           <div class="row">

@@ -344,15 +344,11 @@ export class DocBar extends LitElement {
         if (!path) break
         const base = path.split(/[/\\]/).pop() ?? path
         if (!(await showConfirm(`Move ${base} to trash?`, 'Delete file'))) break
-        const ok = await api()?.file?.delete?.(path)
+        const ok = await this.fileState.deleteFile(path)
         if (!ok) {
           alert('Could not delete file')
           break
         }
-        if (this.fileState.getState().secondaryDoc?.path === path)
-          this.fileState.closeSecondaryFile()
-        const idx = this.fileState.getState().tabs.findIndex((t) => t.path === path)
-        if (idx >= 0) await this.fileState.closeTab(idx)
         break
       }
     }

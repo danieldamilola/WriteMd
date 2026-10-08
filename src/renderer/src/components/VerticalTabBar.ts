@@ -614,7 +614,7 @@ export class VerticalTabBar extends LitElement {
                   <div
                     class="m-item"
                     @click=${() => {
-                      this.fileState.deleteTabGroup(groupId, false)
+                      void this.fileState.deleteTabGroup(groupId, false)
                       this.closeContextMenu()
                     }}
                   >
@@ -624,7 +624,7 @@ export class VerticalTabBar extends LitElement {
                   <div
                     class="m-item danger"
                     @click=${() => {
-                      this.fileState.deleteTabGroup(groupId, true)
+                      void this.fileState.deleteTabGroup(groupId, true)
                       this.closeContextMenu()
                     }}
                   >

@@ -1,6 +1,6 @@
 import { test, expect, type ElectronApplication, type Page } from '@playwright/test'
 import { join } from 'path'
-import { writeFileSync } from 'fs'
+import { writeFileSync, existsSync } from 'fs'
 import { makeFixture, launch, firstWindow } from './fixtures'
 import type { FileState } from '../../src/renderer/src/state/file-state'
 import type { SettingsStore } from '../../src/renderer/src/state/settings'
@@ -52,6 +52,31 @@ test.describe('Pane menus and sidebar updates', () => {
     const bar = page.locator('writemd-doc-bar[secondary]')
     await bar.locator('[aria-label="More Options"]').click()
     await bar.locator(`.note-menu [data-id="${id}"]`).click()
+  }
+
+  for (const shared of [false, true]) {
+    test(`deleting a dirty ${shared ? 'shared' : 'secondary'} document keeps it deleted`, async () => {
+      const path = join(fixture.vault, shared ? 'README.md' : 'PRD.md')
+      await page.evaluate(async (path) => {
+        const host = document.querySelector('writemd-app') as unknown as Host
+        host.settingsStore.set('editor.autoSave', false)
+        const result = await window.electronAPI!.file.read(path)
+        await host.fileState.openSecondaryFile(path, result.content)
+        host.fileState.setSecondaryContent('Unsaved edits to delete')
+      }, path)
+      await secondaryAction('delete')
+      const confirmation = page.locator('writemd-confirm')
+      await expect(confirmation.locator('p')).toContainText('to trash?')
+      await confirmation.getByRole('button', { name: 'OK', exact: true }).click()
+      await expect(page.locator('writemd-doc-bar[secondary]')).toHaveCount(0)
+      await expect(confirmation.locator('button')).toHaveCount(0)
+      expect(existsSync(path)).toBe(false)
+      const state = await page.evaluate(() =>
+        (document.querySelector('writemd-app') as unknown as Host).fileState.getState()
+      )
+      expect(state.tabs.some((tab) => tab.path === path)).toBe(false)
+      expect(state.secondaryDoc).toBeNull()
+    })
   }
   async function update(status: UpdaterState['status'], percent = 0): Promise<void> {
     await app.evaluate(
