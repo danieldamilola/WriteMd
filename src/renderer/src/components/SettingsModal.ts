@@ -1,5 +1,14 @@
 import { html, css, LitElement, type PropertyValues } from 'lit'
 import { customElement, property, state } from 'lit/decorators.js'
+import './BackgroundControls'
+import './IconButton'
+import './SearchBar'
+import { controlStyles, settingsSelectStyles } from '../design/controls'
+import type WaSelect from '@awesome.me/webawesome/dist/components/select/select.js'
+import '@awesome.me/webawesome/dist/components/select/select.js'
+import { chromeIcon } from '../design/icons'
+import './Modal'
+import { nativeModalAvailable } from './Modal'
 import { api } from '../api'
 import { deepActiveElement } from '../utils/links'
 import { MOTION_LABELS, MOTION_PREFERENCES, type MotionPreference } from '../utils/motion'
@@ -21,6 +30,8 @@ import {
 } from '../state/shortcuts'
 import {
   TAB_LABELS,
+  SETTINGS_NAV_GROUPS,
+  exactSettingsTab,
   searchSettingsRows,
   searchSettingsTabs,
   searchTargetTab,
@@ -37,6 +48,26 @@ import {
  * inside `writemd-top-bar`'s shadow root, so the real target is two levels down.
  */
 
+const FONT_FAMILIES = [
+  { id: 'Inter', name: 'Inter', type: 'Sans-serif' },
+  { id: 'Manrope', name: 'Manrope', type: 'Sans-serif' },
+  { id: 'DM Sans', name: 'DM Sans', type: 'Sans-serif' },
+  { id: 'Space Grotesk', name: 'Space Grotesk', type: 'Sans-serif' },
+  { id: 'JetBrains Mono', name: 'JetBrains Mono', type: 'Monospace' },
+  { id: 'Geist Mono', name: 'Geist Mono', type: 'Monospace' }
+]
+
+const NAV_ICONS: Record<SettingsTab, string> = {
+  general: 'file-text',
+  editor: 'pencil',
+  files: 'folder-open',
+  appearance: 'palette',
+  shortcuts: 'keyboard',
+  ai: 'bot',
+  advanced: 'settings',
+  about: 'info'
+}
+
 interface ThemeDefinition {
   id: string
   name: string
@@ -45,13 +76,38 @@ interface ThemeDefinition {
 }
 
 const THEME_PREVIEWS: ThemeDefinition[] = [
-  { id: 'dark', name: 'Dark', c1: '#111', c2: '#1a1a1a' },
-  { id: 'graphite', name: 'Graphite', c1: '#1e1e1e', c2: '#252526' },
-  { id: 'nord', name: 'Nord', c1: '#2e3440', c2: '#3b4252' },
-  { id: 'midnight', name: 'Midnight', c1: '#0f1419', c2: '#151d25' },
-  { id: 'light', name: 'Light', c1: '#ffffff', c2: '#fafafa' },
-  { id: 'paper', name: 'Paper', c1: '#fefbf3', c2: '#fdf6e3' },
-  { id: 'dracula', name: 'Dracula', c1: '#282a36', c2: '#343746' }
+  { id: 'dark', name: 'Dark', c1: 'var(--preview-dark-base)', c2: 'var(--preview-dark-raised)' },
+  {
+    id: 'graphite',
+    name: 'Graphite',
+    c1: 'var(--preview-graphite-base)',
+    c2: 'var(--preview-graphite-raised)'
+  },
+  { id: 'nord', name: 'Nord', c1: 'var(--preview-nord-base)', c2: 'var(--preview-nord-raised)' },
+  {
+    id: 'midnight',
+    name: 'Midnight',
+    c1: 'var(--preview-midnight-base)',
+    c2: 'var(--preview-midnight-raised)'
+  },
+  {
+    id: 'light',
+    name: 'Light',
+    c1: 'var(--preview-light-base)',
+    c2: 'var(--preview-light-raised)'
+  },
+  {
+    id: 'paper',
+    name: 'Paper',
+    c1: 'var(--preview-paper-base)',
+    c2: 'var(--preview-paper-raised)'
+  },
+  {
+    id: 'dracula',
+    name: 'Dracula',
+    c1: 'var(--preview-dracula-base)',
+    c2: 'var(--preview-dracula-raised)'
+  }
 ]
 
 const ACCENT_COLORS = [
@@ -63,16 +119,6 @@ const ACCENT_COLORS = [
   '#f2994a', // Orange/Yellow
   '#f26419', // Orange
   '#00c4cc' // Cyan
-]
-
-const FONT_FAMILIES = [
-  { id: 'Inter', name: 'Inter', type: 'Sans-serif' },
-  { id: 'Merriweather', name: 'Merriweather', type: 'Serif' },
-  { id: 'Lora', name: 'Lora', type: 'Serif' },
-  { id: 'Source Serif Pro', name: 'Source Serif', type: 'Serif' },
-  { id: 'Fira Sans', name: 'Fira Sans', type: 'Sans-serif' },
-  { id: 'JetBrains Mono', name: 'JetBrains Mono', type: 'Monospace' },
-  { id: 'Geist Mono', name: 'Geist Mono', type: 'Monospace' }
 ]
 
 /**
@@ -103,554 +149,592 @@ const PROVIDER_MODEL_DEFAULTS: Record<string, string[]> = {
 
 @customElement('writemd-settings-modal')
 export class SettingsModal extends LitElement {
-  static styles = css`
-    :host {
-      position: fixed;
-      inset: 0;
-      z-index: 300;
-      background: var(--bg-frame);
-    }
+  static styles = [
+    controlStyles,
+    settingsSelectStyles,
+    css`
+      :host {
+        position: fixed;
+        inset: 0;
+        z-index: 300;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: var(--dialog-backdrop);
+      }
+      * {
+        box-sizing: border-box;
+      }
 
-    .modal-dialog {
-      width: 100%;
-      height: 100%;
-      display: flex;
-      background: var(--bg-elevated);
-      border: none;
-      border-radius: 0;
-      box-shadow: none;
-      overflow: hidden;
-      color: var(--text);
-    }
+      .modal-dialog {
+        width: min(980px, calc(100vw - 32px));
+        height: min(600px, calc(100vh - 92px));
+        display: flex;
+        background: var(--bg-elevated);
+        border: none;
+        border-radius: var(--radius-lg);
+        box-shadow: var(--shadow-3);
+        box-sizing: border-box;
+        font-family: var(--font-ui);
+        overflow: hidden;
+        color: var(--text);
+      }
 
-    /* Sidebar Navigation */
-    .sidebar {
-      width: 250px;
-      flex-shrink: 0;
-      background: var(--bg-elevated);
-      border-right: 1px solid var(--border-subtle);
-      display: flex;
-      flex-direction: column;
-    }
+      /* Sidebar Navigation */
+      .sidebar {
+        width: 200px;
+        flex-shrink: 0;
+        background: var(--bg-elevated);
+        border: 0;
+        display: flex;
+        flex-direction: column;
+        min-height: 0;
+      }
 
-    .sidebar-search {
-      padding: 16px 16px 8px 16px;
-    }
+      .sidebar-search {
+        padding: 12px 8px 0;
+        flex-shrink: 0;
+      }
 
-    .sidebar-search input {
-      width: 100%;
-      box-sizing: border-box;
-      background: var(--bg-hover);
-      border: 1px solid var(--border-subtle);
-      border-radius: 6px;
-      padding: 8px 12px;
-      color: var(--text);
-      font-size: 13px;
-      outline: none;
-    }
-    .sidebar-search input:focus {
-      border-color: var(--border);
-    }
+      .search-status {
+        font-size: 11px;
+        color: var(--text-muted);
+        padding: 6px 2px 0 2px;
+      }
 
-    .search-status {
-      font-size: 11px;
-      color: var(--text-muted);
-      padding: 6px 2px 0 2px;
-    }
+      .sidebar-nav {
+        padding: 20px 8px;
+        display: flex;
+        flex-direction: column;
+        gap: 24px;
+        flex: 1;
+        min-height: 0;
+        overflow-y: auto;
+      }
 
-    .sidebar-nav {
-      padding: 8px;
-      display: flex;
-      flex-direction: column;
-      gap: 2px;
-      flex: 1;
-      overflow-y: auto;
-    }
+      .nav-section {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+      }
 
-    .nav-group {
-      font-size: 11px;
-      font-weight: 600;
-      color: var(--text-muted);
-      padding: 12px 12px 4px 12px;
-    }
+      .nav-group {
+        font-size: 11px;
+        font-weight: 600;
+        color: var(--text-muted);
+        padding: 0 8px 4px;
+      }
 
-    .nav-btn {
-      display: flex;
-      align-items: center;
-      gap: 12px;
-      padding: 8px 12px;
-      border-radius: 6px;
-      font-size: 13px;
-      font-weight: 500;
-      color: var(--text-secondary);
-      background: transparent;
-      border: none;
-      cursor: pointer;
-      text-align: left;
-      transition: all 0.15s ease;
-    }
+      .nav-btn {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        min-height: 34px;
+        padding: 8px;
+        border-radius: var(--radius-sm);
+        font-size: 14px;
+        font-weight: 500;
+        color: var(--text-secondary);
+        background: transparent;
+        border: none;
+        cursor: pointer;
+        text-align: left;
+        transition:
+          background var(--motion-fast),
+          color var(--motion-fast);
+      }
 
-    .nav-btn svg {
-      width: 16px;
-      height: 16px;
-      opacity: 0.7;
-      flex-shrink: 0;
-    }
+      .nav-btn svg {
+        width: 16px;
+        height: 16px;
+        opacity: 0.7;
+        flex-shrink: 0;
+      }
 
-    .nav-btn:hover {
-      background: var(--bg-hover);
-      color: var(--text);
-    }
+      .nav-btn:hover {
+        background: var(--bg-hover);
+        color: var(--text);
+      }
 
-    .nav-btn.active {
-      background: var(--bg-active);
-      color: var(--text);
-      font-weight: 600;
-    }
-    .nav-btn.active svg {
-      opacity: 1;
-    }
+      .nav-btn.active {
+        background: var(--bg-active);
+        color: var(--text);
+        font-weight: 600;
+      }
+      .nav-btn.active svg {
+        opacity: 1;
+      }
+      .nav-btn:focus-visible,
+      .back-btn:focus-visible,
+      .close-btn:focus-visible {
+        outline: 1px solid var(--border-focus);
+        outline-offset: -1px;
+      }
 
-    /* The hidden attribute loses to the class display rule without this. */
-    .nav-btn[hidden] {
-      display: none;
-    }
+      /* The hidden attribute loses to the class display rule without this. */
+      .nav-btn[hidden] {
+        display: none;
+      }
 
-    /* Classic popup: centered dialog over a dimmed app, no shell chrome. */
-    :host(.classic) {
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      background: rgba(0, 0, 0, 0.5);
-    }
-    :host(.classic) .modal-dialog {
-      width: min(900px, 94vw);
-      height: min(700px, 90vh);
-      border: 1px solid var(--border-subtle);
-      border-radius: 12px;
-      box-shadow: var(--shadow-3);
-    }
-    :host(.classic) .sidebar {
-      width: 230px;
-    }
-    :host(.classic) .sidebar-footer,
-    :host(.classic) .win-controls {
-      display: none;
-    }
-    :host(.classic) .main-header {
-      padding: 0 24px;
-    }
-    .modal-dialog .close-btn {
-      display: none;
-      width: 32px;
-      height: 32px;
-      align-items: center;
-      justify-content: center;
-      background: transparent;
-      border: none;
-      color: var(--text-secondary);
-      border-radius: 6px;
-      cursor: pointer;
-    }
-    .modal-dialog .close-btn:hover {
-      background: var(--bg-hover);
-      color: var(--text);
-    }
-    :host(.classic) .modal-dialog .close-btn {
-      display: flex;
-    }
+      .modal-dialog .close-btn {
+        display: flex;
+        width: 32px;
+        height: 32px;
+        align-items: center;
+        justify-content: center;
+        background: transparent;
+        border: none;
+        color: var(--text-secondary);
+        border-radius: 6px;
+        cursor: pointer;
+        -webkit-app-region: no-drag;
+      }
+      .modal-dialog .close-btn:hover {
+        background: var(--bg-hover);
+        color: var(--text);
+      }
+      /* Main Area */
+      .main-area {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        min-width: 0;
+        min-height: 0;
+      }
 
-    /* Main Area */
-    .main-area {
-      flex: 1;
-      display: flex;
-      flex-direction: column;
-      min-width: 0;
-    }
+      .main-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        height: 56px;
+        padding: 0 20px 0 24px;
+        flex-shrink: 0;
+      }
 
-    .main-header {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      height: 56px;
-      padding: 0 8px 0 24px;
-      flex-shrink: 0;
-      -webkit-app-region: drag;
-    }
+      .main-header h2 {
+        font-size: 15px;
+        font-weight: 600;
+        margin: 0;
+        color: var(--text);
+      }
 
-    .main-header h2 {
-      font-size: 15px;
-      font-weight: 600;
-      margin: 0;
-      color: var(--text);
-    }
+      /* Return to the document without adding another window title bar. */
+      .sidebar-footer {
+        padding: 8px;
+        border: 0;
+        flex-shrink: 0;
+      }
+      .back-btn {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        width: 100%;
+        min-height: 34px;
+        padding: 8px;
+        border-radius: var(--radius-sm);
+        font-size: 14px;
+        font-weight: 500;
+        color: var(--text-secondary);
+        background: transparent;
+        border: none;
+        cursor: pointer;
+        text-align: left;
+      }
+      .back-btn:hover {
+        background: var(--bg-hover);
+        color: var(--text);
+      }
 
-    /* Window controls mirror the top bar: no new visual language. */
-    .win-controls {
-      display: flex;
-      align-items: stretch;
-      align-self: stretch;
-      -webkit-app-region: no-drag;
-    }
-    .win-btn {
-      width: 46px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      background: transparent;
-      border: none;
-      color: var(--text-secondary);
-      cursor: pointer;
-    }
-    .win-btn:hover {
-      background: var(--bg-hover);
-      color: var(--text);
-    }
-    .win-btn.close:hover {
-      background: #e81123;
-      color: #fff;
-    }
+      .content-panel {
+        flex: 1;
+        padding: clamp(16px, 3vw, 32px);
+        overflow-y: auto;
+        min-height: 0;
+        scrollbar-gutter: stable;
+        container-type: inline-size;
+        container-name: settings;
+      }
 
-    /* Back lives in the sidebar footer, beside the window chrome of the app. */
-    .sidebar-footer {
-      padding: 12px;
-      border-top: 1px solid var(--border-subtle);
-    }
-    .back-btn {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      width: 100%;
-      padding: 8px 12px;
-      border-radius: 6px;
-      font-size: 13px;
-      font-weight: 500;
-      color: var(--text-secondary);
-      background: transparent;
-      border: none;
-      cursor: pointer;
-      text-align: left;
-    }
-    .back-btn:hover {
-      background: var(--bg-hover);
-      color: var(--text);
-    }
+      /* Card sections */
+      .section {
+        background: var(--bg-card);
+        border: none;
+        border-radius: var(--radius-md);
+        padding: 16px;
+        margin-bottom: 24px;
+      }
+      .section-title {
+        font-size: 15px;
+        font-weight: 600;
+        color: var(--text);
+        margin: 0 0 12px 4px;
+      }
 
-    .content-panel {
-      flex: 1;
-      padding: 8px 24px 24px 24px;
-      overflow-y: auto;
-    }
+      /* Theme Grid */
+      .theme-grid {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 16px;
+      }
 
-    /* Card sections */
-    .section {
-      background: var(--bg-card);
-      border: 1px solid var(--border-subtle);
-      border-radius: 12px;
-      padding: 4px 20px;
-      margin-bottom: 24px;
-    }
-    .section-title {
-      font-size: 15px;
-      font-weight: 600;
-      color: var(--text);
-      margin: 0 0 12px 4px;
-    }
+      .theme-card {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 12px;
+        cursor: pointer;
+      }
 
-    .beta-badge {
-      display: inline-block;
-      font-size: 10px;
-      font-weight: 700;
-      letter-spacing: 0.04em;
-      text-transform: uppercase;
-      color: var(--accent-text);
-      background: var(--accent);
-      border-radius: 99px;
-      padding: 2px 8px;
-      margin-left: 8px;
-      vertical-align: 2px;
-    }
+      .theme-box-wrapper {
+        padding: 4px;
+        border-radius: 10px;
+        border: 2px solid transparent;
+        transition: all 0.2s ease;
+      }
 
-    /* Theme Grid */
-    .theme-grid {
-      display: grid;
-      grid-template-columns: repeat(4, 1fr);
-      gap: 16px;
-    }
+      .theme-card.active .theme-box-wrapper {
+        border-color: var(--border-focus);
+      }
 
-    .theme-card {
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      gap: 12px;
-      cursor: pointer;
-    }
+      .theme-box {
+        width: 72px;
+        height: 64px;
+        border-radius: 6px;
+        background: var(--bg-gutter);
+        display: flex;
+        overflow: hidden;
+      }
 
-    .theme-box-wrapper {
-      padding: 4px;
-      border-radius: 10px;
-      border: 2px solid transparent;
-      transition: all 0.2s ease;
-    }
+      .theme-box-left {
+        flex: 1;
+      }
+      .theme-box-right {
+        flex: 1;
+      }
 
-    .theme-card.active .theme-box-wrapper {
-      border-color: var(--border-focus);
-    }
+      .theme-name {
+        font-size: 13px;
+        font-weight: 500;
+        color: var(--text-secondary);
+      }
+      .theme-card.active .theme-name {
+        color: var(--text);
+      }
 
-    .theme-box {
-      width: 72px;
-      height: 64px;
-      border-radius: 6px;
-      background: var(--bg-gutter);
-      display: flex;
-      overflow: hidden;
-    }
+      /* Accent Colors */
+      .color-row {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        flex-wrap: wrap;
+      }
 
-    .theme-box-left {
-      flex: 1;
-    }
-    .theme-box-right {
-      flex: 1;
-    }
+      .color-circle-wrapper {
+        padding: 3px;
+        border-radius: 50%;
+        border: 2px solid transparent;
+        cursor: pointer;
+        transition: all 0.2s ease;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+      .color-circle-wrapper.active {
+        border-color: var(--border-focus);
+      }
 
-    .theme-name {
-      font-size: 13px;
-      font-weight: 500;
-      color: var(--text-secondary);
-    }
-    .theme-card.active .theme-name {
-      color: var(--text);
-    }
+      .color-circle {
+        width: 24px;
+        height: 24px;
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
 
-    /* Accent Colors */
-    .color-row {
-      display: flex;
-      align-items: center;
-      gap: 12px;
-    }
+      .color-circle svg {
+        width: 14px;
+        height: 14px;
+        color: var(--bg-elevated);
+      }
 
-    .color-circle-wrapper {
-      padding: 3px;
-      border-radius: 50%;
-      border: 2px solid transparent;
-      cursor: pointer;
-      transition: all 0.2s ease;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-    }
-    .color-circle-wrapper.active {
-      border-color: var(--border-focus);
-    }
+      /* Font Grid */
+      .font-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr));
+        gap: 12px;
+      }
 
-    .color-circle {
-      width: 24px;
-      height: 24px;
-      border-radius: 50%;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-    }
+      .font-card {
+        background: transparent;
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 16px;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        transition: all 0.2s ease;
+        gap: 12px;
+        min-width: 0;
+      }
 
-    .color-circle svg {
-      width: 14px;
-      height: 14px;
-      color: var(--bg-elevated);
-    }
+      .font-card:hover {
+        border-color: var(--text-muted);
+      }
 
-    /* Font Grid */
-    .font-grid {
-      display: grid;
-      grid-template-columns: repeat(2, 1fr);
-      gap: 12px;
-    }
+      .font-card.active {
+        border-color: var(--border-focus);
+      }
 
-    .font-card {
-      background: transparent;
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      padding: 16px;
-      cursor: pointer;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      transition: all 0.2s ease;
-    }
+      .font-info {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        min-width: 0;
+      }
 
-    .font-card:hover {
-      border-color: var(--text-muted);
-    }
+      .font-name {
+        font-size: 15px;
+        font-weight: 600;
+        color: var(--text-secondary);
+      }
+      .font-card.active .font-name {
+        color: var(--text);
+      }
 
-    .font-card.active {
-      border-color: var(--border-focus);
-    }
+      .font-type {
+        font-size: 12px;
+        color: var(--text-muted);
+      }
 
-    .font-info {
-      display: flex;
-      flex-direction: column;
-      gap: 4px;
-    }
+      .font-card svg {
+        color: var(--text);
+        width: 20px;
+        height: 20px;
+      }
 
-    .font-name {
-      font-size: 15px;
-      font-weight: 600;
-      color: var(--text-secondary);
-    }
-    .font-card.active .font-name {
-      color: var(--text);
-    }
+      /* Card rows */
+      .setting-row {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 24px;
+        padding: 14px 0;
+        border-bottom: none;
+        flex-wrap: wrap;
+      }
+      .setting-row:last-child {
+        padding-bottom: 0;
+      }
+      .setting-row:first-child {
+        padding-top: 0;
+      }
+      .setting-row > :first-child {
+        flex: 1 1 220px;
+        min-width: 0;
+        overflow-wrap: anywhere;
+      }
+      .setting-row > :last-child {
+        max-width: 100%;
+      }
+      .control-stack {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        flex: 0 1 280px;
+        min-width: 0;
+      }
+      .control-group {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 8px;
+        min-width: 0;
+      }
+      .control-group wa-select,
+      .control-group .text-input {
+        flex: 1 1 160px;
+        min-width: 0;
+      }
+      .setting-label {
+        font-size: 14px;
+        font-weight: 500;
+        color: var(--text);
+      }
+      .setting-desc {
+        font-size: 13px;
+        color: var(--text-secondary);
+        margin-top: 4px;
+        line-height: 1.5;
+      }
 
-    .font-type {
-      font-size: 12px;
-      color: var(--text-muted);
-    }
+      .setting-row.search-hit,
+      .section-title.search-hit {
+        background: var(--bg-hover);
+        box-shadow: inset 3px 0 0 var(--accent);
+      }
+      .setting-row.search-hit-active,
+      .section-title.search-hit-active {
+        background: var(--bg-active);
+      }
 
-    .font-card svg {
-      color: var(--text);
-      width: 20px;
-      height: 20px;
-    }
+      .control-btn {
+        min-height: 34px;
+        padding: 6px 12px;
+        background: var(--bg-hover);
+        border: 1px solid var(--border);
+        color: var(--text);
+        border-radius: 6px;
+        cursor: pointer;
+        font-size: 13px;
+        flex-shrink: 0;
+      }
+      .control-btn:hover {
+        background: var(--bg-active);
+      }
 
-    /* Card rows */
-    .setting-row {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      gap: 24px;
-      padding: 14px 0;
-      border-bottom: 1px solid var(--border-subtle);
-    }
-    .setting-row:last-child {
-      border-bottom: none;
-    }
-    .setting-label {
-      font-size: 14px;
-      font-weight: 500;
-      color: var(--text);
-    }
-    .setting-desc {
-      font-size: 13px;
-      color: var(--text-secondary);
-      margin-top: 4px;
-      line-height: 1.5;
-    }
+      .text-input {
+        width: 220px;
+        min-height: 34px;
+        max-width: 100%;
+        min-width: 0;
+        background: var(--bg-hover);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        padding: 6px 10px;
+        color: var(--text);
+        font-size: 13px;
+        outline: none;
+        flex: 0 1 220px;
+      }
+      .text-input:focus {
+        border-color: var(--border-focus);
+      }
+      .text-input[type='number'] {
+        flex: 0 0 88px;
+        width: 88px;
+      }
+      textarea.text-input.prompt-input {
+        width: 100%;
+        min-height: 160px;
+        resize: vertical;
+        line-height: 1.5;
+        font-family: inherit;
+        box-sizing: border-box;
+        flex-shrink: 1;
+      }
 
-    .setting-row.search-hit,
-    .section-title.search-hit {
-      background: var(--bg-hover);
-      box-shadow: inset 3px 0 0 var(--accent);
-    }
-    .setting-row.search-hit-active,
-    .section-title.search-hit-active {
-      background: var(--bg-active);
-    }
+      .danger-btn {
+        background: transparent;
+        border: 1px solid var(--danger);
+        color: var(--danger);
+      }
+      .danger-btn:hover {
+        background: var(--danger-bg);
+      }
 
-    .control-btn {
-      padding: 6px 12px;
-      background: var(--bg-hover);
-      border: 1px solid var(--border);
-      color: var(--text);
-      border-radius: 6px;
-      cursor: pointer;
-      font-size: 13px;
-      flex-shrink: 0;
-    }
-    .control-btn:hover {
-      background: var(--bg-active);
-    }
+      /* Toggle Switch */
+      .toggle-switch {
+        position: relative;
+        width: 36px;
+        height: 20px;
+        border-radius: 99px;
+        background: var(--bg-hover);
+        cursor: pointer;
+        border: 1px solid var(--border);
+        padding: 0;
+        flex-shrink: 0;
+        transition:
+          background 0.2s,
+          border-color 0.2s;
+      }
+      .toggle-switch[aria-checked='true'] {
+        background: var(--accent);
+        border-color: var(--accent);
+      }
+      .toggle-switch::after {
+        content: '';
+        position: absolute;
+        top: 1px;
+        left: 1px;
+        width: 16px;
+        height: 16px;
+        border-radius: 50%;
+        background: var(--text-muted);
+        transition:
+          transform 0.2s,
+          background 0.2s;
+      }
+      .toggle-switch[aria-checked='true']::after {
+        transform: translateX(16px);
+        background: var(--accent-text);
+      }
+      ${scrollbarStyles}
 
-    .select-input {
-      background: transparent;
-      border: none;
-      color: var(--text);
-      font-size: 13px;
-      font-weight: 500;
-      cursor: pointer;
-      outline: none;
-      text-align: right;
-      flex-shrink: 0;
-    }
-    .select-input option {
-      background: var(--bg-elevated);
-      color: var(--text);
-    }
-
-    .text-input {
-      width: 200px;
-      background: var(--bg-hover);
-      border: 1px solid var(--border);
-      border-radius: 6px;
-      padding: 6px 10px;
-      color: var(--text);
-      font-size: 13px;
-      outline: none;
-      flex-shrink: 0;
-    }
-    .text-input:focus {
-      border-color: var(--border-focus);
-    }
-    textarea.text-input.prompt-input {
-      width: 100%;
-      min-height: 160px;
-      resize: vertical;
-      line-height: 1.5;
-      font-family: inherit;
-      box-sizing: border-box;
-      flex-shrink: 1;
-    }
-
-    .danger-btn {
-      background: transparent;
-      border: 1px solid var(--danger);
-      color: var(--danger);
-    }
-    .danger-btn:hover {
-      background: var(--danger-bg);
-    }
-
-    /* Toggle Switch */
-    .toggle-switch {
-      position: relative;
-      width: 36px;
-      height: 20px;
-      border-radius: 99px;
-      background: var(--bg-hover);
-      cursor: pointer;
-      border: 1px solid var(--border);
-      padding: 0;
-      outline: none;
-      transition:
-        background 0.2s,
-        border-color 0.2s;
-    }
-    .toggle-switch[aria-checked='true'] {
-      background: var(--accent);
-      border-color: var(--accent);
-    }
-    .toggle-switch::after {
-      content: '';
-      position: absolute;
-      top: 1px;
-      left: 1px;
-      width: 16px;
-      height: 16px;
-      border-radius: 50%;
-      background: var(--text-muted);
-      transition:
-        transform 0.2s,
-        background 0.2s;
-    }
-    .toggle-switch[aria-checked='true']::after {
-      transform: translateX(16px);
-      background: var(--accent-text);
-    }
-    ${scrollbarStyles}
-  `
+      :host(.embedded) {
+        position: absolute;
+        inset: 0;
+        z-index: 6;
+        background: var(--bg);
+      }
+      :host(.embedded) .modal-dialog {
+        width: 100%;
+        height: 100%;
+        border-radius: 0;
+        box-shadow: none;
+      }
+      :host(.embedded) .sidebar {
+        width: var(--shell-sidebar-width);
+        background: var(--frame-surface);
+      }
+      :host(.embedded) .main-area {
+        padding-top: var(--shell-header-height);
+      }
+      :host(.embedded) .main-header {
+        display: none;
+      }
+      :host(.embedded) .content-panel {
+        padding-bottom: 48px;
+      }
+      .content-inner {
+        width: 100%;
+        max-width: 768px;
+        margin-inline: auto;
+      }
+      .section-title {
+        font-size: 13px;
+        margin-bottom: 10px;
+      }
+      .setting-label {
+        font-size: 13px;
+      }
+      .setting-desc {
+        font-size: 13px;
+        color: var(--text-secondary);
+      }
+      @container settings (width < 560px) {
+        .setting-row {
+          flex-wrap: wrap;
+          gap: 12px;
+        }
+        .text-input {
+          max-width: 100%;
+        }
+      }
+      @container settings (width < 440px) {
+        .theme-grid {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+      }
+    `
+  ]
 
   @state() private tab: SettingsTab = 'general'
   @state() private searchQuery = ''
 
   /** Jump to a tab from outside, e.g. the AI panel's "not configured" state. */
+  @property({ type: Boolean }) embedded = false
   @property({ type: String }) initialTab: SettingsTab = 'general'
 
   /**
@@ -678,9 +762,8 @@ export class SettingsModal extends LitElement {
   @state() private pdfMargin = 24
   @state() private appVersion = ''
   @state() private autoCheckForUpdates = true
-  @state() private panelOrientation: 'horizontal' | 'vertical' = 'horizontal'
+  @state() private panelOrientation: 'horizontal' | 'vertical' = 'vertical'
   @state() private motion: MotionPreference = 'system'
-  @state() private newSettingsDesign = true
   @state() private updateStatus:
     'idle' | 'checking' | 'available' | 'downloading' | 'downloaded' | 'up-to-date' | 'error' =
     'idle'
@@ -718,10 +801,18 @@ export class SettingsModal extends LitElement {
   @state() private webSearchEnabled = false
 
   private settingsStore = SettingsStore.getInstance()
+  private settingsSubscriptions: (() => void)[] = []
 
   connectedCallback(): void {
     super.connectedCallback()
     this.loadCurrentSettings()
+    this.settingsSubscriptions = [
+      this.settingsStore.subscribeSaveStatus(() => this.requestUpdate()),
+      this.settingsStore.subscribe('appearance', () => {
+        this.loadCurrentSettings()
+        this.requestUpdate()
+      })
+    ]
     this.previouslyFocused = deepActiveElement() as HTMLElement | null
     window.addEventListener('keydown', this.handleKeyDown, true)
     void api()
@@ -773,6 +864,8 @@ export class SettingsModal extends LitElement {
   }
 
   disconnectedCallback(): void {
+    this.settingsSubscriptions.forEach((unsubscribe) => unsubscribe())
+    this.settingsSubscriptions = []
     window.removeEventListener('keydown', this.handleKeyDown, true)
     this.updaterUnsubs.forEach((fn) => fn())
     this.updaterUnsubs = []
@@ -799,9 +892,8 @@ export class SettingsModal extends LitElement {
     this.pdfPageSize = s.get('export.pdfPageSize', 'A4')
     this.pdfTheme = s.get('export.pdfTheme', 'light')
     this.pdfMargin = s.get('export.pdfMargin', 24)
-    this.panelOrientation = s.get('appearance.panelOrientation', 'horizontal') as
+    this.panelOrientation = s.get('appearance.panelOrientation', 'vertical') as
       'horizontal' | 'vertical'
-    this.newSettingsDesign = s.get<boolean>('appearance.newSettingsDesign', true)
     this.motion = s.get('appearance.motion', 'system') as MotionPreference
     this.aiProvider = s.get('ai.provider', 'OpenAI')
     this.aiModel = s.get('ai.model', 'gpt-4o')
@@ -834,6 +926,19 @@ export class SettingsModal extends LitElement {
       return
     }
     if (e.key === 'Escape') {
+      const select = e
+        .composedPath()
+        .find(
+          (node) =>
+            node instanceof HTMLElement && node.localName === 'wa-select' && (node as WaSelect).open
+        ) as WaSelect | undefined
+      if (select) {
+        e.stopImmediatePropagation()
+        void select.hide()
+        return
+      }
+      if (!this.embedded && nativeModalAvailable()) return
+      if (e.composedPath().some((node) => node instanceof HTMLDialogElement && node.open)) return
       // Capture phase via the window listener above is shared with
       // ConflictDialog; stopImmediatePropagation keeps one Escape from
       // resolving both.
@@ -841,7 +946,7 @@ export class SettingsModal extends LitElement {
       this.close()
       return
     }
-    if (e.key === 'Tab') this.trapFocus(e)
+    if (e.key === 'Tab') if (!nativeModalAvailable()) this.trapFocus(e)
   }
 
   /** Keep Tab inside the dialog; the document behind it is not inert. */
@@ -878,24 +983,27 @@ export class SettingsModal extends LitElement {
    * lives under Files, so section keywords alone kept sending it to Editor,
    * where nothing matched.
    */
-  private handleSearchInput = (e: InputEvent): void => {
-    this.searchQuery = (e.target as HTMLInputElement).value
+  private handleSearchQuery = (e: CustomEvent<{ query: string }>): void => {
+    this.applySearchQuery(e.detail.query)
+  }
+
+  private applySearchQuery(query: string): void {
+    this.searchQuery = query
     this.hitIndex = 0
     const target = searchTargetTab(this.searchQuery)
     if (target && target !== this.tab) this.tab = target
   }
 
   /** Enter / ArrowDown step through the matches in the open panel. */
-  private handleSearchKey = (e: KeyboardEvent): void => {
-    if (e.key !== 'Enter' && e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return
-    e.preventDefault()
+  private navigateSearch(key: string): void {
+    if (key !== 'Enter' && key !== 'ArrowDown' && key !== 'ArrowUp') return
     if (this.searchTokens().length === 0) return
     if (this.hitRows.length === 0) {
       const target = searchTargetTab(this.searchQuery)
       if (target) this.tab = target
       return
     }
-    const step = e.key === 'ArrowUp' ? -1 : 1
+    const step = key === 'ArrowUp' ? -1 : 1
     const next = (this.hitIndex + step + this.hitRows.length) % this.hitRows.length
     this.hitIndex = next
     this.paintHits()
@@ -904,6 +1012,8 @@ export class SettingsModal extends LitElement {
   /** Tabs worth showing for the current query: section words or row matches. */
   private matchingTabs(): SettingsTab[] {
     if (this.searchTokens().length === 0) return searchSettingsTabs('')
+    const category = exactSettingsTab(this.searchQuery)
+    if (category) return [category]
     const sections = searchSettingsTabs(this.searchQuery)
     const rows = searchSettingsRows(this.searchQuery).map((r) => r.tab)
     const all = [...new Set([...rows, ...sections])]
@@ -918,6 +1028,7 @@ export class SettingsModal extends LitElement {
 
   /** What the search box found, counted the same way the nav filters it. */
   private matchStatus(): string {
+    if (exactSettingsTab(this.searchQuery)) return '1 matching section'
     const rows = searchSettingsRows(this.searchQuery).length
     if (rows > 0) return rows === 1 ? '1 matching setting' : `${rows} matching settings`
     const sections = searchSettingsTabs(this.searchQuery).length
@@ -959,6 +1070,14 @@ export class SettingsModal extends LitElement {
    */
   protected updated(changed: Map<string, unknown>): void {
     super.updated(changed)
+    if (changed.has('tab'))
+      this.dispatchEvent(
+        new CustomEvent('settings-section-change', {
+          detail: { tab: this.tab },
+          bubbles: true,
+          composed: true
+        })
+      )
     this.hitRows = this.hitsInPanel()
     if (this.hitIndex >= this.hitRows.length) this.hitIndex = 0
     this.paintHits()
@@ -999,7 +1118,12 @@ export class SettingsModal extends LitElement {
   }
 
   firstUpdated(): void {
-    this.renderRoot?.querySelector<HTMLElement>('input, button')?.focus()
+    const search = this.renderRoot.querySelector('writemd-search-bar')
+    if (search) {
+      void search.updateComplete.then(() => {
+        if (this.isConnected) search.shadowRoot?.querySelector<HTMLInputElement>('input')?.focus()
+      })
+    }
   }
 
   private shortcutOverrides(): Record<string, string> {
@@ -1209,7 +1333,7 @@ export class SettingsModal extends LitElement {
   }
 
   private handleProviderChange(e: Event): void {
-    const provider = (e.target as HTMLSelectElement).value
+    const provider = String((e.currentTarget as WaSelect).value ?? '')
     this.updateSetting('ai.provider', provider)
 
     // Show known models immediately so the dropdown is not empty while the
@@ -1289,8 +1413,8 @@ export class SettingsModal extends LitElement {
   }
 
   render(): unknown {
-    this.classList.toggle('classic', !this.newSettingsDesign)
-    return html`
+    this.classList.toggle('embedded', this.embedded)
+    const content = html`
       <div
         class="modal-dialog"
         role="dialog"
@@ -1301,161 +1425,68 @@ export class SettingsModal extends LitElement {
         <!-- Sidebar Navigation -->
         <div class="sidebar">
           <div class="sidebar-search">
-            <input
-              type="text"
+            <writemd-search-bar
+              filter
+              placeholder="Search settings"
               aria-label="Search settings"
-              placeholder="Search settings..."
-              @keydown=${this.handleSearchKey}
-              @input=${this.handleSearchInput}
-            />
-            ${this.searchQuery.trim() ? html`<div class="search-status">${this.matchStatus()}</div>` : ''}
+              .value=${this.searchQuery}
+              @search-query=${this.handleSearchQuery}
+              @search-navigate=${(e: CustomEvent<{ key: string }>) =>
+                this.navigateSearch(e.detail.key)}
+            ></writemd-search-bar>
+            ${
+              this.searchQuery.trim()
+                ? html`<div class="search-status" role="status">${this.matchStatus()}</div>`
+                : ''
+            }
+            ${
+              this.settingsStore.saveStatus === 'error'
+                ? html`<div class="search-status" role="alert">
+                    Settings could not be saved. ${this.settingsStore.saveError}
+                    <button @click=${() => this.settingsStore.retrySave()}>Retry</button>
+                  </div>`
+                : ''
+            }
           </div>
-          <div class="sidebar-nav">
-            <div class="nav-group" ?hidden=${!this.groupVisible(['general', 'editor', 'files'])}>
-              Workspace
-            </div>
-            <button
-              class="nav-btn ${this.tab === 'general' ? 'active' : ''}"
-              ?hidden=${!this.visibleTabs.includes('general')}
-              @click=${() => (this.tab = 'general')}
+          <div class="sidebar-nav" role="navigation" aria-label="Settings categories">
+            ${SETTINGS_NAV_GROUPS.map(
+              (group) => html`
+                <div class="nav-section" ?hidden=${!this.groupVisible(group.tabs)}>
+                  <div class="nav-group">${group.label}</div>
+                  ${group.tabs.map(
+                    (tab) => html`
+                      <button
+                        class="nav-btn ${this.tab === tab ? 'active' : ''}"
+                        ?hidden=${!this.visibleTabs.includes(tab)}
+                        aria-current=${this.tab === tab ? 'page' : 'false'}
+                        @click=${() => (this.tab = tab)}
+                      >
+                        ${chromeIcon(NAV_ICONS[tab])} ${TAB_LABELS[tab]}
+                      </button>
+                    `
+                  )}
+                </div>
+              `
+            )}
+          </div>
+          <div class="sidebar-footer">
+            <button class="back-btn" @click=${this.close} aria-label="Back to editor">
+              ${chromeIcon('arrow-left')} Back to editor
+            </button>
+          </div>
+        </div>
+
+        <!-- Main Area -->
+        <div class="main-area">
+          <div class="main-header">
+            <h2>${TAB_LABELS[this.tab]}</h2>
+            <writemd-icon-button class="close-btn" title="Close settings" @click=${this.close}
+              >${icon('x')}</writemd-icon-button
             >
-                ${icon('sliders')} General
-              </button>
-              <button
-                class="nav-btn ${this.tab === 'editor' ? 'active' : ''}"
-                ?hidden=${!this.visibleTabs.includes('editor')}
-                @click=${() => (this.tab = 'editor')}
-              >
-                ${icon('pencil')} Editor
-              </button>
-              <button
-                class="nav-btn ${this.tab === 'files' ? 'active' : ''}"
-                ?hidden=${!this.visibleTabs.includes('files')}
-                @click=${() => (this.tab = 'files')}
-              >
-                ${icon('folder-open')} Files & Vault
-              </button>
-              <div class="nav-group" ?hidden=${!this.groupVisible(['appearance', 'shortcuts', 'advanced'])}>
-              Application
-            </div>
-              <button
-                class="nav-btn ${this.tab === 'appearance' ? 'active' : ''}"
-                ?hidden=${!this.visibleTabs.includes('appearance')}
-                @click=${() => (this.tab = 'appearance')}
-              >
-                ${icon('palette')} Appearance
-              </button>
-              <button
-                class="nav-btn ${this.tab === 'shortcuts' ? 'active' : ''}"
-                ?hidden=${!this.visibleTabs.includes('shortcuts')}
-                @click=${() => (this.tab = 'shortcuts')}
-              >
-                ${icon('keyboard')} Shortcuts
-              </button>
-              <button
-                class="nav-btn ${this.tab === 'advanced' ? 'active' : ''}"
-                ?hidden=${!this.visibleTabs.includes('advanced')}
-                @click=${() => (this.tab = 'advanced')}
-              >
-                ${icon('settings')} Advanced
-              </button>
-              <div class="nav-group" ?hidden=${!this.groupVisible(['ai', 'about'])}>Plugins</div>
-              <button
-                class="nav-btn ${this.tab === 'ai' ? 'active' : ''}"
-                ?hidden=${!this.visibleTabs.includes('ai')}
-                @click=${() => (this.tab = 'ai')}
-              >
-                ${icon('sparkle')} AI Assistant
-              </button>
-              <button
-                class="nav-btn ${this.tab === 'about' ? 'active' : ''}"
-                ?hidden=${!this.visibleTabs.includes('about')}
-                @click=${() => (this.tab = 'about')}
-              >
-                ${icon('info')} About
-              </button>
-            </div>
-            <div class="sidebar-footer">
-              <button class="back-btn" @click=${this.close} aria-label="Back to editor">
-                <svg
-                  viewBox="0 0 24 24"
-                  width="16"
-                  height="16"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="2"
-                >
-                  <line x1="19" y1="12" x2="5" y2="12" />
-                  <polyline points="12 19 5 12 12 5" />
-                </svg>
-                Back
-              </button>
-            </div>
           </div>
 
-          <!-- Main Area -->
-          <div class="main-area">
-            <div class="main-header">
-              <h2>${this.tab === 'files' ? 'Files & Vault' : TAB_LABELS[this.tab]}</h2>
-              <button class="close-btn" aria-label="Close settings" @click=${this.close}>
-                <svg
-                  viewBox="0 0 24 24"
-                  width="18"
-                  height="18"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="2"
-                >
-                  <line x1="18" y1="6" x2="6" y2="18" />
-                  <line x1="6" y1="6" x2="18" y2="18" />
-                </svg>
-              </button>
-              <div class="win-controls">
-                <button
-                  class="win-btn"
-                  aria-label="Minimize"
-                  title="Minimize"
-                  @click=${() => void api()?.window?.minimize?.()}
-                >
-                  <svg viewBox="0 0 10 10" width="10" height="10" fill="none">
-                    <path d="M0 5H10" stroke="currentColor" stroke-width="1" />
-                  </svg>
-                </button>
-                <button
-                  class="win-btn"
-                  aria-label="Maximize"
-                  title="Maximize"
-                  @click=${() => void api()?.window?.maximize?.()}
-                >
-                  <svg viewBox="0 0 10 10" width="10" height="10" fill="none">
-                    <rect
-                      x="0.5"
-                      y="0.5"
-                      width="9"
-                      height="9"
-                      stroke="currentColor"
-                      stroke-width="1"
-                    />
-                  </svg>
-                </button>
-                <button
-                  class="win-btn close"
-                  aria-label="Close window"
-                  title="Close"
-                  @click=${() => void api()?.window?.close?.()}
-                >
-                  <svg viewBox="0 0 10 10" width="10" height="10" fill="none">
-                    <path
-                      d="M0.5 0.5L9.5 9.5M9.5 0.5L0.5 9.5"
-                      stroke="currentColor"
-                      stroke-width="1"
-                    />
-                  </svg>
-                </button>
-              </div>
-            </div>
-
-            <div class="content-panel" data-tab=${this.tab}>
+          <div class="content-panel" data-tab=${this.tab}>
+            <div class="content-inner">
               ${this.tab === 'general' ? this.renderGeneral() : ''}
               ${this.tab === 'appearance' ? this.renderAppearance() : ''}
               ${this.tab === 'editor' ? this.renderEditor() : ''}
@@ -1469,11 +1500,16 @@ export class SettingsModal extends LitElement {
         </div>
       </div>
     `
+    return this.embedded
+      ? content
+      : html`<writemd-modal label="Settings" @modal-dismiss=${this.close}
+          >${content}</writemd-modal
+        >`
   }
 
   private renderGeneral(): unknown {
     return html`
-      <div class="section-title">New files</div>
+      <div class="section-title">New notes</div>
       <div class="section">
         <div class="setting-row">
           <div>
@@ -1503,7 +1539,7 @@ export class SettingsModal extends LitElement {
                 class="theme-card ${this.theme === t.id ? 'active' : ''}"
                 role="radio"
                 tabindex="0"
-                aria-checked=${this.theme === t.id}"
+                aria-checked=${this.theme === t.id}
                 aria-label=${t.name + ' theme'}
                 @keydown=${this.handleCardKey}
                 @click=${() => this.updateSetting('appearance.theme', t.id)}
@@ -1531,11 +1567,11 @@ export class SettingsModal extends LitElement {
                 role="radio"
                 tabindex="0"
                 aria-checked=${this.accentColor === c}
-                aria-label=${c + ' accent'}
+                aria-label=${i === 0 ? 'Monochrome accent' : c + ' accent'}
                 @keydown=${this.handleCardKey}
                 @click=${() => this.updateSetting('appearance.accentColor', c)}
               >
-                <div class="color-circle" style="background: ${c}">
+                <div class="color-circle" style="background: var(--accent-choice-${i})">
                   ${
                     i === 0
                       ? html`
@@ -1558,62 +1594,41 @@ export class SettingsModal extends LitElement {
         </div>
       </div>
 
-      <div class="section-title">Panel Layout</div>
+      <writemd-background-controls></writemd-background-controls>
+      <div class="section-title">Layout</div>
       <div class="section">
         <div class="setting-row">
           <div>
-            <div class="setting-label">Vertical tabs</div>
-            <div class="setting-desc">Show tabs in a side rail instead of the top bar</div>
-          </div>
-          <button
-            class="toggle-switch"
-            role="switch"
-            aria-checked="${this.panelOrientation === 'vertical'}"
-            @click=${() => this.updateSetting('appearance.panelOrientation', this.panelOrientation === 'vertical' ? 'horizontal' : 'vertical')}
-          ></button>
-        </div>
-      </div>
-
-      <div class="section-title">Motion</div>
-      <div class="section">
-        <div class="setting-row">
-          <div>
-            <div class="setting-label">Animation</div>
+            <div class="setting-label">Panel orientation</div>
             <div class="setting-desc">
-              Match system follows the Windows animation setting. Always and never override it.
+              Vertical uses the document sidebar. Horizontal puts documents in the title bar.
             </div>
           </div>
-          <select
-            class="select-input"
-            aria-label="Animation"
-            .value=${this.motion}
-            @change=${(e: Event) =>
-              this.updateSetting('appearance.motion', (e.target as HTMLSelectElement).value)}
+          <wa-select
+            size="small"
+            label="Panel orientation"
+            aria-label="Panel orientation"
+            .value=${this.panelOrientation}
+            @change=${(event: Event) => this.updateSetting('appearance.panelOrientation', String((event.currentTarget as WaSelect).value ?? ''))}
           >
-            ${MOTION_PREFERENCES.map(
-              (p) =>
-                html`<option value=${p} ?selected=${p === this.motion}>${MOTION_LABELS[p]}</option>`
-            )}
-          </select>
+            <wa-option value="vertical"> Vertical </wa-option>
+            <wa-option value="horizontal"> Horizontal </wa-option>
+          </wa-select>
         </div>
-      </div>
-
-      <div class="section-title">Settings Window</div>
-      <div class="section">
         <div class="setting-row">
           <div>
-            <div class="setting-label">New Design <span class="beta-badge">Beta</span></div>
-            <div class="setting-desc">
-              Full-screen settings shell. Off restores the classic popup dialog.
-            </div>
+            <div class="setting-label">Motion</div>
+            <div class="setting-desc">Follow system preferences or choose animation behavior.</div>
           </div>
-          <button
-            class="toggle-switch"
-            role="switch"
-            aria-checked="${this.newSettingsDesign}"
-            aria-label="New settings design"
-            @click=${() => this.updateSetting('appearance.newSettingsDesign', !this.newSettingsDesign)}
-          ></button>
+          <wa-select
+            size="small"
+            label="Motion"
+            aria-label="Motion"
+            .value=${this.motion}
+            @change=${(event: Event) => this.updateSetting('appearance.motion', String((event.currentTarget as WaSelect).value ?? ''))}
+          >
+            ${MOTION_PREFERENCES.map((preference) => html`<wa-option value=${preference}>${MOTION_LABELS[preference]}</wa-option>`)}
+          </wa-select>
         </div>
       </div>
     `
@@ -1685,6 +1700,7 @@ export class SettingsModal extends LitElement {
             class="toggle-switch"
             role="switch"
             aria-checked="${this.wordWrap}"
+            aria-label="Word wrap"
             @click=${() => this.updateSetting('editor.wordWrap', !this.wordWrap)}
           ></button>
         </div>
@@ -1698,6 +1714,7 @@ export class SettingsModal extends LitElement {
             class="toggle-switch"
             role="switch"
             aria-checked="${this.lineNumbers}"
+            aria-label="Line numbers"
             @click=${() => this.updateSetting('editor.showLineNumbers', !this.lineNumbers)}
           ></button>
         </div>
@@ -1712,9 +1729,7 @@ export class SettingsModal extends LitElement {
         <div class="setting-row">
           <div>
             <div class="setting-label">Vault Location</div>
-            <div class="setting-desc" style="max-width: 400px; word-break: break-all;">
-              ${this.vaultPath || 'Default Documents/WriteMd folder'}
-            </div>
+            <div class="setting-desc">${this.vaultPath || 'Default Documents/WriteMd folder'}</div>
           </div>
           <button class="control-btn" @click=${this.handleVaultSelect}>Change</button>
         </div>
@@ -1728,6 +1743,7 @@ export class SettingsModal extends LitElement {
             class="toggle-switch"
             role="switch"
             aria-checked="${this.autoSave}"
+            aria-label="Auto-save"
             @click=${() => this.updateSetting('editor.autoSave', !this.autoSave)}
           ></button>
         </div>
@@ -1798,6 +1814,7 @@ export class SettingsModal extends LitElement {
             class="toggle-switch"
             role="switch"
             aria-checked="${this.enableMermaid}"
+            aria-label="Enable Mermaid"
             @click=${() => this.updateSetting('advanced.enableMermaid', !this.enableMermaid)}
           ></button>
         </div>
@@ -1810,17 +1827,20 @@ export class SettingsModal extends LitElement {
             <div class="setting-label">PDF page size</div>
             <div class="setting-desc">Paper size for PDF export</div>
           </div>
-          <select
+          <wa-select
+            size="small"
             class="select-input"
+            label="PDF page size"
+            aria-label="PDF page size"
             .value=${this.pdfPageSize}
-            @change=${(e: Event) => this.updateSetting('export.pdfPageSize', (e.target as HTMLSelectElement).value)}
+            @change=${(e: Event) => this.updateSetting('export.pdfPageSize', String((e.currentTarget as WaSelect).value ?? ''))}
           >
-            <option value="A4">A4</option>
-            <option value="A5">A5</option>
-            <option value="Letter">Letter</option>
-            <option value="Legal">Legal</option>
-            <option value="Tabloid">Tabloid</option>
-          </select>
+            <wa-option value="A4">A4</wa-option>
+            <wa-option value="A5">A5</wa-option>
+            <wa-option value="Letter">Letter</wa-option>
+            <wa-option value="Legal">Legal</wa-option>
+            <wa-option value="Tabloid">Tabloid</wa-option>
+          </wa-select>
         </div>
 
         <div class="setting-row">
@@ -1828,14 +1848,17 @@ export class SettingsModal extends LitElement {
             <div class="setting-label">PDF theme</div>
             <div class="setting-desc">Color scheme for exported documents</div>
           </div>
-          <select
+          <wa-select
+            size="small"
             class="select-input"
+            label="PDF theme"
+            aria-label="PDF theme"
             .value=${this.pdfTheme}
-            @change=${(e: Event) => this.updateSetting('export.pdfTheme', (e.target as HTMLSelectElement).value)}
+            @change=${(e: Event) => this.updateSetting('export.pdfTheme', String((e.currentTarget as WaSelect).value ?? ''))}
           >
-            <option value="light">Light</option>
-            <option value="dark">Dark</option>
-          </select>
+            <wa-option value="light">Light</wa-option>
+            <wa-option value="dark">Dark</wa-option>
+          </wa-select>
         </div>
 
         <div class="setting-row">
@@ -1875,23 +1898,26 @@ export class SettingsModal extends LitElement {
             <div class="setting-label">Provider</div>
             <div class="setting-desc">Select your AI backend provider</div>
           </div>
-          <select
+          <wa-select
+            size="small"
             class="select-input"
+            label="Provider"
+            aria-label="Provider"
             .value=${this.aiProvider}
             @change=${this.handleProviderChange}
           >
-            <option value="OpenAI">OpenAI</option>
-            <option value="Anthropic">Anthropic</option>
-            <option value="GoogleGemini">Google Gemini</option>
-            <option value="Mistral">Mistral</option>
-            <option value="Groq">Groq</option>
-            <option value="OpenRouter">OpenRouter</option>
-            <option value="OpenCode">OpenCode (Console login)</option>
-            <option value="Nvidia">Nvidia</option>
-            <option value="DeepSeek">DeepSeek</option>
-            <option value="xAI">xAI (Grok)</option>
-            <option value="Ollama">Ollama (Local)</option>
-          </select>
+            <wa-option value="OpenAI">OpenAI</wa-option>
+            <wa-option value="Anthropic"> Anthropic </wa-option>
+            <wa-option value="GoogleGemini"> Google Gemini </wa-option>
+            <wa-option value="Mistral">Mistral</wa-option>
+            <wa-option value="Groq">Groq</wa-option>
+            <wa-option value="OpenRouter"> OpenRouter </wa-option>
+            <wa-option value="OpenCode"> OpenCode (Console login) </wa-option>
+            <wa-option value="Nvidia">Nvidia</wa-option>
+            <wa-option value="DeepSeek">DeepSeek</wa-option>
+            <wa-option value="xAI">xAI (Grok)</wa-option>
+            <wa-option value="Ollama">Ollama (Local)</wa-option>
+          </wa-select>
         </div>
 
         <div class="setting-row">
@@ -1921,8 +1947,8 @@ export class SettingsModal extends LitElement {
               }
             </div>
           </div>
-          <div style="display: flex; gap: 8px; flex-direction: column; align-items: flex-end;">
-            <div style="display: flex; gap: 8px;">
+          <div class="control-stack">
+            <div class="control-group">
               ${
                 this.aiProvider === 'OpenCode'
                   ? html`
@@ -1943,22 +1969,22 @@ export class SettingsModal extends LitElement {
                       </datalist>
                     `
                   : html`
-                      <select
+                      <wa-select
+                        size="small"
                         class="select-input"
+                        label="Model"
+                        aria-label="Model"
                         .value=${this.aiModel}
-                        @change=${(e: Event) => this.updateSetting('ai.model', (e.target as HTMLSelectElement).value)}
+                        @change=${(e: Event) => this.updateSetting('ai.model', String((e.currentTarget as WaSelect).value ?? ''))}
                       >
                         ${
                           this.availableModels.length > 0
                             ? this.availableModels.map(
-                                (m) =>
-                                  html`<option value=${m} ?selected=${this.aiModel === m}>
-                                    ${m}
-                                  </option>`
+                                (m) => html`<wa-option value=${m}> ${m} </wa-option>`
                               )
-                            : html`<option value=${this.aiModel}>${this.aiModel}</option>`
+                            : html`<wa-option value=${this.aiModel}>${this.aiModel}</wa-option>`
                         }
-                      </select>
+                      </wa-select>
                     `
               }
               <button
@@ -2015,7 +2041,7 @@ export class SettingsModal extends LitElement {
                       browser login. 3) Back here, Recheck, then /models in the CLI to pick a model.
                     </div>
                   </div>
-                  <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
+                  <div class="control-group">
                     <code
                       class="text-input"
                       style="padding: 8px 12px; font-size: 12px; user-select: all;"
@@ -2043,7 +2069,7 @@ export class SettingsModal extends LitElement {
                       ${this.opencodeManagedUp ? ' Managed server running.' : ''}
                     </div>
                   </div>
-                  <div style="display: flex; gap: 8px; align-items: center;">
+                  <div class="control-group">
                     <button class="control-btn" @click=${this.handleOpencodeBrowse}>
                       ${this.opencodeCustomPath ? 'Change…' : 'Browse…'}
                     </button>
@@ -2149,6 +2175,7 @@ export class SettingsModal extends LitElement {
             class="toggle-switch"
             role="switch"
             aria-checked="${this.autoCheckForUpdates}"
+            aria-label="Auto-check for updates"
             @click=${() => this.updateSetting('updates.autoCheckForUpdates', !this.autoCheckForUpdates)}
           ></button>
         </div>
@@ -2164,7 +2191,7 @@ export class SettingsModal extends LitElement {
             <div class="setting-label">Updates</div>
             <div class="setting-desc" role="status" aria-live="polite">${statusText}</div>
           </div>
-          <div style="display: flex; gap: 8px; align-items: center;">
+          <div class="control-group">
             ${
               this.updateStatus === 'available'
                 ? html`<button class="control-btn" @click=${this.handleDownloadUpdate}>

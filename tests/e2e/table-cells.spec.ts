@@ -44,7 +44,7 @@ test.describe('Live table cell editing', () => {
             openTabs: paths,
             activeTabPath: paths[0]
           },
-          appearance: { theme: 'dark', panelOrientation: 'horizontal' }
+          appearance: { designVersion: 1, theme: 'dark', panelOrientation: 'horizontal' }
         },
         null,
         2

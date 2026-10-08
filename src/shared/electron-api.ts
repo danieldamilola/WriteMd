@@ -1,6 +1,17 @@
 /// <reference types="electron" />
 import type { WriteMdSettings, WriteMdSettingsPatch } from './settings-schema'
 
+export interface BackgroundAsset {
+  id: string
+  name: string
+  url: string
+}
+
+export interface MaterialSupport {
+  supported: boolean
+  platform: string
+}
+
 export interface FileReadResult {
   content: string
   mtime: number
@@ -135,6 +146,12 @@ export interface UpdaterState {
 }
 
 export interface ElectronAPI {
+  appearance: {
+    importBackground: () => Promise<BackgroundAsset | null>
+    getBackground: (id: string) => Promise<BackgroundAsset | null>
+    removeBackground: (id: string) => Promise<void>
+    materialSupport: () => Promise<MaterialSupport>
+  }
   app: {
     getVersion: () => Promise<string>
     getPath: (name: 'home' | 'documents' | 'downloads' | 'temp') => Promise<string>
@@ -210,14 +227,16 @@ export interface ElectronAPI {
       apiKey: string,
       messages: ChatMessage[],
       onChunk: (delta: string) => void,
-      systemPrompt?: string
+      systemPrompt?: string,
+      sessionId?: string
     ) => Promise<string>
     /**
      * Abort the in-flight stream. The promise from `chatStream` then resolves
      * with whatever text had already arrived instead of rejecting, so a stopped
-     * reply keeps its partial answer.
+     * reply keeps its partial answer. Pass `sessionId` to abort a specific
+     * conversation, or omit it to abort any stream for this window.
      */
-    cancelChat: () => Promise<void>
+    cancelChat: (sessionId?: string) => Promise<void>
   }
   chat: {
     /** Create an empty session bound to a document, or null for a scratch chat. */

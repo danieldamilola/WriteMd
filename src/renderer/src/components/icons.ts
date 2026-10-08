@@ -1,4 +1,5 @@
 import { svg, type TemplateResult } from 'lit'
+import { chromeIcon } from '../design/icons'
 
 /**
  * WriteMd's icon set.
@@ -132,6 +133,8 @@ export const ICON_NAMES = Object.keys(PATHS)
  * outline set would need.
  */
 export function icon(name: string, size = 16): TemplateResult {
+  const chrome = chromeIcon(name, size)
+  if (chrome) return chrome
   const body = PATHS[name]
   if (!body) {
     console.warn(`[icon] no such icon: ${name}`)

@@ -59,7 +59,7 @@ export class WriteMdIconButton extends LitElement {
     }
 
     :host([size='caption']) button {
-      width: 46px;
+      width: var(--caption-button-width);
       height: 100%;
       min-height: 32px;
       border-radius: 0;

@@ -48,9 +48,17 @@ describe('writemd-vertical-tab-bar component', () => {
     expect(pinnedSection).not.toBeNull()
     const pinnedDivider = el.shadowRoot?.querySelector('.pinned-divider')
     expect(pinnedDivider).not.toBeNull()
+    expect(pinnedDivider?.getAttribute('role')).toBe('separator')
 
     const pinnedTab = pinnedSection?.querySelector('writemd-tab')
     expect(pinnedTab?.hasAttribute('pinned')).toBe(true)
+  })
+
+  it('omits the pinned separator when there is no unpinned section', async () => {
+    const el = mountRail()
+    el.tabs = [{ path: 'pinned.md', dirty: false, isPinned: true }]
+    await flush(el)
+    expect(el.shadowRoot?.querySelector('.pinned-divider')).toBeNull()
   })
 
   it('renders tab groups with collapsible header and color dot', async () => {
@@ -92,15 +100,48 @@ describe('writemd-vertical-tab-bar component', () => {
       { id: 'group-clean', label: 'Plain', color: 'transparent', collapsed: false }
     ]
     el.tabGroups = groups
-    el.tabs = [
-      { path: 'note.md', dirty: false, groupId: 'group-clean' }
-    ]
+    el.tabs = [{ path: 'note.md', dirty: false, groupId: 'group-clean' }]
     await flush(el)
 
     const groupHeader = el.shadowRoot?.querySelector('.group-header')
     expect(groupHeader).not.toBeNull()
     const dot = groupHeader?.querySelector('.group-color-dot')
     expect(dot).toBeNull()
+  })
+
+  it('labels the pinned area Space with no count and keeps groups on top', async () => {
+    const el = mountRail()
+    el.tabGroups = [{ id: 'group-1', label: 'Docs', color: '#3b82f6', collapsed: false }]
+    el.tabs = [
+      { path: 'pinned.md', dirty: false, isPinned: true },
+      { path: 'grouped.md', dirty: false, groupId: 'group-1' },
+      { path: 'regular.md', dirty: false }
+    ]
+    el.activeTab = 0
+    await flush(el)
+
+    const label = el.shadowRoot?.querySelector('.section-label')
+    expect(label?.textContent?.trim()).toBe('Space')
+    // Groups render before pinned tabs inside Space, ungrouped after it.
+    const rows = Array.from(el.shadowRoot?.querySelectorAll('.scroll-container > *') ?? []).map(
+      (n) => (n as HTMLElement).className
+    )
+    const groupAt = rows.findIndex((c) => String(c).includes('tab-group-container'))
+    const pinnedAt = rows.findIndex((c) => String(c).includes('pinned-section'))
+    expect(groupAt).toBeGreaterThanOrEqual(0)
+    expect(pinnedAt).toBeGreaterThan(groupAt)
+  })
+
+  it('shows the file icon on pinned tabs with no pin badge', async () => {
+    const el = mountRail()
+    el.tabs = [{ path: 'pinned.md', dirty: false, isPinned: true }]
+    el.activeTab = 0
+    await flush(el)
+
+    const tab = el.shadowRoot?.querySelector('writemd-tab')
+    expect(tab?.hasAttribute('pinned')).toBe(true)
+    expect(tab?.shadowRoot?.querySelector('.pin-icon')).toBeNull()
+    expect(tab?.shadowRoot?.querySelector('svg[data-icon="file-text"]')).not.toBeNull()
   })
 
   it('uses only CSS custom properties or theme tokens in stylesheet', () => {

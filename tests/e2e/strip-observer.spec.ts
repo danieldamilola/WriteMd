@@ -24,7 +24,7 @@ test.describe('Tab strip resize observation', () => {
           openTabs: FILES.map((f) => join(fixture.vault, f)),
           activeTabPath: join(fixture.vault, FILES[FILES.length - 1])
         },
-        appearance: { theme: 'dark', panelOrientation: 'horizontal' }
+        appearance: { designVersion: 1, theme: 'dark', panelOrientation: 'horizontal' }
       }),
       'utf-8'
     )

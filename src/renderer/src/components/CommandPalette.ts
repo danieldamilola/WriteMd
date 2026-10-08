@@ -1,3 +1,4 @@
+import './Modal'
 import { html, css, LitElement } from 'lit'
 import { customElement, state } from 'lit/decorators.js'
 import { SettingsStore } from '../state/settings'
@@ -188,49 +189,51 @@ export class CommandPalette extends LitElement {
   render(): unknown {
     const list = this.filtered
     return html`
-      <div
-        class="panel"
-        role="dialog"
-        aria-modal="true"
-        @click=${(e: MouseEvent) => e.stopPropagation()}
-      >
-        <input
-          type="text"
-          role="combobox"
-          aria-label="Search commands"
-          aria-expanded="true"
-          aria-controls="cmd-list"
-          aria-activedescendant=${list[this.selected] ? `cmd-${this.selected}` : ''}
-          autocomplete="off"
-          placeholder="Type a command..."
-          .value=${this.query}
-          @input=${this.handleInput}
-          @keydown=${this.handleKeyDown}
-        />
-        <div class="list" id="cmd-list" role="listbox" aria-label="Commands">
-          ${
-            list.length === 0
-              ? html`<div class="empty">No matching commands</div>`
-              : list.map(
-                  (c, i) => html`
-                    <div
-                      id=${`cmd-${i}`}
-                      role="option"
-                      aria-selected=${i === this.selected ? 'true' : 'false'}
-                      class=${i === this.selected ? 'item selected' : 'item'}
-                      @click=${() => this.run(c.id)}
-                      @mousemove=${() => {
-                        if (this.selected !== i) this.selected = i
-                      }}
-                    >
-                      <span>${c.title}</span>
-                      <span class="hint">${this.bindingLabel(c.id)}</span>
-                    </div>
-                  `
-                )
-          }
+      <writemd-modal label="Commands" @modal-dismiss=${this.close}>
+        <div
+          class="panel"
+          role="dialog"
+          aria-modal="true"
+          @click=${(e: MouseEvent) => e.stopPropagation()}
+        >
+          <input
+            type="text"
+            role="combobox"
+            aria-label="Search commands"
+            aria-expanded="true"
+            aria-controls="cmd-list"
+            aria-activedescendant=${list[this.selected] ? `cmd-${this.selected}` : ''}
+            autocomplete="off"
+            placeholder="Type a command..."
+            .value=${this.query}
+            @input=${this.handleInput}
+            @keydown=${this.handleKeyDown}
+          />
+          <div class="list" id="cmd-list" role="listbox" aria-label="Commands">
+            ${
+              list.length === 0
+                ? html`<div class="empty">No matching commands</div>`
+                : list.map(
+                    (c, i) => html`
+                      <div
+                        id=${`cmd-${i}`}
+                        role="option"
+                        aria-selected=${i === this.selected ? 'true' : 'false'}
+                        class=${i === this.selected ? 'item selected' : 'item'}
+                        @click=${() => this.run(c.id)}
+                        @mousemove=${() => {
+                          if (this.selected !== i) this.selected = i
+                        }}
+                      >
+                        <span>${c.title}</span>
+                        <span class="hint">${this.bindingLabel(c.id)}</span>
+                      </div>
+                    `
+                  )
+            }
+          </div>
         </div>
-      </div>
+      </writemd-modal>
     `
   }
 }

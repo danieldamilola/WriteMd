@@ -3,6 +3,7 @@ import { join, dirname } from 'path'
 import { readFileSync, existsSync, mkdirSync, renameSync } from 'fs'
 import { writeFile, rename, unlink } from 'fs/promises'
 import { randomUUID } from 'crypto'
+import { migrateDesign } from '../shared/design-migration'
 import {
   DEFAULT_SETTINGS,
   validatePatch,
@@ -108,7 +109,7 @@ export function getSettings(): WriteMdSettings {
     if (existsSync(SETTINGS_FILE)) {
       next = deepMerge(
         structuredClone(DEFAULT_SETTINGS) as unknown as Record<string, unknown>,
-        JSON.parse(readFileSync(SETTINGS_FILE, 'utf-8'))
+        migrateDesign(JSON.parse(readFileSync(SETTINGS_FILE, 'utf-8')) as Record<string, unknown>)
       ) as unknown as WriteMdSettings
     }
   } catch (e) {
@@ -188,7 +189,7 @@ export function setSettings(partial: WriteMdSettingsPatch): Promise<void> {
   // concurrent truncating writes to the same path can interleave, and the
   // corruption handler in getSettings() then wipes the API key along with
   // everything else.
-  writeQueue = writeQueue.then(() => writeSettingsFile(merged))
+  writeQueue = writeQueue.catch(() => undefined).then(() => writeSettingsFile(merged))
   // Errors propagate: the renderer is told a save succeeded when it did not.
   return writeQueue
 }

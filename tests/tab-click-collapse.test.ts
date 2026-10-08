@@ -45,10 +45,22 @@ describe('tab click selection and group collapse', () => {
 
     // Simulate mouse click (pointerdown then pointerup then click)
     secondRow.dispatchEvent(
-      new PointerEvent('pointerdown', { bubbles: true, cancelable: true, clientX: 50, clientY: 50, button: 0 })
+      new PointerEvent('pointerdown', {
+        bubbles: true,
+        cancelable: true,
+        clientX: 50,
+        clientY: 50,
+        button: 0
+      })
     )
     secondRow.dispatchEvent(
-      new PointerEvent('pointerup', { bubbles: true, cancelable: true, clientX: 50, clientY: 50, button: 0 })
+      new PointerEvent('pointerup', {
+        bubbles: true,
+        cancelable: true,
+        clientX: 50,
+        clientY: 50,
+        button: 0
+      })
     )
     secondRow.click()
 
@@ -70,10 +82,22 @@ describe('tab click selection and group collapse', () => {
 
     // Simulate click on chevron
     chevron.dispatchEvent(
-      new PointerEvent('pointerdown', { bubbles: true, cancelable: true, clientX: 20, clientY: 20, button: 0 })
+      new PointerEvent('pointerdown', {
+        bubbles: true,
+        cancelable: true,
+        clientX: 20,
+        clientY: 20,
+        button: 0
+      })
     )
     chevron.dispatchEvent(
-      new PointerEvent('pointerup', { bubbles: true, cancelable: true, clientX: 20, clientY: 20, button: 0 })
+      new PointerEvent('pointerup', {
+        bubbles: true,
+        cancelable: true,
+        clientX: 20,
+        clientY: 20,
+        button: 0
+      })
     )
     chevron.click()
 
@@ -85,10 +109,12 @@ describe('tab click selection and group collapse', () => {
     expect(header).not.toBeNull()
     header.click()
     const afterHeaderClick = (fileState.getState().tabGroups ?? [])[0].collapsed
-    expect(afterHeaderClick, 'Clicking group-header must toggle group collapsed').toBe(initialCollapsed)
+    expect(afterHeaderClick, 'Clicking group-header must toggle group collapsed').toBe(
+      initialCollapsed
+    )
   })
 
-  it('does not select tab if pointer moved past drag threshold (drag suppression)', async () => {
+  it('suppresses the click following a completed drag', async () => {
     const el = mountRail()
     el.tabs = [
       { path: 'first.md', dirty: false },
@@ -105,19 +131,16 @@ describe('tab click selection and group collapse', () => {
     const secondRow = el.shadowRoot?.querySelector('.tab-row[data-tab-index="1"]') as HTMLElement
     expect(secondRow).not.toBeNull()
 
-    // Simulate drag: pointerdown at (50, 50), move to (50, 80) (> 4px), pointerup, click
-    secondRow.dispatchEvent(
-      new PointerEvent('pointerdown', { bubbles: true, cancelable: true, clientX: 50, clientY: 50, button: 0 })
-    )
-    secondRow.dispatchEvent(
-      new PointerEvent('pointermove', { bubbles: true, cancelable: true, clientX: 50, clientY: 80, button: 0 })
-    )
-    secondRow.dispatchEvent(
-      new PointerEvent('pointerup', { bubbles: true, cancelable: true, clientX: 50, clientY: 80, button: 0 })
-    )
+    // Layout and sensor activation are exercised in Electron. This guards
+    // the row's click contract after the controller has ended a gesture.
+    const drag = (el as unknown as { tabDrag: { suppressedUntil: number } }).tabDrag
+    drag.suppressedUntil = performance.now() + 150
     secondRow.click()
 
     expect(selectedIndex, 'Dragging must not emit select-tab on release').toBe(-1)
+    drag.suppressedUntil = 0
+    secondRow.click()
+    expect(selectedIndex).toBe(1)
   })
 
   it('opens tab context menu and clicking menu item triggers action without backdrop intercepting', async () => {
@@ -149,6 +172,9 @@ describe('tab click selection and group collapse', () => {
     pinItem?.click()
     await flush(el)
 
-    expect(fileState.getState().tabs[0].isPinned, 'Clicking Pin tab in context menu must pin the tab').toBe(true)
+    expect(
+      fileState.getState().tabs[0].isPinned,
+      'Clicking Pin tab in context menu must pin the tab'
+    ).toBe(true)
   })
 })

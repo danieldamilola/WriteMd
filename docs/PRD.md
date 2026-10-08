@@ -86,20 +86,22 @@ Theme count: seven ship (`dark`, `graphite`, `midnight`, `light`, `paper`,
 
 ### 4.2 Tech Stack
 
-| Layer                | Technology                                                          | Rationale                                      |
-| -------------------- | ------------------------------------------------------------------- | ---------------------------------------------- |
-| **Shell**            | Electron 30+ (latest LTS)                                           | Native menus, file dialogs, associations       |
-| **Language**         | TypeScript 5+ (strict mode)                                         | Type safety, Obsidian-compatible plugin types  |
-| **Editor**           | CodeMirror 6 + @codemirror/lang-markdown                            | Live Preview, decorations, incremental parsing |
-| **Markdown Parse**   | markdown-it (preview) + Lezer (editor)                              | Proven, extensible, spec-compliant             |
-| **Syntax Highlight** | @codemirror/language (Lezer, editor) + custom highlighter (preview) | One highlight pipeline per surface             |
-| **Math**             | KaTeX (fast, no MathJax bloat)                                      | Client-side rendering                          |
-| **Diagrams**         | Mermaid.js (lazy-loaded)                                            | Optional, on-demand                            |
-| **Styling**          | CSS Custom Properties + PostCSS                                     | Themeable, no runtime CSS-in-JS                |
-| **UI Framework**     | **None** - Vanilla TS + Web Components                              | Like Obsidian: lightweight, no framework tax   |
-| **State**            | Signals (Preact signals or custom)                                  | Fine-grained reactivity, tiny                  |
-| **Build**            | Vite + electron-builder                                             | Fast dev, optimized production                 |
-| **Testing**          | Vitest + Playwright (E2E)                                           | Unit + integration                             |
+| Layer                | Technology                                                          | Rationale                                                |
+| -------------------- | ------------------------------------------------------------------- | -------------------------------------------------------- |
+| **Shell**            | Electron 44                                                         | Native menus, file dialogs, associations                 |
+| **Language**         | TypeScript 5+ (strict mode)                                         | Type safety, Obsidian-compatible plugin types            |
+| **Editor**           | CodeMirror 6 + @codemirror/lang-markdown                            | Live Preview, decorations, incremental parsing           |
+| **Markdown Parse**   | markdown-it (preview) + Lezer (editor)                              | Proven, extensible, spec-compliant                       |
+| **Syntax Highlight** | @codemirror/language (Lezer, editor) + custom highlighter (preview) | One highlight pipeline per surface                       |
+| **Math**             | KaTeX (fast, no MathJax bloat)                                      | Client-side rendering                                    |
+| **Diagrams**         | Mermaid.js (lazy-loaded)                                            | Optional, on-demand                                      |
+| **Styling**          | CSS Custom Properties + PostCSS                                     | Themeable, no runtime CSS-in-JS                          |
+| **UI Framework**     | TypeScript + Lit Web Components                                     | Preserve existing editor and WriteMd styling             |
+| **UI Primitives**    | Web Awesome 3, behind WriteMd adapters                              | Dialog focus, popup placement, split panels, sliders     |
+| **Interactions**     | @dnd-kit/dom 0.5 + Motion                                           | Shared gesture lifecycle and interruptible motion        |
+| **State**            | FileState and SettingsStore singletons with subscriptions/selectors | One owner per state; document typing skips shell renders |
+| **Build**            | Vite + electron-builder                                             | Fast dev, optimized production                           |
+| **Testing**          | Vitest + Playwright (E2E)                                           | Unit + integration                                       |
 
 ### 4.3 Architecture Diagram
 
@@ -155,20 +157,55 @@ CodeMirror 6 EditorView
 
 - **WYSIWYG (default):** `livePreviewDecorations` active → syntax hidden, rendered inline
 - **Source:** `livePreviewDecorations` disabled → raw markdown with syntax highlight
-- **Split:** Two EditorViews synced via shared `EditorState` (different extensions)
+- **Split:** Independent CodeMirror views for the primary and optional secondary document. `writemd-workspace` owns available width and pane constraints; resizing preserves the mounted views and their selections.
+
+### 4.5 Workspace and interaction boundaries
+
+- `WorkspaceState` persists preferred pane and rail widths in pixels. `paneGeometry` derives the rendered width from available space, reserving 320px for each document pane and a 5px gutter. When both minimums cannot fit, Document/Second pane controls select one visible surface; both stay mounted.
+- `writemd-workspace` adapts Web Awesome's split panel and supports pointer and keyboard resizing. Window constraints never overwrite preferred width. `writemd-rail-frame` animates allocated width, retains the rail DOM when collapsed, and marks its contents inert.
+- `TabDragController` owns both tab orientations. Pointer activation starts after 4px, child controls cannot start a drag, the library owns edge scrolling, and cancellation never commits. `FileState.dropTab` resolves pin/group/insertion changes by stable IDs in one transaction. Lit renders keyed tab nodes. Alt+Arrow reorders from a focused tab; context menus expose pin/group actions.
+- `AiSessionController` owns chat sessions, streams, attachments, provider models, and chat persistence. The editor supplies document context and the guarded CodeMirror replacement operation. Stale disk results cannot replace another tab's conversation.
+- `writemd-modal` and `writemd-context-menu` adapt library behavior while retaining WriteMd content and styling. Native dialogs own background inertness; tab navigation uses a roving focus target.
+- Renderer settings writes are serialized and coalesced. Reset notifies all subscribers. Save failures appear in Settings with a retry action; a failed main-process write cannot poison later writes.
+
+### 4.6 Local backgrounds and glass
+
+Backgrounds are application preferences, never document data or export styling. An OS image picker imports a decoded, normalized PNG into `userData/backgrounds` with a generated asset ID and an atomic write. The typed preload API accepts that ID rather than arbitrary filesystem paths. Removing a background deletes the owned copy after settings save successfully and leaves the selected source image untouched.
+
+Appearance controls provide None, Haze, Dither, ASCII, Halftone, and Scanlines, workspace/AI targeting, empty-only/always visibility, separate empty/content strength, haze blur, and surface opacity. Pixel effects run in a worker and cache per imported image; typing does not reprocess the artwork. Workspace images sit inside each pane, above its painted surface and below content. Their visibility is independent of surface opacity; importing an image leaves glass preferences unchanged. Empty/content preview switching follows the same strength and scope rules as the workspace. Haze blurs and fades the image toward the bottom; reduced motion disables visibility transitions.
+
+Window material is separate from CSS artwork blur. Supported Windows builds offer Mica/Acrylic; macOS uses vibrancy. Unsupported systems keep the opaque window and disable the material control. Normal appearance defaults remain opaque.
+
+The background card and compact workspace selector reuse existing WriteMd tokens and the supplied reference. Square, edge-to-edge panes replace the original pane radius and outer gutter. Three small dots mark pane and sidebar resize areas without a continuous divider line; pointer and keyboard resizing remain available. Settings open as an application page with independently scrolling navigation and content. The New Design beta card and its obsolete preference are removed. These requested changes need formalizing in Figma.
+
+The toolbar shares the editor's surface color, opacity, and blur as appearance changes. Window controls blend into it without a separate background or left/bottom borders. The sidebar retains the secondary frame surface. The file path stays visible in both document layouts, with the full path available on hover. The floating mode/word-count control uses readable text, a 30px minimum height, and a keyboard-accessible mode button.
+
+The document title and rename field center on the full header, including the space occupied by caption controls. The workspace adds no second translucent surface behind its panes. Document menus use the shared anchored popup: labels determine their width, viewport edges constrain placement, short windows allow scrolling, and Escape restores focus to the trigger.
+
+Each document pane has its own title, path, reading toggle, and document menu. Secondary-pane mode, rename, move, export, and find actions target its document; renaming a file shared by both panes updates both paths and later save targets. Document and text menus dismiss one another. Text menus and their submenus use viewport-constrained popups, shared SVG icons, and arrow-key navigation with focus applied after the popup opens.
+
+The vertical sidebar separates pinned/grouped documents from unpinned documents with a centered 48px by 1px line, shown only when both sections exist. Updates appear above AI Assistant in that sidebar: Update available starts the download, progress remains visible, and Restart to update installs the downloaded release. Horizontal tabs retain the toolbar update control. The revised pane actions, separator, and update placement need formalizing in Figma.
+
+Home uses the same shell, caption controls, sidebar, settings page, and command search as the editor. Vertical mode remains the default; explicit horizontal preferences are retained. The former welcome frame, separate toolbar, watermark, and fixed columns are replaced by responsive New note/Open file actions, recent-note rows with paths, and vault access. Native buttons support keyboard activation, and shortcut hints follow user bindings. Home uses workspace artwork with empty-view strength and scope. Its sidebar marks Home and offers vault access; document AI actions become available when a note is open. Recent-file subscriptions update the page without allowing stale vault responses to replace newer notes. This requested home layout supersedes the original welcome frame and needs formalizing in Figma.
+
+Settings now open as an application page. Search sits at the top of its sidebar, using the same search component and inset as the document sidebar. Writing contains New notes, Editor, and Files & vault; Workspace contains Appearance and Keyboard shortcuts; Application contains AI Assistant, Advanced, and About WriteMd. Navigation uses shared chrome icons, 34px minimum row heights, and 24px between groups. Back to editor remains at the bottom. Exact category names take priority in search; row searches still highlight settings and support Enter/arrow navigation. This requested sidebar layout supersedes the earlier centered settings presentation and needs formalizing in Figma.
+
+Settings cards use theme surfaces, consistent 16px padding, readable descriptions, and 34px controls. Rows wrap to fit the available content width; font and theme grids adapt without horizontal overflow. Dropdowns use the shared Web Awesome select styling, including background settings. Monochrome accents follow the theme's text color with a contrasting surface-colored toggle thumb; colored accents choose a light or dark foreground according to luminance. The bundled editor font choices are Inter, Manrope, DM Sans, Space Grotesk, JetBrains Mono, and Geist Mono. Removed serif/handwritten selections migrate to Manrope, retaining other editor preferences.
 
 ---
 
 ## 5. UI/UX Specification (from Figma)
 
-### 5.1 Layout Structure (Figma Design Aligned)
+### 5.1 Layout Structure
+
+The original Figma pane frame below is superseded by the requested flat workspace described in section 4.6. Tabs, toolbar controls, fonts, and theme tokens retain the existing design.
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │  Top Bar (height: 43px, custom frameless drag area)         │
 │  [Menu] [Settings]  [Tab 1] [Tab 2] ... [Split] [Min/Max/X] │
 ├─────────────────────────────────────────────────────────────┤
-│  Split View / Panel (background: #141414, radius: 10px)     │
+│  Split View / Panel (theme surface, radius: 0, no gutter)   │
 │  ┌───────────────────────────────────────────────────────┐  │
 │  │  Editor Surface / Split Windows                       │  │
 │  │  - WYSIWYG Mode (Live Preview)                        │  │
@@ -374,7 +411,7 @@ without `safeStorage` it falls back to plaintext in this file.
   },
   "preview": {
     "fontSize": 16,
-    "fontFamily": "Source Serif Pro",
+    "fontFamily": "Manrope",
     "lineHeight": 1.8,
     "maxWidth": 800,
     "showMargin": true

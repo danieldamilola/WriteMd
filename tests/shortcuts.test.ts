@@ -54,6 +54,13 @@ describe('shortcut registry', () => {
     expect(normalizeBinding('Ctrl++')).toBe('Ctrl++')
   })
 
+  it('opens the palette through Ctrl+K as well as Ctrl+P', () => {
+    const bindings = effectiveBindings('command-palette', {})
+    const keys = bindings.map((b) => b.key)
+    expect(keys).toContain('p')
+    expect(keys).toContain('k')
+  })
+
   it('matches zoom-in through its aliases', () => {
     const bindings = effectiveBindings('zoom-in', {})
     const keys = bindings.map((b) => b.key)

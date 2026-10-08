@@ -23,6 +23,10 @@ const corpus = sources.map((f) => ({ file: f, text: readFileSync(f, 'utf-8') }))
  * default answer to "this setting does nothing" is a bug, not a decision.
  */
 const NO_READER_ALLOWED = new Map<string, string>([
+  [
+    'appearance.designVersion',
+    'migration sentinel; migrateDesign reads it as a property, not a dotted key'
+  ],
   ['shortcuts.bindings', 'read by the settings UI only, which writes the map back'],
   ['files.openTabs', 'session restore input, persisted and read by FileState.restoreTabs'],
   ['files.activeTabPath', 'session restore input, persisted and read by FileState.restoreTabs'],

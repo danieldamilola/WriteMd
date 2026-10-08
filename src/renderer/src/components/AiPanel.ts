@@ -1,3 +1,4 @@
+import './Background'
 import { html, css, LitElement, type PropertyValues } from 'lit'
 import { customElement, property, state } from 'lit/decorators.js'
 import { unsafeHTML } from 'lit/directives/unsafe-html.js'
@@ -50,7 +51,12 @@ export interface AiMessage {
 @customElement('writemd-ai-panel')
 export class AiPanel extends LitElement {
   static styles = css`
+    writemd-background {
+      z-index: -1;
+    }
     :host {
+      position: relative;
+      isolation: isolate;
       display: flex;
       flex-direction: column;
       height: 100%;
@@ -1259,6 +1265,7 @@ export class AiPanel extends LitElement {
       // No decoration without function: the mark is the panel's own glyph at a
       // fixed size, and the single action is what actually resolves the state.
       return html`
+        <writemd-background target="ai" .empty=${this.messages.length === 0}></writemd-background>
         <div class="ai-empty" role="status">
           <span class="ai-empty-mark">${icon('sparkle', 36)}</span>
           <p class="ai-empty-title">No assistant selected</p>
@@ -1276,6 +1283,7 @@ export class AiPanel extends LitElement {
       `
     }
     return html`
+      <writemd-background target="ai" .empty=${this.messages.length === 0}></writemd-background>
       <div class="panel">
         <div class="chat-log" role="log" aria-live="polite" aria-label="Assistant conversation">
           <div class="row">

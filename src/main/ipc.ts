@@ -3,6 +3,13 @@ import { readFile, writeFile, stat, rename, unlink, open } from 'fs/promises'
 import { watch, existsSync, mkdirSync, type FSWatcher } from 'fs'
 import { basename, dirname, extname, join, resolve } from 'path'
 import { randomUUID } from 'crypto'
+import {
+  importBackground,
+  getBackground,
+  removeBackground,
+  materialSupport,
+  applyWindowMaterial
+} from './appearance'
 import log from 'electron-log'
 import {
   getVaultPath,
@@ -102,6 +109,10 @@ export function closeAllWatchers(): void {
 export function setupIpc(getWindow: () => BrowserWindow | null): void {
   setVaultRootProvider(getVaultPath)
   registerPersistedPaths()
+  ipcMain.handle('appearance:import-background', () => importBackground(getWindow()))
+  ipcMain.handle('appearance:get-background', (_, id: string) => getBackground(id))
+  ipcMain.handle('appearance:remove-background', (_, id: string) => removeBackground(id))
+  ipcMain.handle('appearance:material-support', () => materialSupport())
 
   ipcMain.handle('app:get-version', () => app.getVersion())
   ipcMain.handle('app:get-path', (_, name: 'home' | 'documents' | 'downloads' | 'temp') =>
@@ -378,6 +389,7 @@ export function setupIpc(getWindow: () => BrowserWindow | null): void {
 
   ipcMain.handle('settings:get', () => getSettingsForRenderer())
   ipcMain.handle('settings:set', async (_, settings: WriteMdSettingsPatch) => {
+    const previousMaterial = getSettings().appearance.windowMaterial
     // Every path guard measures against `getVaultPath()`. A vault change that
     // arrives through settings rather than `vault:set-path` still has to move
     // that boundary, so the cache cannot survive it.
@@ -385,6 +397,8 @@ export function setupIpc(getWindow: () => BrowserWindow | null): void {
       invalidateVaultPathCache()
     }
     await setSettings(settings)
+    if (getSettings().appearance.windowMaterial !== previousMaterial)
+      applyWindowMaterial(getWindow())
   })
 
   // Single owner for the open dialog: every chosen path is registered so the
@@ -573,7 +587,8 @@ export function setupIpc(getWindow: () => BrowserWindow | null): void {
     systemPrompt: string | undefined,
     cwd: string,
     onDelta?: (delta: string) => void,
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    sessionId?: string
   ): Promise<string> {
     const found = await resolveOpencodeOrThrow()
     const prompt = opencodePromptFrom(messages, systemPrompt)
@@ -583,7 +598,8 @@ export function setupIpc(getWindow: () => BrowserWindow | null): void {
       directory: cwd,
       model: model?.trim() || undefined,
       prompt,
-      signal
+      signal,
+      sessionId
     }
     // One-shot and streaming share the managed `serve` backend: blocking
     // message for chat, prompt_async + /event SSE for stream.
@@ -638,17 +654,31 @@ export function setupIpc(getWindow: () => BrowserWindow | null): void {
   )
 
   /*
-   * In-flight stream aborts, keyed by the WebContents that started them.
+   * In-flight stream aborts, keyed by a composite stream key:
+   *   `${event.sender.id}:${sessionId}` when a sessionId is provided, or
+   *   `${event.sender.id}` as fallback.
    *
-   * The send button becomes a stop square while a reply is arriving, so the
-   * click has to reach the socket rather than only the renderer's flags. Keying
-   * on the sender means a cancel cannot abort a stream belonging to another
-   * window, and the entry is deleted in a finally so the map cannot grow.
+   * Keying by session ID allows concurrent background generations across tabs.
+   * A sender-level cancel aborts all streams for that window, while a session-scoped
+   * cancel aborts only that specific session.
    */
-  const activeStreams = new Map<number, AbortController>()
+  const activeStreams = new Map<string, AbortController>()
 
-  ipcMain.handle('net:chat-cancel', (event) => {
-    activeStreams.get(event.sender.id)?.abort()
+  ipcMain.handle('net:chat-cancel', (event, sessionId?: string) => {
+    if (sessionId) {
+      const key = `${event.sender.id}:${sessionId}`
+      activeStreams.get(key)?.abort()
+      activeStreams.delete(key)
+    } else {
+      // Cancel all streams for this window
+      const prefix = `${event.sender.id}:`
+      for (const [key, controller] of activeStreams.entries()) {
+        if (key === `${event.sender.id}` || key.startsWith(prefix)) {
+          controller.abort()
+          activeStreams.delete(key)
+        }
+      }
+    }
   })
 
   ipcMain.handle(
@@ -659,14 +689,21 @@ export function setupIpc(getWindow: () => BrowserWindow | null): void {
       model: string,
       apiKey: string,
       messages: ChatMessage[],
-      systemPrompt?: string
+      systemPrompt?: string,
+      sessionId?: string
     ): Promise<string> => {
+      const streamKey = sessionId ? `${event.sender.id}:${sessionId}` : `${event.sender.id}`
+      const chunkChannel = sessionId ? `net:chat-chunk:${sessionId}` : 'net:chat-chunk'
+
       if (provider === 'OpenCode') {
         const send = (delta: string): void => {
-          if (delta && !event.sender.isDestroyed()) event.sender.send('net:chat-chunk', delta)
+          if (delta && !event.sender.isDestroyed()) {
+            event.sender.send(chunkChannel, delta)
+          }
         }
+        activeStreams.get(streamKey)?.abort()
         const controller = new AbortController()
-        activeStreams.set(event.sender.id, controller)
+        activeStreams.set(streamKey, controller)
         try {
           return await runOpencodeChat(
             model,
@@ -674,15 +711,16 @@ export function setupIpc(getWindow: () => BrowserWindow | null): void {
             systemPrompt,
             getVaultPath(),
             send,
-            controller.signal
+            controller.signal,
+            sessionId
           )
         } catch (e) {
           if (controller.signal.aborted) return ''
           console.error('OpenCode stream error:', e)
           throw new Error(opencodeFriendlyError(e), { cause: e })
         } finally {
-          if (activeStreams.get(event.sender.id) === controller) {
-            activeStreams.delete(event.sender.id)
+          if (activeStreams.get(streamKey) === controller) {
+            activeStreams.delete(streamKey)
           }
         }
       }
@@ -696,13 +734,14 @@ export function setupIpc(getWindow: () => BrowserWindow | null): void {
       })
       if (!req) throw new Error(`${provider} cannot stream responses`)
       const send = (delta: string): void => {
-        if (delta && !event.sender.isDestroyed()) event.sender.send('net:chat-chunk', delta)
+        if (delta && !event.sender.isDestroyed()) {
+          event.sender.send(chunkChannel, delta)
+        }
       }
-      // One controller per sender: a second send supersedes the first rather
-      // than leaking an unreachable abort handle.
-      activeStreams.get(event.sender.id)?.abort()
+      // Supersede any existing generation for THIS session:
+      activeStreams.get(streamKey)?.abort()
       const controller = new AbortController()
-      activeStreams.set(event.sender.id, controller)
+      activeStreams.set(streamKey, controller)
       let full = ''
       try {
         const res = await net.fetch(req.url, {
@@ -754,8 +793,8 @@ export function setupIpc(getWindow: () => BrowserWindow | null): void {
         console.error('Chat stream error:', e)
         throw new Error(e instanceof Error ? e.message : 'Chat failed', { cause: e })
       } finally {
-        if (activeStreams.get(event.sender.id) === controller) {
-          activeStreams.delete(event.sender.id)
+        if (activeStreams.get(streamKey) === controller) {
+          activeStreams.delete(streamKey)
         }
       }
     }

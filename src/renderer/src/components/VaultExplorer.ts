@@ -16,7 +16,7 @@ export class VaultExplorer extends LitElement {
       overflow-y: auto;
       box-sizing: border-box;
       padding: 12px 8px;
-      font-family: 'Geist Mono', monospace;
+      font-family: var(--font-ui);
       color: var(--text);
       user-select: none;
     }

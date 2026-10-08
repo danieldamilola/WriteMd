@@ -1,7 +1,7 @@
 import { test, expect, type ElectronApplication, type Page } from '@playwright/test'
 import { readFileSync, writeFileSync } from 'fs'
 import { join } from 'path'
-import { makeFixture, launch, firstWindow } from './fixtures'
+import { makeFixture, launch, firstWindow, openSettings } from './fixtures'
 
 /**
  * The secondary split pane used to swallow edits: its content reached
@@ -47,7 +47,7 @@ test.describe('Split pane sync', () => {
             openTabs: [notePath],
             activeTabPath: notePath
           },
-          appearance: { theme: 'dark', panelOrientation: 'horizontal' }
+          appearance: { designVersion: 1, theme: 'dark', panelOrientation: 'horizontal' }
         },
         null,
         2
@@ -75,7 +75,7 @@ test.describe('Split pane sync', () => {
 
   /** Flip auto-save through the UI so the write has to be explicit. */
   async function setAutoSave(on: boolean): Promise<void> {
-    await window.locator('writemd-icon-button[title="Settings"]').click()
+    await openSettings(window)
     const modal = window.locator('writemd-settings-modal')
     await expect(modal).toBeVisible()
     await modal.locator('.nav-btn', { hasText: 'Files' }).click()

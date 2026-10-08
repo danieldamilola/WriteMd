@@ -3,6 +3,8 @@ import { applyConflictReview, applyConflictReload, applyConflictDismiss } from '
 import { api } from '../api'
 import { showConfirm } from '../services/confirm'
 import { sameFilePath } from '../utils/paths'
+import { placeTab, type TabDestination } from './tab-order'
+import type { FileWriteResult } from '../../../shared/electron-api'
 
 /**
  * Modes the primary pane can render.
@@ -142,6 +144,8 @@ export class FileState {
   private listeners = new Set<(state: FileStateData) => void>()
   private autoSaveTimer: ReturnType<typeof setTimeout> | null = null
   private secondaryAutoSaveTimer: ReturnType<typeof setTimeout> | null = null
+  private deletingPaths = new Set<string>()
+  private pendingWrites = new Map<Promise<FileWriteResult>, string>()
   private settingsStore = SettingsStore.getInstance()
 
   private constructor() {
@@ -164,6 +168,48 @@ export class FileState {
     return () => {
       this.listeners.delete(listener)
     }
+  }
+
+  subscribeSelector<T>(
+    select: (state: Readonly<FileStateData>) => T,
+    listener: (value: T, state: FileStateData) => void,
+    equals: (a: T, b: T) => boolean = Object.is
+  ): () => void {
+    let previous = select(this.state)
+    return this.subscribe((snapshot) => {
+      const next = select(snapshot)
+      if (equals(previous, next)) return
+      previous = next
+      listener(next, snapshot)
+    })
+  }
+
+  dropTab(id: string, destination: TabDestination): void {
+    if (
+      destination.section === 'group' &&
+      !this.state.tabGroups?.some((group) => group.id === destination.groupId)
+    )
+      return
+    this.flushActiveTab()
+    const active = this.activeTabDoc()
+    const tabs = placeTab(this.state.tabs, id, destination)
+    const unchanged = tabs.every((tab, i) => {
+      const old = this.state.tabs[i]
+      return (
+        tab.id === old?.id &&
+        !!tab.isPinned === !!old?.isPinned &&
+        (tab.groupId ?? null) === (old?.groupId ?? null)
+      )
+    })
+    if (unchanged) return
+    const activeTab = Math.max(
+      0,
+      tabs.findIndex((tab) => tab.id === active?.id)
+    )
+    this.state = { ...this.state, tabs, activeTab }
+    this.syncMirror()
+    this.persistTabs()
+    this.notify()
   }
 
   private notify(): void {
@@ -202,22 +248,22 @@ export class FileState {
   }
 
   private persistTabs(): void {
-    this.settingsStore.set(
-      'files.openTabs',
-      this.state.tabs.map((t) => t.path)
-    )
-    this.settingsStore.set('files.activeTabPath', this.activeTabDoc()?.path ?? null)
-    this.settingsStore.set(
-      'files.pinnedTabs',
-      this.state.tabs.filter((t) => t.isPinned && t.path).map((t) => t.path as string)
-    )
     const groupData = {
       groups: this.state.tabGroups,
       assignments: this.state.tabs
         .filter((t) => t.path && t.groupId)
         .map((t) => ({ path: t.path as string, groupId: t.groupId as string }))
     }
-    this.settingsStore.set('files.tabGroups', JSON.stringify(groupData))
+    this.settingsStore.setMany({
+      'files.openTabs': this.state.tabs
+        .map((tab) => tab.path)
+        .filter((path): path is string => path !== null),
+      'files.activeTabPath': this.activeTabDoc()?.path ?? null,
+      'files.pinnedTabs': this.state.tabs
+        .filter((tab) => tab.isPinned && tab.path)
+        .map((tab) => tab.path as string),
+      'files.tabGroups': JSON.stringify(groupData)
+    })
   }
 
   private openTab(tab: Omit<TabDoc, 'lastWritten' | 'pendingWrite'>): void {
@@ -425,7 +471,15 @@ export class FileState {
   createTabGroup(label: string, color?: string, tabIndices: number[] = []): string {
     const currentGroups = this.state.tabGroups ?? []
     const id = `group-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`
-    const groupColors = ['#f24e1e', '#3b82f6', '#10b981', '#f59e0b', '#8b5cf6', '#ec4899', '#06b6d4']
+    const groupColors = [
+      '#f24e1e',
+      '#3b82f6',
+      '#10b981',
+      '#f59e0b',
+      '#8b5cf6',
+      '#ec4899',
+      '#06b6d4'
+    ]
     const assignedColor = color ?? groupColors[currentGroups.length % groupColors.length]
     const newGroup: TabGroup = {
       id,
@@ -466,27 +520,55 @@ export class FileState {
   /**
    * Delete a tab group. If closeTabs is true, member tabs are closed; otherwise ungrouped.
    */
-  deleteTabGroup(groupId: string, closeTabs = false): void {
-    const currentGroups = this.state.tabGroups ?? []
+  async deleteTabGroup(groupId: string, closeTabs = false): Promise<void> {
     if (closeTabs) {
-      const remainingTabs = this.state.tabs.filter((t) => t.groupId !== groupId)
-      let activeTab = this.state.activeTab
-      if (activeTab >= remainingTabs.length) {
-        activeTab = Math.max(0, remainingTabs.length - 1)
+      const active = this.activeTabDoc()
+      if (this.state.tabs.some((tab) => tab.groupId === groupId && tab.dirty)) {
+        if (active?.groupId === groupId) this.clearAutoSaveTimer()
+        const confirmed = await showConfirm(
+          'This group has unsaved changes. Close all tabs in the group anyway?'
+        )
+        if (!confirmed) {
+          if (active?.groupId === groupId && this.activeTabDoc()?.id === active.id)
+            this.scheduleAutoSave()
+          return
+        }
       }
+      const currentActive = this.activeTabDoc()
+      if (currentActive?.groupId === groupId) this.clearAutoSaveTimer()
+      const closedTabs = this.state.tabs.filter((tab) => tab.groupId === groupId)
+      const remainingTabs = this.state.tabs.filter((t) => t.groupId !== groupId)
+      const remainingActive = remainingTabs.findIndex((tab) => tab.id === currentActive?.id)
+      const activeTab = Math.max(
+        0,
+        remainingActive >= 0
+          ? remainingActive
+          : Math.min(this.state.activeTab, remainingTabs.length - 1)
+      )
       this.state = {
         ...this.state,
         tabs: remainingTabs,
         activeTab,
-        tabGroups: currentGroups.filter((g) => g.id !== groupId)
+        tabGroups: this.state.tabGroups?.filter((g) => g.id !== groupId)
       }
       this.syncMirror()
+      if (remainingActive >= 0) this.scheduleAutoSave()
+      for (const tab of closedTabs) {
+        if (
+          tab.path &&
+          !sameFilePath(tab.path, this.state.secondaryDoc?.path) &&
+          !remainingTabs.some((remaining) => sameFilePath(remaining.path, tab.path))
+        )
+          void api()
+            ?.file?.unwatch?.(tab.path)
+            .catch(() => undefined)
+      }
     } else {
       const tabs = this.state.tabs.map((t) => (t.groupId === groupId ? { ...t, groupId: null } : t))
       this.state = {
         ...this.state,
         tabs,
-        tabGroups: currentGroups.filter((g) => g.id !== groupId)
+        tabGroups: this.state.tabGroups?.filter((g) => g.id !== groupId)
       }
     }
     this.persistTabs()
@@ -590,6 +672,74 @@ export class FileState {
     this.syncMirror()
     this.persistTabs()
     this.notify()
+  }
+
+  /** Delete a document without letting pane teardown save it back to disk. */
+  async deleteFile(path: string): Promise<boolean> {
+    if (this.isDeleting(path)) return false
+    this.deletingPaths.add(path)
+    if (sameFilePath(this.state.path, path)) this.clearAutoSaveTimer()
+    if (sameFilePath(this.state.secondaryDoc?.path, path)) this.clearSecondaryAutoSaveTimer()
+    let deleted = false
+    try {
+      await Promise.allSettled(
+        [...this.pendingWrites]
+          .filter(([, target]) => sameFilePath(target, path))
+          .map(([write]) => write)
+      )
+      deleted = Boolean(await api()?.file?.delete?.(path))
+    } catch (error) {
+      console.error('Failed to delete file:', error)
+    }
+    if (!deleted) {
+      this.deletingPaths.delete(path)
+      if (sameFilePath(this.state.path, path)) this.scheduleAutoSave()
+      if (sameFilePath(this.state.secondaryDoc?.path, path)) this.scheduleSecondaryAutoSave()
+      return false
+    }
+    const active = this.activeTabDoc()
+    const tabs = this.state.tabs.filter((tab) => !sameFilePath(tab.path, path))
+    const remainingActive = tabs.findIndex((tab) => tab.id === active?.id)
+    if (sameFilePath(this.state.path, path)) this.clearAutoSaveTimer()
+    const secondaryMatches = sameFilePath(this.state.secondaryDoc?.path, path)
+    if (secondaryMatches) this.clearSecondaryAutoSaveTimer()
+    this.state = {
+      ...this.state,
+      tabs,
+      activeTab: Math.max(
+        0,
+        remainingActive >= 0 ? remainingActive : Math.min(this.state.activeTab, tabs.length - 1)
+      ),
+      ...(secondaryMatches
+        ? { splitActive: false, splitSurface: 'launcher', secondaryDoc: null }
+        : {}),
+      conflict: sameFilePath(this.state.conflict?.path, path) ? null : this.state.conflict
+    }
+    this.syncMirror()
+    if (remainingActive >= 0) this.scheduleAutoSave()
+    this.persistTabs()
+    this.notify()
+    void api()
+      ?.file?.unwatch?.(path)
+      .catch(() => undefined)
+    this.deletingPaths.delete(path)
+    return true
+  }
+
+  private isDeleting(path: string | null): boolean {
+    return [...this.deletingPaths].some((deletingPath) => sameFilePath(deletingPath, path))
+  }
+
+  private async writeDocument(path: string, content: string): Promise<FileWriteResult | undefined> {
+    if (this.isDeleting(path)) return undefined
+    const write = api()?.file?.write?.(path, content)
+    if (!write) return undefined
+    this.pendingWrites.set(write, path)
+    try {
+      return await write
+    } finally {
+      this.pendingWrites.delete(write)
+    }
   }
 
   async newFile(): Promise<void> {
@@ -726,6 +876,7 @@ export class FileState {
     const index = targetIndex ?? this.state.activeTab
     const tab = this.state.tabs[index] ?? null
     if (!tab) return false
+    if (this.isDeleting(tab.path)) return false
     if (!tab.path) return targetIndex === undefined ? this.saveAs() : false
     try {
       // Mark as pending to prevent watcher race conditions
@@ -736,7 +887,7 @@ export class FileState {
           i === index ? { ...t, pendingWrite: contentToSave } : t
         )
       }
-      const result = await api()?.file?.write?.(tab.path, contentToSave)
+      const result = await this.writeDocument(tab.path, contentToSave)
       // Re-resolve by path, not by this.state.activeTab. Switching tabs during
       // the write used to mark the wrong tab clean and clobber its
       // originalContent while leaving pendingWrite set on the tab that was
@@ -805,44 +956,40 @@ export class FileState {
   }
 
   async renameFile(newName: string, isSecondary = false): Promise<boolean> {
-    if (isSecondary) {
-      const doc = this.state.secondaryDoc
-      if (!doc || !doc.path) return false
-      const newPath = this.buildRenamedPath(doc.path, newName)
-      if (newPath === doc.path) return true
-      const exists = await api()?.file?.exists?.(doc.path)
-      if (exists) {
-        const success = await api()?.file?.rename?.(doc.path, newPath)
-        if (!success) return false
-      }
-      this.state = {
-        ...this.state,
-        secondaryDoc: { ...doc, path: newPath }
-      }
-      this.notify()
-      return true
+    const doc = isSecondary ? this.state.secondaryDoc : this.activeTabDoc()
+    if (!doc?.path) return false
+    const newPath = this.buildRenamedPath(doc.path, newName)
+    if (newPath === doc.path) return true
+    const exists = await api()?.file?.exists?.(doc.path)
+    if (exists && !(await api()?.file?.rename?.(doc.path, newPath))) return false
+    return this.updateDocumentPath(doc.path, newPath)
+  }
+
+  private updateDocumentPath(previousPath: string, nextPath: string): boolean {
+    const primaryMatches = sameFilePath(this.state.path, previousPath)
+    const secondary = this.state.secondaryDoc
+    const secondaryMatches = secondary !== null && sameFilePath(secondary.path, previousPath)
+    const tabs = this.state.tabs.map((tab) =>
+      sameFilePath(tab.path, previousPath) ? { ...tab, path: nextPath } : tab
+    )
+    if (!secondaryMatches && tabs.every((tab, index) => tab === this.state.tabs[index]))
+      return false
+    this.state = {
+      ...this.state,
+      tabs,
+      secondaryDoc: secondaryMatches ? { ...secondary!, path: nextPath } : secondary
     }
-
-    const tab = this.activeTabDoc()
-    if (!tab || !tab.path) return false
-    const newPath = this.buildRenamedPath(tab.path, newName)
-    if (newPath === tab.path) return true
-
-    const exists = await api()?.file?.exists?.(tab.path)
-    if (exists) {
-      const success = await api()?.file?.rename?.(tab.path, newPath)
-      if (!success) return false
-    }
-
-    // Resolve by the original path: two awaits have passed, so
-    // this.state.activeTab may no longer point at the tab being renamed.
-    const idx = this.state.tabs.findIndex((t) => t.path === tab.path)
-    if (idx < 0) return false
-    const tabs = this.state.tabs.map((t, i) => (i === idx ? { ...t, path: newPath } : t))
-    this.state = { ...this.state, tabs }
     this.syncMirror()
     this.persistTabs()
-    this.addRecentFile(newPath)
+    this.addRecentFile(nextPath)
+    void api()
+      ?.file?.unwatch?.(previousPath)
+      .catch(() => undefined)
+    void api()
+      ?.file?.watch?.(nextPath)
+      .catch(() => undefined)
+    if (primaryMatches) this.scheduleAutoSave()
+    if (secondaryMatches) this.scheduleSecondaryAutoSave()
     this.notify()
     return true
   }
@@ -854,9 +1001,9 @@ export class FileState {
     return parts.length > 0 ? parts.join('/') + '/' + finalName : finalName
   }
 
-  /** Move the active tab's file into another directory. Returns false when cancelled. */
-  async moveActiveFile(): Promise<boolean> {
-    const tab = this.activeTabDoc()
+  /** Move the selected pane's file into another directory. Returns false when cancelled. */
+  async moveActiveFile(isSecondary = false): Promise<boolean> {
+    const tab = isSecondary ? this.state.secondaryDoc : this.activeTabDoc()
     if (!tab || !tab.path) return false
     const result = await api()?.dialog?.showOpenDialog?.({
       properties: ['openDirectory', 'createDirectory']
@@ -870,21 +1017,7 @@ export class FileState {
       alert(`Could not move file to ${newPath}`)
       return false
     }
-    await api()
-      ?.file?.unwatch?.(tab.path)
-      .catch(() => undefined)
-    await api()
-      ?.file?.watch?.(newPath)
-      .catch(() => undefined)
-    const idx = this.state.tabs.findIndex((t) => t.path === tab.path)
-    if (idx < 0) return false
-    const tabs = this.state.tabs.map((t, i) => (i === idx ? { ...t, path: newPath } : t))
-    this.state = { ...this.state, tabs }
-    this.syncMirror()
-    this.persistTabs()
-    this.addRecentFile(newPath)
-    this.notify()
-    return true
+    return this.updateDocumentPath(tab.path, newPath)
   }
 
   setContent(content: string): void {
@@ -1187,8 +1320,9 @@ export class FileState {
   async saveSecondary(): Promise<boolean> {
     const secondary = this.state.secondaryDoc
     if (!secondary || secondary.isDiff || !secondary.dirty || !secondary.path) return false
+    if (this.isDeleting(secondary.path)) return false
     try {
-      const result = await api()?.file?.write?.(secondary.path, secondary.content)
+      const result = await this.writeDocument(secondary.path, secondary.content)
       if (!result) return false
       const current = this.state.secondaryDoc
       if (current && current.path === secondary.path && current.content === secondary.content) {
@@ -1218,8 +1352,9 @@ export class FileState {
    */
   async writeSecondary(path: string | null, content: string): Promise<boolean> {
     if (!path) return false
+    if (this.isDeleting(path)) return false
     try {
-      const result = await api()?.file?.write?.(path, content)
+      const result = await this.writeDocument(path, content)
       if (!result) return false
       const current = this.state.secondaryDoc
       if (current && sameFilePath(current.path, path)) {

@@ -82,4 +82,16 @@ describe('settings persistence', () => {
     expect(s.editor.fontFamily).toBe('JetBrains Mono')
     expect(s.appearance.theme).toBe('graphite')
   })
+
+  it('recovers the write queue after an atomic rename fails', async () => {
+    mockElectron(false)
+    const { setSettings, getSettings } = await import('../src/main/settings')
+    getSettings()
+    mkdirSync(CONFIG)
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    await expect(setSettings({ appearance: { railWidth: 224 } })).rejects.toThrow()
+    rmSync(CONFIG, { recursive: true })
+    await setSettings({ appearance: { railWidth: 240 } })
+    expect(JSON.parse(readFileSync(CONFIG, 'utf-8')).appearance.railWidth).toBe(240)
+  })
 })

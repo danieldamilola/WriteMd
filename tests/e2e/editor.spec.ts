@@ -1,5 +1,5 @@
 import { test, expect, type ElectronApplication } from '@playwright/test'
-import { makeFixture, launch, firstWindow } from './fixtures'
+import { makeFixture, launch, firstWindow, openSettings } from './fixtures'
 
 const fixture = makeFixture('editor')
 
@@ -27,19 +27,15 @@ test.describe('WriteMd Editor', () => {
   test('should open and close settings', async () => {
     const window = await firstWindow(app!)
 
-    const settingsBtn = window.locator('writemd-icon-button[title="Settings"]')
-    // No `if (await isVisible())` wrapper. The old version skipped its whole
-    // body when the button was missing, so the test passed without asserting
-    // anything at all.
-    await expect(settingsBtn).toBeVisible()
-    await settingsBtn.click()
+    // The title bar carries no Settings icon; the shortcut opens the modal.
+    await openSettings(window)
 
     const modal = window.locator('writemd-settings-modal')
     await expect(modal).toBeVisible()
     await expect(modal.locator('[role="dialog"]')).toBeVisible()
 
     // The search field is wired to the nav now, not a decorative input.
-    const search = modal.locator('input[aria-label="Search settings"]')
+    const search = modal.locator('.sidebar-search writemd-search-bar input')
     await expect(search).toBeVisible()
     await search.fill('shortcut')
     await expect(modal.locator('[data-tab="shortcuts"]')).toBeVisible()
@@ -50,7 +46,7 @@ test.describe('WriteMd Editor', () => {
 
   test('the settings modal lays out as a sidebar beside its content', async () => {
     const window = await firstWindow(app!)
-    await window.locator('writemd-icon-button[title="Settings"]').click()
+    await openSettings(window)
     const modal = window.locator('writemd-settings-modal')
     await expect(modal).toBeVisible()
 
@@ -74,7 +70,7 @@ test.describe('WriteMd Editor', () => {
     })
 
     expect(box.dialogWidth).toBeGreaterThan(600)
-    expect(box.sidebarWidth).toBeGreaterThanOrEqual(250)
+    expect(box.sidebarWidth).toBeGreaterThanOrEqual(200)
     expect(box.mainWidth).toBeGreaterThan(400)
     expect(box.sideBySide).toBe(true)
 
@@ -83,8 +79,10 @@ test.describe('WriteMd Editor', () => {
 
   test('the settings modal returns focus to whatever opened it', async () => {
     const window = await firstWindow(app!)
-    const settingsBtn = window.locator('writemd-icon-button[title="Settings"]')
-    await settingsBtn.click()
+    // Focus the editor first: the shortcut opener hands focus back to
+    // whatever held it, and body is not a useful answer.
+    await window.locator('writemd-editor').click()
+    await openSettings(window)
     await expect(window.locator('writemd-settings-modal')).toBeVisible()
     await window.locator('button.back-btn').click()
     await expect(window.locator('writemd-settings-modal')).toHaveCount(0)

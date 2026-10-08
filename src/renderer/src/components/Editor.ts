@@ -5,7 +5,7 @@ import { findNext, findPrevious, getSearchQuery } from '@codemirror/search'
 import { scrollbarStyles } from './scrollbars'
 import { SettingsStore } from '../state/settings'
 import { type AiMessage } from './AiPanel'
-import type { AttachedFile, ChatMessage, ChatSessionSummary } from '../../../shared/electron-api'
+import type { AttachedFile, ChatSessionSummary } from '../../../shared/electron-api'
 import { icon } from './icons'
 import './FindPanel'
 import './AiPanel'
@@ -54,21 +54,17 @@ import {
 } from '../state/file-state'
 import { hasOriginalDocUpdate } from '../state/conflict'
 import './Panel'
+import './Workspace'
 import './InfoPill'
 import './DocBar'
 import './SurfaceLauncher'
 import './TextMenu'
 import './VaultExplorer'
 import { api } from '../api'
-import { DEFAULT_AI_SYSTEM_PROMPT } from '../../../shared/settings-schema'
+import { AiSessionController } from '../controllers/ai-session'
+export { AI_DOC_CONTEXT_LIMIT, documentContextFor } from '../controllers/ai-session'
 import type { VaultTreeNode } from '../../../shared/electron-api'
-import {
-  basenameNoExt,
-  cleanWikiTarget,
-  displayPath,
-  displayTitle,
-  shortPath
-} from '../utils/links'
+import { basenameNoExt, cleanWikiTarget, displayPath, shortPath } from '../utils/links'
 import { navigateLink, resolveOrCreateLink, type NavigateDeps } from '../utils/navigate'
 
 /**
@@ -99,38 +95,6 @@ function headingMatches(lineText: string, anchor: string): boolean {
  * "Error invoking remote method 'net:chat': Error: <the real message>". Showing
  * that verbatim in the chat log told the user nothing about which call failed.
  */
-function describeAiError(e: unknown): string {
-  const raw = e instanceof Error ? e.message : String(e)
-  const wrapped = /^Error invoking remote method '[^']*':\s*(?:Error:\s*)?([\s\S]*)$/
-  const match = wrapped.exec(raw)
-  return (match ? match[1] : raw).trim() || 'The request failed.'
-}
-
-/**
- * How much of the open file rides along with an AI question.
- *
- * The full document used to be embedded in every request. That is a 6 MB string
- * copy per question on a large note, and a payload no provider accepts, so the
- * context is capped and the model is told the file was cut rather than left to
- * assume it saw all of it. About 200 000 characters, roughly 50k tokens.
- */
-export const AI_DOC_CONTEXT_LIMIT = 200_000
-
-export function documentContextFor(content: string): { text: string; note: string } {
-  if (content.length <= AI_DOC_CONTEXT_LIMIT) return { text: content, note: '' }
-  let cut = AI_DOC_CONTEXT_LIMIT
-  // Never end on half a surrogate pair: a lone surrogate in a request is
-  // invalid UTF-16 and some providers reject the whole payload over it.
-  const next = content.charCodeAt(cut)
-  if (next >= 0xdc00 && next <= 0xdfff) cut -= 1
-  const kept = content.slice(0, cut)
-  const totalMb = Math.round(content.length / (1024 * 1024))
-  return {
-    text: kept,
-    note: `Only the first ${Math.round(cut / 1024)} KB of this ${totalMb} MB file are shown below.\n\n`
-  }
-}
-
 /** Relative for anything recent, absolute beyond a week. */
 function formatWhen(ts: number): string {
   const diff = Date.now() - ts
@@ -156,14 +120,9 @@ export class Editor extends LitElement {
         min-height: 0;
         min-width: 0;
         position: relative;
-        /* Transparent, not --bg. This element's 5px padding is the gutter that
-           separates the window frame from the pane, and painting it introduced a
-           third tone between the two: frame, gutter, pane. Leaving it
-           transparent lets the frame show through, so the shell reads as exactly
-           two surfaces. */
         background: transparent;
         box-sizing: border-box;
-        padding: 0 5px 5px 5px;
+        padding: 0;
       }
 
       .workspace {
@@ -226,7 +185,7 @@ export class Editor extends LitElement {
         display: flex;
         flex-direction: column;
         min-height: 0;
-        min-width: 320px;
+        min-width: 0;
         position: relative;
         height: 100%;
         overflow: hidden;
@@ -256,16 +215,16 @@ export class Editor extends LitElement {
         justify-content: space-between;
         height: 49px;
         padding: 0 20px;
-        border-bottom: 1px solid var(--border-subtle);
         flex-shrink: 0;
         user-select: none;
-        font-family: 'Geist Mono', monospace;
+        font-family: var(--font-ui);
         font-size: 14px;
       }
 
       .sub-header-left {
         display: flex;
         align-items: center;
+        gap: 8px;
         color: var(--text-muted);
         font-size: 13px;
         overflow: hidden;
@@ -273,6 +232,12 @@ export class Editor extends LitElement {
         -webkit-mask-image: linear-gradient(to right, black 80%, transparent 100%);
         mask-image: linear-gradient(to right, black 80%, transparent 100%);
         flex: 1;
+      }
+
+      .sub-header-left span {
+        color: var(--text);
+        font-weight: 500;
+        font-size: 13px;
       }
 
       .sub-header-center {
@@ -358,26 +323,6 @@ export class Editor extends LitElement {
         writemd-panel .sub-header + * {
           animation: none;
         }
-      }
-
-      input.title-input {
-        background: transparent;
-        border: 1px solid transparent;
-        color: inherit;
-        font-family: inherit;
-        font-size: inherit;
-        font-weight: inherit;
-        text-align: center;
-        width: 100%;
-        outline: none;
-        padding: 2px 4px;
-        border-radius: 4px;
-      }
-
-      input.title-input:hover,
-      input.title-input:focus {
-        background: var(--bg-hover);
-        border-color: var(--border);
       }
 
       .sub-header-right {
@@ -609,7 +554,8 @@ export class Editor extends LitElement {
   @state() private splitLeaving = false
   @state() private splitSurface: SplitSurface = 'launcher'
   @state() private secondaryDoc: SecondaryDocState | null = null
-  @state() private textMenu: { x: number; y: number } | null = null
+  @state() private textMenu: { x: number; y: number; secondary: boolean } | null = null
+  @state() private findPane: 'primary' | 'secondary' = 'primary'
   @state() private findOpen = false
   @state() private findMode: 'find' | 'replace' = 'find'
   @state() private findQuery = ''
@@ -619,27 +565,70 @@ export class Editor extends LitElement {
   @state() private notice = ''
   private noticeTimer: number | null = null
 
-  @state() private leftPaneWidth = 50 // percentage
-  @state() private isDraggingResizer = false
   @state() private panelOrientation: 'horizontal' | 'vertical' = 'horizontal'
-  @state() private isAiConfigured = false
-  @state() private aiMessages: AiMessage[] = []
-  @state() private aiIsLoading = false
-  /** Persisted chat for the open document. Null until one exists on disk. */
-  @state() private aiSessionId: string | null = null
-  @state() private aiSessions: ChatSessionSummary[] = []
+  private readonly ai = new AiSessionController(this, {
+    path: () => this.filePath,
+    content: () => this.content,
+    closeHistory: () => {
+      this.aiHistoryOpen = false
+    },
+    replace: (content, path) => this.applyAiReplacement(content, path)
+  })
   @state() private aiHistoryOpen = false
-  /** Index of the reply currently streaming in, or -1 when none is. */
-  private aiStreamIndex = -1
-
-  /** Files attached to the next prompt, read by the main process. */
-  @state() private aiAttachments: AttachedFile[] = []
-  /** True while a chosen attachment is being read across the bridge. */
-  @state() private aiAttaching = false
-  /** Models the provider reports for the configured key. */
-  @state() private aiModels: string[] = []
-  @state() private aiModelsLoading = false
-
+  private get isAiConfigured(): boolean {
+    return this.ai.isAiConfigured
+  }
+  private set isAiConfigured(value: boolean) {
+    this.ai.isAiConfigured = value
+  }
+  private get aiMessages(): AiMessage[] {
+    return this.ai.aiMessages
+  }
+  private set aiMessages(value: AiMessage[]) {
+    this.ai.aiMessages = value
+  }
+  private get aiIsLoading(): boolean {
+    return this.ai.aiIsLoading
+  }
+  private set aiIsLoading(value: boolean) {
+    this.ai.aiIsLoading = value
+  }
+  private get aiSessionId(): string | null {
+    return this.ai.aiSessionId
+  }
+  private set aiSessionId(value: string | null) {
+    this.ai.aiSessionId = value
+  }
+  private get aiSessions(): ChatSessionSummary[] {
+    return this.ai.aiSessions
+  }
+  private set aiSessions(value: ChatSessionSummary[]) {
+    this.ai.aiSessions = value
+  }
+  private get aiAttachments(): AttachedFile[] {
+    return this.ai.aiAttachments
+  }
+  private set aiAttachments(value: AttachedFile[]) {
+    this.ai.aiAttachments = value
+  }
+  private get aiAttaching(): boolean {
+    return this.ai.aiAttaching
+  }
+  private set aiAttaching(value: boolean) {
+    this.ai.aiAttaching = value
+  }
+  private get aiModels(): string[] {
+    return this.ai.aiModels
+  }
+  private set aiModels(value: string[]) {
+    this.ai.aiModels = value
+  }
+  private get aiModelsLoading(): boolean {
+    return this.ai.aiModelsLoading
+  }
+  private set aiModelsLoading(value: boolean) {
+    this.ai.aiModelsLoading = value
+  }
   /**
    * Model the composer names on its chip, so the target of a send is visible.
    *
@@ -673,136 +662,22 @@ export class Editor extends LitElement {
    * list too, and the key never crosses into renderer memory: the request goes
    * out with an empty key and main substitutes the stored one.
    */
-  private async refreshAiModels(): Promise<void> {
-    const electron = api()
-    if (!electron?.net) return
-    this.aiModelsLoading = true
-    const configuredModel = this.aiModel
-    try {
-      const provider = this.settingsStore?.get('ai.provider', 'OpenAI') ?? 'OpenAI'
-      const models = await electron.net.fetchModels(provider, '')
-      // A selected model stays usable even if a provider omits it from its
-      // discoverable list. The chat request is the authority on whether it is
-      // actually available to this key.
-      this.aiModels = configuredModel
-        ? [configuredModel, ...models.filter((model) => model !== configuredModel)]
-        : models
-    } catch (e) {
-      // A failed discovery request must not make an already selected model look
-      // unavailable. Sending remains possible and surfaces the provider's real
-      // error if the key, model, or network is the underlying problem.
-      console.error('Failed to fetch AI models:', e)
-      this.aiModels = configuredModel ? [configuredModel] : []
-    } finally {
-      this.aiModelsLoading = false
-    }
-  }
-
-  /** Switch model from the composer chip. Persisted, so it survives a restart. */
-  private handleAiModelChange = (e: Event): void => {
-    const model = (e as CustomEvent<{ model: string }>).detail.model
-    if (!model || model === this.aiModel) return
-    void this.settingsStore?.set('ai.model', model)
-  }
-
-  /**
-   * Attach files to the next prompt.
-   *
-   * The dialog runs here rather than in the panel because it is what registers
-   * each chosen path with the main process, and the reads have to follow that
-   * registration. One failing file is reported and the rest still attach: a
-   * user picking six screenshots does not want all six lost to one bad path.
-   */
-  private handleAiAttachRequest = async (): Promise<void> => {
-    const electron = api()
-    if (!electron?.dialog || !electron.file?.readAttachment) return
-    let picked: Electron.OpenDialogReturnValue
-    try {
-      picked = await electron.dialog.showOpenDialog({
-        properties: ['openFile', 'multiSelections'],
-        filters: [
-          {
-            name: 'Notes and text',
-            extensions: ['md', 'markdown', 'txt', 'csv', 'json', 'yaml', 'yml']
-          },
-          { name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'gif', 'webp'] },
-          { name: 'All files', extensions: ['*'] }
-        ]
-      })
-    } catch (e) {
-      console.error('Failed to open attach dialog:', e)
-      return
-    }
-    if (picked.canceled || picked.filePaths.length === 0) return
-
-    this.aiAttaching = true
-    const added: AttachedFile[] = []
-    for (const path of picked.filePaths) {
-      try {
-        added.push(await electron.file.readAttachment(path))
-      } catch (e) {
-        // Surfaced as an assistant line rather than a dialog: the user is
-        // looking at the transcript, and the reason belongs next to the prompt
-        // it was meant for.
-        const reason = e instanceof Error ? e.message : String(e)
-        this.aiMessages = [
-          ...this.aiMessages,
-          { role: 'assistant', content: `Could not attach that file: ${reason}` }
-        ]
-      }
-    }
-    this.aiAttachments = [...this.aiAttachments, ...added]
-    this.aiAttaching = false
-  }
-
-  /**
-   * Files dropped on the composer: register the paths (the dialog would have),
-   * then read them through the same guard-checked bridge the picker uses.
-   */
-  private handleAiAttachFiles = async (e: Event): Promise<void> => {
-    const electron = api()
-    if (!electron?.file?.readAttachment || !electron.file.registerDroppedPaths) return
-    const { paths } = (e as CustomEvent<{ paths: string[] }>).detail
-    if (!paths?.length) return
-    try {
-      await electron.file.registerDroppedPaths(paths)
-    } catch (err) {
-      console.error('Failed to register dropped paths:', err)
-    }
-    this.aiAttaching = true
-    const added: AttachedFile[] = []
-    for (const path of paths) {
-      try {
-        added.push(await electron.file.readAttachment(path))
-      } catch (err) {
-        const reason = err instanceof Error ? err.message : String(err)
-        this.aiMessages = [
-          ...this.aiMessages,
-          { role: 'assistant', content: `Could not attach that file: ${reason}` }
-        ]
-      }
-    }
-    this.aiAttachments = [...this.aiAttachments, ...added]
-    this.aiAttaching = false
-  }
-
-  private handleAiAttachRemove = (e: Event): void => {
-    const path = (e as CustomEvent<{ path: string }>).detail.path
-    this.aiAttachments = this.aiAttachments.filter((f) => f.path !== path)
-  }
-
-  /** Stop the reply in flight. The partial answer is kept by the main process. */
-  private handleAiCancel = (): void => {
-    void api()?.net?.cancelChat?.()
-  }
-
-  private handleAiClear = (): void => {
-    this.aiMessages = []
-    // Clearing empties the transcript; starting a new chat is what mints a new
-    // session, so the current id is kept.
-    void this.persistAiSession()
-  }
-
+  private refreshAiModels = this.ai.refreshAiModels.bind(this.ai)
+  private handleAiModelChange = this.ai.handleAiModelChange.bind(this.ai)
+  private handleAiAttachRequest = this.ai.handleAiAttachRequest.bind(this.ai)
+  private handleAiAttachFiles = this.ai.handleAiAttachFiles.bind(this.ai)
+  private handleAiAttachRemove = this.ai.handleAiAttachRemove.bind(this.ai)
+  private handleAiCancel = this.ai.handleAiCancel.bind(this.ai)
+  private handleAiClear = this.ai.handleAiClear.bind(this.ai)
+  private checkAiConfigured = this.ai.checkAiConfigured.bind(this.ai)
+  private handleAiWebSearchToggle = this.ai.handleAiWebSearchToggle.bind(this.ai)
+  private stashAiSessionForPath = this.ai.stashAiSessionForPath.bind(this.ai)
+  private loadAiSession = this.ai.loadAiSession.bind(this.ai)
+  private refreshAiSessions = this.ai.refreshAiSessions.bind(this.ai)
+  private handleAiNewSession = this.ai.handleAiNewSession.bind(this.ai)
+  private handleAiSelectSession = this.ai.handleAiSelectSession.bind(this.ai)
+  private handleAiSubmit = this.ai.handleAiSubmit.bind(this.ai)
+  private handleThoughtSettle = this.ai.handleThoughtSettle.bind(this.ai)
   private settingsStore: SettingsStore | null = null
   private settingsUnsubs: Array<() => void> = []
   private busUnsubs: Array<() => void> = []
@@ -818,7 +693,7 @@ export class Editor extends LitElement {
       })
     )
     this.settingsStore = SettingsStore.getInstance()
-    this.panelOrientation = this.settingsStore.get('appearance.panelOrientation', 'horizontal') as
+    this.panelOrientation = this.settingsStore.get('appearance.panelOrientation', 'vertical') as
       'horizontal' | 'vertical'
     this.checkAiConfigured()
     this.settingsUnsubs.push(
@@ -865,14 +740,15 @@ export class Editor extends LitElement {
       const normalizedMode = s.viewMode === 'wysiwyg' ? 'live' : s.viewMode
       const modeChanged = this.viewMode !== normalizedMode
       const docChanged = this.content !== s.content
-      const pathChanged = this.filePath !== s.path
+      const oldPath = this.filePath
+      const newPath = s.path
+      const pathChanged = oldPath !== newPath
       const secondaryDocChanged = this.secondaryDoc?.content !== s.secondaryDoc?.content
       const secondaryPathChanged = this.secondaryDoc?.path !== s.secondaryDoc?.path
       const secondaryModeChanged = this.secondaryDoc?.viewMode !== s.secondaryDoc?.viewMode
 
       const wasSplitActive = this.splitActive
       this.content = s.content
-      this.filePath = s.path
       this.viewMode = normalizedMode
       this.splitActive = s.splitActive
       this.splitSurface = s.splitSurface
@@ -887,7 +763,11 @@ export class Editor extends LitElement {
       // Chat is per document, so switching tabs swaps the transcript. The
       // initial document is handled at setup, above; this is the change case.
       if (pathChanged) {
-        void this.loadAiSession()
+        this.stashAiSessionForPath(oldPath)
+        this.filePath = newPath
+        void this.loadAiSession(newPath)
+      } else {
+        this.filePath = newPath
       }
 
       // While a conflict merge is open the secondary view owns the document
@@ -969,333 +849,6 @@ export class Editor extends LitElement {
     })
   }
 
-  private checkAiConfigured(): void {
-    if (!this.settingsStore) return
-    const provider = this.settingsStore.get<string>('ai.provider', 'OpenAI')
-    // The plaintext key never reaches the renderer; the main process reports
-    // whether one is stored.
-    const keySet = this.settingsStore.get<boolean>('ai.apiKeySet', false)
-    this.isAiConfigured = provider === 'Ollama' || provider === 'OpenCode' || keySet
-  }
-
-  /** Toggle keyless web-search grounding from the composer globe button. */
-  private handleAiWebSearchToggle = (): void => {
-    if (!this.settingsStore) return
-    const current = this.settingsStore.get<boolean>('ai.webSearchEnabled', false)
-    void this.settingsStore.set('ai.webSearchEnabled', !current)
-  }
-
-  /**
-   * Persist the live session. Called after every exchange rather than on a
-   * timer, so a quit mid-conversation does not lose the last reply.
-   */
-  private async persistAiSession(): Promise<void> {
-    const chat = api()?.chat
-    if (!chat || !this.aiSessionId || this.aiMessages.length === 0) return
-    try {
-      await chat.saveSession({
-        id: this.aiSessionId,
-        // Main derives the title from the first user message; empty is fine.
-        title: '',
-        docPath: this.filePath,
-        createdAt: Date.now(),
-        updatedAt: Date.now(),
-        // `streaming` is a live-render flag, not part of the conversation. The
-        // settle handler persists while a reply is still arriving, and a session
-        // file with it would replay the reveal animation on load.
-        messages: this.aiMessages.map((m) => ({
-          role: m.role,
-          content: m.content,
-          filePath: m.filePath,
-          elapsed: m.elapsed,
-          // Names only. The bytes were never in `aiMessages` to begin with,
-          // which is what keeps a session with screenshots from being enormous.
-          attachments: m.attachments
-        }))
-      })
-    } catch (e) {
-      console.error('Failed to save chat session:', e)
-    }
-  }
-
-  /** Newest session for this document, so reopening a file restores its chat. */
-  private async loadAiSession(): Promise<void> {
-    const chat = api()?.chat
-    if (!chat) return
-    try {
-      const existing = await chat.listSessions(this.filePath)
-      this.aiSessions = existing
-      if (existing.length === 0) {
-        this.aiSessionId = null
-        this.aiMessages = []
-        return
-      }
-      const full = await chat.loadSession(existing[0].id)
-      this.aiSessionId = existing[0].id
-      this.aiMessages = full ? (full.messages as AiMessage[]) : []
-    } catch (e) {
-      console.error('Failed to load chat session:', e)
-    }
-  }
-
-  private async refreshAiSessions(): Promise<void> {
-    const chat = api()?.chat
-    if (!chat) return
-    try {
-      this.aiSessions = await chat.listSessions(this.filePath)
-    } catch (e) {
-      console.error('Failed to list chat sessions:', e)
-    }
-  }
-
-  private handleAiNewSession = (): void => {
-    const chat = api()?.chat
-    if (!chat) return
-    this.aiHistoryOpen = false
-    void (async () => {
-      try {
-        const session = await chat.createSession(this.filePath)
-        this.aiSessionId = session.id
-        this.aiMessages = []
-        await this.refreshAiSessions()
-      } catch (e) {
-        console.error('Failed to create chat session:', e)
-      }
-    })()
-  }
-
-  private handleAiSelectSession = (id: string): void => {
-    this.aiHistoryOpen = false
-    const chat = api()?.chat
-    if (!id || !chat) return
-    void (async () => {
-      try {
-        const session = await chat.loadSession(id)
-        if (!session) return
-        this.aiSessionId = session.id
-        this.aiMessages = session.messages as AiMessage[]
-      } catch (err) {
-        console.error('Failed to switch chat session:', err)
-      }
-    })()
-  }
-
-  private async handleAiSubmit(input: string, attachments: AttachedFile[] = []): Promise<void> {
-    // An attachment with no words is a real prompt, so the emptiness check is
-    // on both together rather than on the text alone.
-    if ((!input.trim() && attachments.length === 0) || this.aiIsLoading || !this.settingsStore) {
-      return
-    }
-
-    const currentPath = this.filePath || 'Untitled'
-    // The transcript keeps the names, not the payloads: a session file holding
-    // three screenshots' worth of base64 would be megabytes of disk per chat.
-    this.aiMessages = [
-      ...this.aiMessages,
-      {
-        role: 'user',
-        content: input,
-        filePath: currentPath,
-        attachments: attachments.map((f) => ({ name: f.name, kind: f.kind, size: f.size }))
-      }
-    ]
-    // Cleared here, not in the panel: this is the moment the files stop being
-    // needed and the owner holds them.
-    this.aiAttachments = []
-    this.aiIsLoading = true
-
-    const electron = api()
-    if (!electron) {
-      this.aiIsLoading = false
-      return
-    }
-
-    // The first message in a document creates the session, so an untouched
-    // document leaves no empty transcript behind.
-    if (electron.chat && !this.aiSessionId) {
-      try {
-        const session = await electron.chat.createSession(this.filePath)
-        this.aiSessionId = session.id
-      } catch (e) {
-        console.error('Failed to create chat session:', e)
-      }
-    }
-
-    try {
-      const provider = this.settingsStore.get('ai.provider', 'OpenAI')
-      const model = this.settingsStore.get('ai.model', '')
-
-      // Ground the answer when web search is on: run a keyless search for the
-      // user's question and append the cited results to the file context.
-      // Silent by design: this used to post a `thinking` transcript entry,
-      // which rendered as a second "Thought for 0.0s" line under every prompt.
-      let searchContext = ''
-      const webSearchOn = this.settingsStore.get('ai.webSearchEnabled', false)
-      if (webSearchOn && input.trim()) {
-        try {
-          searchContext = (await electron.web.searchContext(input.trim())) || ''
-        } catch (e) {
-          console.error('Web search failed:', e)
-        }
-      }
-
-      // Custom instructions from Settings > AI Assistant, with live file context appended
-      const customPrompt =
-        this.settingsStore.get('ai.systemPrompt', DEFAULT_AI_SYSTEM_PROMPT) ||
-        DEFAULT_AI_SYSTEM_PROMPT
-      // The whole file used to go out with every question. A 6 MB note meant a
-      // 6 MB payload on the renderer's main thread and a request every provider
-      // rejects for size, so the context is capped and says so. Roughly 200k
-      // characters, which is about 50k tokens.
-      const docContext = documentContextFor(this.content)
-      const systemPrompt = `${customPrompt}
-
-The user is currently editing the file: ${currentPath}
-${docContext.note}Here is the current content of the active file:
-
-\`\`\`markdown
-${docContext.text}
-\`\`\`
-
-If the user asks questions about their file, use the above content to answer.
-${searchContext}`
-
-      // We bypass the ipc.ts system prompt handling completely to avoid needing an app restart.
-      // We inject the system context as a 'user' message at the very beginning of the payload.
-      const payloadMessages: ChatMessage[] = [
-        { role: 'user', content: systemPrompt },
-        {
-          role: 'assistant',
-          content: 'Understood.'
-        },
-        // `thinking` lines are a local record of elapsed time, not conversation,
-        // so they must not reach the provider as messages. The predicate is
-        // needed because filter() alone does not narrow the union.
-        ...this.aiMessages
-          .filter((m): m is AiMessage & { role: 'user' | 'assistant' } => m.role !== 'thinking')
-          .map((m): ChatMessage => {
-            if (m.role === 'user') {
-              return {
-                role: m.role,
-                content: `[Context: The user is currently in file: ${m.filePath}]\n\n${m.content}`
-              }
-            }
-            return { role: m.role, content: m.content }
-          })
-      ]
-
-      /*
-       * Attached files ride on the message that carried them, not on a new one.
-       * Older attachments are not re-sent: their bytes are gone by the time a
-       * later question is asked, and a stale screenshot would silently answer a
-       * question it had nothing to do with.
-       */
-      const textFiles = attachments.filter((f) => f.kind === 'text' && f.text)
-      if (textFiles.length > 0) {
-        payloadMessages[payloadMessages.length - 1] = {
-          ...payloadMessages[payloadMessages.length - 1],
-          content: [
-            payloadMessages[payloadMessages.length - 1].content,
-            ...textFiles.map((f) => `\n\n[Attached file: ${f.name}]\n\`\`\`\n${f.text}\n\`\`\``)
-          ].join('')
-        }
-      }
-      const images = attachments.filter((f) => f.kind === 'image' && f.data)
-      if (images.length > 0) {
-        payloadMessages[payloadMessages.length - 1] = {
-          ...payloadMessages[payloadMessages.length - 1],
-          images: images.map((f) => ({
-            data: f.data as string,
-            mediaType: f.mediaType ?? 'image/png',
-            name: f.name
-          }))
-        }
-      }
-
-      // Send chat request
-      // An empty key tells the main process to use the stored one.
-      // The reply streams in token by token: `onDelta` appends each chunk to a
-      // placeholder message, which is what the reveal animation follows.
-      this.aiStreamIndex = -1
-      const response = await electron.net.chatStream(
-        provider,
-        model,
-        '',
-        payloadMessages,
-        (delta: string) => this.appendAiDelta(delta),
-        ''
-      )
-
-      const replaceRegex = /```writemd-replace\s*\n([\s\S]*?)```/
-      const match = response.match(replaceRegex)
-
-      if (match) {
-        const applied = await this.applyAiReplacement(match[1], currentPath)
-        // Remove the block from the chat response so it doesn't clutter the UI
-        const cleaned = response.replace(replaceRegex, '').trim()
-        const note = applied
-          ? cleaned || 'I have updated the document.'
-          : 'I left your document alone: you switched tabs before the reply arrived. Ask again with that file active.'
-        if (!this.settleAiStream(note)) {
-          this.aiMessages = [...this.aiMessages, { role: 'assistant', content: note }]
-        }
-      } else if (!this.settleAiStream(response)) {
-        // No delta ever arrived, so there is no placeholder to fill.
-        this.aiMessages = [...this.aiMessages, { role: 'assistant', content: response }]
-      }
-      await this.persistAiSession()
-      await this.refreshAiSessions()
-    } catch (e) {
-      const partial = this.aiStreamIndex >= 0 ? this.aiMessages[this.aiStreamIndex]?.content : ''
-      // Whatever arrived before the failure is real output, so it is kept and
-      // the error is reported underneath it rather than replacing it.
-      if (partial) this.settleAiStream(partial)
-      this.aiMessages = [
-        ...this.aiMessages,
-        { role: 'assistant', content: `Error: ${describeAiError(e)}` }
-      ]
-      // The error is part of the transcript the user is looking at, so persist
-      // it too rather than silently dropping it from the stored session.
-      await this.persistAiSession()
-    } finally {
-      this.aiIsLoading = false
-    }
-  }
-
-  /**
-   * Add one streamed delta to the reply, creating the placeholder on the first
-   * one so an empty bubble never appears.
-   */
-  private appendAiDelta(delta: string): void {
-    const i = this.aiStreamIndex
-    if (i === -1 || !this.aiMessages[i]) {
-      this.aiMessages = [...this.aiMessages, { role: 'assistant', content: delta, streaming: true }]
-      this.aiStreamIndex = this.aiMessages.length - 1
-      return
-    }
-    const next = [...this.aiMessages]
-    next[i] = { ...next[i], content: next[i].content + delta }
-    this.aiMessages = next
-  }
-
-  /**
-   * Replace the streaming placeholder with its finished text and stop the reveal.
-   * Returns false when no reply ever started, so the caller can append instead.
-   */
-  private settleAiStream(content: string): boolean {
-    const i = this.aiStreamIndex
-    this.aiStreamIndex = -1
-    if (i === -1 || !this.aiMessages[i]) return false
-    const next = [...this.aiMessages]
-    next[i] = { ...next[i], content, streaming: false }
-    this.aiMessages = next
-    return true
-  }
-
-  /**
-   * Apply an AI-provided document replacement and force-save it to disk.
-   * Returns false when the target document is no longer the active one.
-   */
   private async applyAiReplacement(
     newContent: string,
     targetPath: string | null
@@ -1332,15 +885,6 @@ ${searchContext}`
    * elapsed time only exists while the bubble is mounted and is lost the moment
    * the reply lands.
    */
-  private handleThoughtSettle = (e: Event): void => {
-    const { tenths } = (e as CustomEvent<{ tenths: number }>).detail ?? { tenths: 0 }
-    this.aiMessages = [
-      ...this.aiMessages,
-      { role: 'thinking', content: 'Thinking', elapsed: tenths }
-    ]
-    void this.persistAiSession()
-  }
-
   /**
    * Whether the split pane shows a document editor. The lifecycle code and the
    * template must agree on this exactly, so both read this one getter rather
@@ -1364,7 +908,6 @@ ${searchContext}`
     // run against an already-destroyed view. A teardown mid-drag would otherwise
     // leave the two document listeners and the resize cursor in place, pinning
     // this element and both views.
-    this.stopResize()
     this.editorView?.destroy()
     this.secondaryEditorView?.destroy()
     this.editorView = null
@@ -1413,6 +956,7 @@ ${searchContext}`
     const pane = this.shadowRoot?.querySelector<HTMLElement>('writemd-panel.pane-in') ?? null
     void conceal(pane).then(() => {
       this.splitLeaving = false
+      if (this.splitActive) return
       this.secondaryEditorView?.destroy()
       this.secondaryEditorView = null
     })
@@ -1754,14 +1298,15 @@ ${searchContext}`
     this.fileState.setExplicitMode(e.detail.mode)
   }
 
-  private handleTextMenu = (e: MouseEvent): void => {
+  private handleTextMenu = (e: MouseEvent, secondary = false): void => {
     e.preventDefault()
-    this.textMenu = { x: e.clientX, y: e.clientY }
+    this.textMenu = { x: e.clientX, y: e.clientY, secondary }
   }
 
   /** View the find panel currently targets (secondary pane when focused). */
   private get findTargetView(): EditorView | null {
-    if (this.secondaryEditorView?.hasFocus) return this.secondaryEditorView
+    if (this.findOpen ? this.findPane === 'secondary' : this.secondaryEditorView?.hasFocus)
+      return this.secondaryEditorView
     return this.editorView
   }
 
@@ -1773,8 +1318,11 @@ ${searchContext}`
   @query('writemd-find-panel')
   private findPanelEl!: FindPanel
 
-  private handleGlobalFind = (detail: { mode: 'find' | 'replace' }): void => {
-    this.openFind(detail.mode)
+  private handleGlobalFind = (detail: {
+    mode: 'find' | 'replace'
+    pane?: 'primary' | 'secondary'
+  }): void => {
+    this.openFind(detail.mode, detail.pane)
   }
 
   /**
@@ -1928,8 +1476,9 @@ ${searchContext}`
     }, 4000)
   }
 
-  private openFind(mode: 'find' | 'replace'): void {
-    const view = this.findTargetView
+  private openFind(mode: 'find' | 'replace', pane?: 'primary' | 'secondary'): void {
+    this.findPane = pane ?? (this.secondaryEditorView?.hasFocus ? 'secondary' : 'primary')
+    const view = this.findPane === 'secondary' ? this.secondaryEditorView : this.editorView
     if (!view) return
     const sel = view.state.sliceDoc(view.state.selection.main.from, view.state.selection.main.to)
     const seed = sel.includes('\n') ? '' : sel
@@ -2007,30 +1556,6 @@ ${searchContext}`
     }
   }
 
-  private async handleRename(e: Event, isSecondary: boolean): Promise<void> {
-    const input = e.target as HTMLInputElement
-    const newName = input.value.trim()
-    if (!newName) {
-      // Revert to original title if empty
-      input.value = displayTitle(isSecondary ? this.secondaryDoc?.path || null : this.filePath)
-      return
-    }
-
-    await this.fileState.renameFile(newName, isSecondary)
-  }
-
-  private handleRenameKeyDown(e: KeyboardEvent, isSecondary: boolean): void {
-    if (e.key === 'Enter') {
-      e.preventDefault()
-      ;(e.target as HTMLInputElement).blur()
-    } else if (e.key === 'Escape') {
-      e.preventDefault()
-      const input = e.target as HTMLInputElement
-      input.value = displayTitle(isSecondary ? this.secondaryDoc?.path || null : this.filePath)
-      input.blur()
-    }
-  }
-
   /** Enter/Space on an icon-action div, so it is reachable by keyboard. */
   private handleIconActionKey = (e: KeyboardEvent): void => {
     if (e.key !== 'Enter' && e.key !== ' ') return
@@ -2038,55 +1563,10 @@ ${searchContext}`
     ;(e.currentTarget as HTMLElement).click()
   }
 
-  private startResize = (e: MouseEvent): void => {
-    e.preventDefault()
-    this.isDraggingResizer = true
-    document.addEventListener('mousemove', this.doResize)
-    document.addEventListener('mouseup', this.stopResize)
-    document.body.style.cursor = 'col-resize'
-  }
-
-  /**
-   * Arrow-key resize. The resizer had no role, no tabindex and no keyboard
-   * path at all, so split width was mouse-only.
-   */
-  private handleResizerKey = (e: KeyboardEvent): void => {
-    const step = e.shiftKey ? 10 : 2
-    if (e.key === 'ArrowLeft') this.leftPaneWidth = Math.max(20, this.leftPaneWidth - step)
-    else if (e.key === 'ArrowRight') this.leftPaneWidth = Math.min(80, this.leftPaneWidth + step)
-    else return
-    e.preventDefault()
-    this.editorView?.requestMeasure()
-    this.secondaryEditorView?.requestMeasure()
-  }
-
-  private doResize = (e: MouseEvent): void => {
-    if (!this.isDraggingResizer) return
-    const container = this.shadowRoot?.querySelector('.workspace')
-    if (container) {
-      const rect = container.getBoundingClientRect()
-      // Clamp between 20% and 80%
-      const newWidth = ((e.clientX - rect.left) / rect.width) * 100
-      this.leftPaneWidth = Math.max(20, Math.min(80, newWidth))
-    }
-  }
-
-  /** Idempotent: safe to call when no drag is in progress. */
-  private stopResize = (): void => {
-    if (!this.isDraggingResizer) return
-    this.isDraggingResizer = false
-    document.removeEventListener('mousemove', this.doResize)
-    document.removeEventListener('mouseup', this.stopResize)
-    document.body.style.cursor = ''
-    // Inform codemirror to resize
-    this.editorView?.requestMeasure()
-    this.secondaryEditorView?.requestMeasure()
-  }
-
   render(): unknown {
     if (!this.filePath && !this.content) {
       return html`
-        <writemd-panel>
+        <writemd-panel empty>
           <div class="empty-state">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
               <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
@@ -2124,11 +1604,16 @@ ${searchContext}`
             : ''
         }
         <!-- split view - 1 (Responsive Left Pane) -->
-        <div class="panes">
-          <writemd-panel
-            class="pane"
-            style=${this.splitActive || this.splitLeaving ? `flex: 0 0 calc(${this.leftPaneWidth}% - 2.5px);` : ''}
-          >
+        <writemd-workspace
+          class="panes"
+          .active=${this.splitActive || this.splitLeaving}
+          .surface=${this.splitSurface}
+          @workspace-measure=${() => {
+            this.editorView?.requestMeasure()
+            this.secondaryEditorView?.requestMeasure()
+          }}
+        >
+          <writemd-panel class="pane" slot="primary" .empty=${!this.content.trim()}>
             ${isVerticalTabs ? '' : html`<writemd-doc-bar></writemd-doc-bar>`}
 
             <!-- Body Content Area (CodeMirror permanently mounted, reconfigured via Compartment) -->
@@ -2147,17 +1632,6 @@ ${searchContext}`
                 .mode=${this.viewMode}
                 @mode-change=${this.handleExplicitModeChange}
               ></writemd-info-pill>
-              ${
-                this.textMenu && this.editorView
-                  ? html`<writemd-text-menu
-                      .x=${Math.min(this.textMenu.x, window.innerWidth - 240)}
-                      .y=${Math.min(this.textMenu.y, window.innerHeight - 380)}
-                      .flip=${this.textMenu.x > window.innerWidth - 480}
-                      .view=${this.editorView}
-                      @close=${() => (this.textMenu = null)}
-                    ></writemd-text-menu>`
-                  : ''
-              }
             </div>
           </writemd-panel>
 
@@ -2165,69 +1639,54 @@ ${searchContext}`
           ${
             this.splitActive || this.splitLeaving
               ? html`
-                  <div
-                    class="resizer ${this.isDraggingResizer ? 'dragging' : ''}"
-                    role="separator"
-                    tabindex="0"
-                    aria-orientation="vertical"
-                    aria-label="Resize split panes"
-                    aria-valuenow=${Math.round(this.leftPaneWidth)}
-                    aria-valuemin="20"
-                    aria-valuemax="80"
-                    @mousedown=${this.startResize}
-                    @keydown=${this.handleResizerKey}
-                  ></div>
-                  <writemd-panel class="pane pane-in ${this.splitLeaving ? ' pane-leaving' : ''}">
+                  <writemd-panel
+                    slot="auxiliary"
+                    class="pane pane-in ${this.splitLeaving ? ' pane-leaving' : ''}"
+                    .empty=${
+                      this.mountsSecondaryView && secondaryDoc
+                        ? !secondaryDoc.content.trim()
+                        : this.splitSurface === 'ai'
+                          ? this.aiMessages.length === 0
+                          : this.splitSurface === 'launcher'
+                    }
+                  >
                     ${
                       this.mountsSecondaryView && secondaryDoc
                         ? html`
-                            <!-- Secondary Document Editor -->
-                            <div class="sub-header">
-                              <div class="sub-header-left">${displayPath(secondaryDoc.path)}</div>
-                              <div class="sub-header-center">
-                                ${
-                                  secondaryDoc.isDiff
-                                    ? html`<span style="color: var(--warning); font-weight: 600;"
+                            ${
+                              secondaryDoc.isDiff
+                                ? html`<div class="sub-header">
+                                    <div class="sub-header-left" title=${secondaryDoc.path ?? ''}>
+                                      ${displayPath(secondaryDoc.path)}
+                                    </div>
+                                    <div class="sub-header-center">
+                                      <span style="color:var(--warning);font-weight:600"
                                         >External Changes Diff</span
-                                      >`
-                                    : html`<input
-                                        type="text"
-                                        class="title-input"
-                                        aria-label="Split pane document title"
-                                        .value=${displayTitle(secondaryDoc.path)}
-                                        @blur=${(e: Event) => this.handleRename(e, true)}
-                                        @keydown=${(e: KeyboardEvent) => this.handleRenameKeyDown(e, true)}
-                                      />`
-                                }
-                              </div>
-                              <div class="sub-header-right">
-                                <div
-                                  class="icon-action"
-                                  role="button"
-                                  tabindex="0"
-                                  aria-label="Close split pane"
-                                  title="Close split pane"
-                                  @keydown=${this.handleIconActionKey}
-                                  @click=${() => this.fileState.closeSecondaryFile()}
-                                >
-                                  <svg
-                                    viewBox="0 0 12 12"
-                                    fill="none"
-                                    stroke="currentColor"
-                                    stroke-width="1.5"
-                                  >
-                                    <line x1="2" y1="2" x2="10" y2="10" />
-                                    <line x1="10" y1="2" x2="2" y2="10" />
-                                  </svg>
-                                </div>
-                              </div>
-                            </div>
+                                      >
+                                    </div>
+                                    <div class="sub-header-right">
+                                      <div
+                                        class="icon-action"
+                                        role="button"
+                                        tabindex="0"
+                                        aria-label="Close split pane"
+                                        title="Close split pane"
+                                        @keydown=${this.handleIconActionKey}
+                                        @click=${() => this.fileState.closeSecondaryFile()}
+                                      >
+                                        ${icon('x')}
+                                      </div>
+                                    </div>
+                                  </div>`
+                                : html`<writemd-doc-bar secondary></writemd-doc-bar>`
+                            }
 
                             <div
                               class="body-area"
                               @paste=${(e: ClipboardEvent) => this.handlePaste(e, true)}
                               @dragover=${(e: DragEvent) => e.preventDefault()}
                               @drop=${(e: DragEvent) => this.handleDrop(e, true)}
+                              @contextmenu=${(e: MouseEvent) => this.handleTextMenu(e, true)}
                             >
                               <div id="secondary-cm-wrapper" class="cm-wrapper"></div>
                               <writemd-info-pill
@@ -2247,8 +1706,21 @@ ${searchContext}`
                           ? html`
                               <!-- Vault Files Tree Panel -->
                               <div class="sub-header">
-                                <div class="sub-header-left">Vault</div>
-                                <div class="sub-header-center">Files</div>
+                                <div class="sub-header-left">
+                                  <div
+                                    class="icon-action"
+                                    role="button"
+                                    tabindex="0"
+                                    aria-label="Back to surfaces"
+                                    title="Back to surfaces"
+                                    @keydown=${this.handleIconActionKey}
+                                    @click=${() => this.fileState.setSplitSurface('launcher')}
+                                  >
+                                    ${icon('arrow-left')}
+                                  </div>
+                                  <span>Vault Files</span>
+                                </div>
+                                <div class="sub-header-center"></div>
                                 <div class="sub-header-right">
                                   <div
                                     class="icon-action"
@@ -2277,8 +1749,21 @@ ${searchContext}`
                             ? html`
                                 <!-- Backlinks Panel -->
                                 <div class="sub-header">
-                                  <div class="sub-header-left">Document</div>
-                                  <div class="sub-header-center">Backlinks</div>
+                                  <div class="sub-header-left">
+                                    <div
+                                      class="icon-action"
+                                      role="button"
+                                      tabindex="0"
+                                      aria-label="Back to surfaces"
+                                      title="Back to surfaces"
+                                      @keydown=${this.handleIconActionKey}
+                                      @click=${() => this.fileState.setSplitSurface('launcher')}
+                                    >
+                                      ${icon('arrow-left')}
+                                    </div>
+                                    <span>Backlinks</span>
+                                  </div>
+                                  <div class="sub-header-center"></div>
                                   <div class="sub-header-right">
                                     <div
                                       class="icon-action"
@@ -2309,8 +1794,21 @@ ${searchContext}`
                               ? html`
                                   <!-- AI Panel -->
                                   <div class="sub-header">
-                                    <div class="sub-header-left">Assistant</div>
-                                    <div class="sub-header-center">AI</div>
+                                    <div class="sub-header-left">
+                                      <div
+                                        class="icon-action"
+                                        role="button"
+                                        tabindex="0"
+                                        aria-label="Back to surfaces"
+                                        title="Back to surfaces"
+                                        @keydown=${this.handleIconActionKey}
+                                        @click=${() => this.fileState.setSplitSurface('launcher')}
+                                      >
+                                        ${icon('arrow-left')}
+                                      </div>
+                                      <span>AI Assistant</span>
+                                    </div>
+                                    <div class="sub-header-center"></div>
                                     <div class="sub-header-right">
                                       <div class="ai-history-anchor">
                                         <div
@@ -2458,7 +1956,6 @@ ${searchContext}`
                                   <!-- Open a surface Launcher Panel -->
                                   <div class="sub-header">
                                     <div class="sub-header-left">Surface</div>
-                                    <div class="sub-header-center">Open a surface</div>
                                     <div class="sub-header-right">
                                       <div
                                         class="icon-action"
@@ -2491,7 +1988,18 @@ ${searchContext}`
                 `
               : ''
           }
-        </div>
+        </writemd-workspace>
+        ${
+          this.textMenu && (this.textMenu.secondary ? this.secondaryEditorView : this.editorView)
+            ? html`<writemd-text-menu
+                .x=${this.textMenu.x}
+                .y=${this.textMenu.y}
+                .flip=${this.textMenu.x > window.innerWidth - 480}
+                .view=${this.textMenu.secondary ? this.secondaryEditorView : this.editorView}
+                @close=${() => (this.textMenu = null)}
+              ></writemd-text-menu>`
+            : ''
+        }
       </div>
     `
   }

@@ -5,6 +5,9 @@ import { menuStyles, menuIcon } from './menu-styles'
 import { scrollbarStyles } from './scrollbars'
 import { api } from '../api'
 import type { VaultTreeNode } from '../../../shared/electron-api'
+import '@awesome.me/webawesome/dist/components/popup/popup.js'
+import { emit, on } from '../events/bus'
+import { deepActiveElement } from '../utils/links'
 import { FileState } from '../state/file-state'
 import { SettingsStore } from '../state/settings'
 import { basenameNoExt, isWebUrl, normalizeExternalUrl, shortPath } from '../utils/links'
@@ -83,19 +86,22 @@ export class TextMenu extends LitElement {
     menuStyles,
     css`
       :host {
+        display: contents;
+      }
+      .anchor {
         position: fixed;
-        inset: 0;
-        z-index: 400;
+        width: 0;
+        height: 0;
+        pointer-events: none;
+      }
+      wa-popup::part(popup) {
+        z-index: 1000;
       }
       .submenu {
-        display: none;
-        position: absolute;
-        top: -4px;
-        left: 100%;
-        margin-left: 4px;
+        position: relative;
         min-width: 180px;
         max-width: 280px;
-        max-height: 280px;
+        max-height: min(280px, var(--auto-size-available-height, 280px));
         overflow-y: auto;
         background: var(--menu-bg);
         border: 1px solid var(--border-subtle);
@@ -103,33 +109,14 @@ export class TextMenu extends LitElement {
         box-shadow: var(--shadow-3);
         padding: 4px;
       }
-      .submenu.left {
-        left: auto;
-        right: 100%;
-        margin-left: 0;
-        margin-right: 4px;
-      }
-      .has-sub:hover > .submenu,
-      .has-sub:focus-within > .submenu,
-      .has-sub[aria-expanded='true'] > .submenu {
-        display: block;
-      }
       .m-panel {
-        transform-origin: top left;
-        animation: menu-in var(--motion-fast) var(--motion-ease);
-      }
-
-      @keyframes menu-in {
-        from {
-          opacity: 0;
-          transform: translateY(-4px) scale(0.97);
-        }
-      }
-
-      :host-context([data-motion='reduced']) {
-        .m-panel {
-          animation: none;
-        }
+        position: relative;
+        width: max-content;
+        max-width: calc(100vw - 16px);
+        max-height: var(--auto-size-available-height, 85vh);
+        overflow-y: auto;
+        box-sizing: border-box;
+        pointer-events: auto;
       }
       .m-item[role='menuitem'] {
         cursor: pointer;
@@ -155,11 +142,23 @@ export class TextMenu extends LitElement {
 
   private fileState = FileState.getInstance()
   private settingsStore = SettingsStore.getInstance()
+  private unsubscribe: (() => void) | null = null
+  private previous: HTMLElement | null = null
+  private restoreFocus = true
+  private focusPending = true
+  private submenuFocusPending: string | null = null
 
   connectedCallback(): void {
     super.connectedCallback()
-    this.addEventListener('click', this.handleBackdropClick)
-    window.addEventListener('keydown', this.handleKeyDown)
+    this.previous = deepActiveElement() as HTMLElement | null
+    this.unsubscribe = on('menu:open', ({ owner }) => {
+      if (owner !== this) {
+        this.restoreFocus = false
+        this.close()
+      }
+    })
+    window.addEventListener('pointerdown', this.handleOutside, true)
+    window.addEventListener('keydown', this.handleKeyDown, true)
     void this.loadLinkFiles()
   }
 
@@ -202,17 +201,65 @@ export class TextMenu extends LitElement {
   }
 
   disconnectedCallback(): void {
-    this.removeEventListener('click', this.handleBackdropClick)
-    window.removeEventListener('keydown', this.handleKeyDown)
+    window.removeEventListener('pointerdown', this.handleOutside, true)
+    window.removeEventListener('keydown', this.handleKeyDown, true)
+    this.unsubscribe?.()
+    if (this.restoreFocus && this.previous?.isConnected)
+      this.previous.focus({ preventScroll: true })
     super.disconnectedCallback()
   }
 
-  private handleBackdropClick = (e: MouseEvent): void => {
-    if (e.target === this) this.close()
+  protected firstUpdated(): void {
+    emit('menu:open', { owner: this })
+  }
+
+  private handlePopupPosition = (event: Event): void => {
+    if (!this.focusPending || event.target !== event.currentTarget) return
+    this.focusPending = false
+    this.shadowRoot
+      ?.querySelector<HTMLElement>('.m-panel > .m-item')
+      ?.focus({ preventScroll: true })
+  }
+
+  private focusSubmenu(id: string): void {
+    if (this.submenuFocusPending !== id || this.openSub !== id) return
+    this.submenuFocusPending = null
+    this.shadowRoot
+      ?.querySelector<HTMLElement>(`#text-${id} .submenu .m-item`)
+      ?.focus({ preventScroll: true })
+  }
+  private handleOutside = (e: PointerEvent): void => {
+    if (!e.composedPath().includes(this)) {
+      this.restoreFocus = false
+      this.close()
+    }
   }
 
   private handleKeyDown = (e: KeyboardEvent): void => {
-    if (e.key === 'Escape') this.close()
+    const current = deepActiveElement() as HTMLElement | null
+    if (e.key === 'Escape' || e.key === 'Tab') {
+      this.close()
+    } else if (current && this.shadowRoot?.contains(current)) {
+      const container = current.closest('.submenu') ?? this.shadowRoot.querySelector('.m-panel')
+      const items = Array.from(container?.querySelectorAll<HTMLElement>(':scope > .m-item') ?? [])
+      const index = items.indexOf(current)
+      if (e.key === 'ArrowDown') items[(index + 1) % items.length]?.focus()
+      else if (e.key === 'ArrowUp') items[(index - 1 + items.length) % items.length]?.focus()
+      else if (e.key === 'Home') items[0]?.focus()
+      else if (e.key === 'End') items.at(-1)?.focus()
+      else if (e.key === 'ArrowLeft') {
+        const parent = current.closest('.has-sub')
+        this.openSub = null
+        ;(parent as HTMLElement | null)?.focus()
+      } else if (e.key === 'ArrowRight' || e.key === 'Enter' || e.key === ' ') {
+        if (current.classList.contains('has-sub')) {
+          this.openSub = current.dataset.id ?? null
+          this.submenuFocusPending = this.openSub
+        } else if (e.key !== 'ArrowRight' && current.dataset.id) void this.run(current.dataset.id)
+      } else return
+    } else return
+    if (e.key !== 'Tab') e.preventDefault()
+    e.stopImmediatePropagation()
   }
 
   private close(): void {
@@ -473,7 +520,7 @@ export class TextMenu extends LitElement {
         })),
         {
           id: 'link-browse',
-          label: 'Browse for fileÃ¢â‚¬Â¦',
+          label: 'Browse for file...',
           icon: 'folder',
           dividerBefore: this.linkFiles.length > 0
         }
@@ -484,66 +531,98 @@ export class TextMenu extends LitElement {
   render(): unknown {
     const items = MENU.map((item) => (item.id === 'add-link' ? this.linkMenuItem() : item))
     return html`
-      <div
-        class="m-panel"
-        role="menu"
-        aria-label="Text formatting"
-        style="left: ${this.x}px; top: ${this.y}px"
-        @click=${(e: MouseEvent) => e.stopPropagation()}
+      <span id="text-anchor" class="anchor" style=${`left:${this.x}px;top:${this.y}px`}></span>
+      <wa-popup
+        anchor="text-anchor"
+        @wa-reposition=${this.handlePopupPosition}
+        active
+        strategy="fixed"
+        placement="bottom-start"
+        flip
+        shift
+        flip-padding="8"
+        shift-padding="8"
+        auto-size="vertical"
+        auto-size-padding="8"
       >
-        ${items.map(
-          (item) => html`
-            ${item.dividerBefore ? html`<div class="m-divider" role="separator"></div>` : ''}
-            ${
-              item.children
-                ? html`
-                    <div
-                      class="m-item has-sub"
-                      role="menuitem"
-                      tabindex="0"
-                      aria-haspopup="menu"
-                      aria-expanded=${this.openSub === item.id ? 'true' : 'false'}
-                    >
-                      ${menuIcon(item.icon)}
-                      <span>${item.label}</span>
-                      <span class="m-chevron">Ã¢â‚¬Âº</span>
-                      <div class="submenu ${this.flip ? 'left' : ''}" role="menu">
-                        ${item.children.map(
-                          (sub) => html`
-                            <div
-                              class="m-item"
-                              role="menuitem"
-                              tabindex="0"
-                              data-id=${sub.id}
-                              @click=${() => void this.run(sub.id)}
-                              @keydown=${this.handleItemKey}
-                              @focus=${() => (this.openSub = item.id)}
-                            >
-                              ${menuIcon(sub.icon)}
-                              <span>${sub.label}</span>
-                            </div>
-                          `
-                        )}
+        <div
+          class="m-panel"
+          role="menu"
+          aria-label="Text formatting"
+          @click=${(e: MouseEvent) => e.stopPropagation()}
+        >
+          ${items.map(
+            (item) => html`
+              ${item.dividerBefore ? html`<div class="m-divider" role="separator"></div>` : ''}
+              ${
+                item.children
+                  ? html`
+                      <div
+                        class="m-item has-sub"
+                        id=${`text-${item.id}`}
+                        data-id=${item.id}
+                        @mouseenter=${() => (this.openSub = item.id)}
+                        @mouseleave=${() => (this.openSub = null)}
+                        role="menuitem"
+                        tabindex="0"
+                        aria-haspopup="menu"
+                        aria-expanded=${this.openSub === item.id ? 'true' : 'false'}
+                      >
+                        ${menuIcon(item.icon)}
+                        <span>${item.label}</span>
+                        <span class="m-chevron">${menuIcon('chevron-right')}</span>
+                        <wa-popup
+                          anchor=${`text-${item.id}`}
+                          @wa-reposition=${() => this.focusSubmenu(item.id)}
+                          .active=${this.openSub === item.id}
+                          .placement=${this.flip ? 'left-start' : 'right-start'}
+                          flip
+                          shift
+                          flip-padding="8"
+                          shift-padding="8"
+                          hover-bridge
+                          auto-size="vertical"
+                          auto-size-padding="8"
+                        >
+                          <div class="submenu" role="menu">
+                            ${item.children.map(
+                              (sub) => html`
+                                <div
+                                  class="m-item"
+                                  role="menuitem"
+                                  tabindex="0"
+                                  data-id=${sub.id}
+                                  @click=${() => void this.run(sub.id)}
+                                  @keydown=${this.handleItemKey}
+                                  @focus=${() => (this.openSub = item.id)}
+                                >
+                                  ${menuIcon(sub.icon)}
+                                  <span>${sub.label}</span>
+                                </div>
+                              `
+                            )}
+                          </div>
+                        </wa-popup>
                       </div>
-                    </div>
-                  `
-                : html`
-                    <div
-                      class="m-item"
-                      role="menuitem"
-                      tabindex="0"
-                      data-id=${item.id}
-                      @click=${() => void this.run(item.id)}
-                      @keydown=${this.handleItemKey}
-                    >
-                      ${menuIcon(item.icon)}
-                      <span>${item.label}</span>
-                    </div>
-                  `
-            }
-          `
-        )}
-      </div>
+                    `
+                  : html`
+                      <div
+                        class="m-item"
+                        role="menuitem"
+                        tabindex="0"
+                        data-id=${item.id}
+                        @click=${() => void this.run(item.id)}
+                        @keydown=${this.handleItemKey}
+                      >
+                        ${menuIcon(item.icon)}
+                        <span>${item.label}</span>
+                      </div>
+                    `
+              }
+            `
+          )}
+        </div>
+      </wa-popup>
     `
   }
 }

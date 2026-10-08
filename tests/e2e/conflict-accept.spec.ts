@@ -44,7 +44,7 @@ test.describe('Conflict accept/reject', () => {
             activeTabPath: notePath
           },
           editor: { autoSave: false },
-          appearance: { theme: 'dark', panelOrientation: 'horizontal' }
+          appearance: { designVersion: 1, theme: 'dark', panelOrientation: 'horizontal' }
         },
         null,
         2

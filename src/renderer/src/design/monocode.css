@@ -1,0 +1,9 @@
+/* Shell layout tokens. Everything else (surfaces, text, borders, accents,
+   radii, motion) belongs to the named themes in styles/themes.css: a second
+   :root block redefining them here wins the cascade by source order and pins
+   every theme to one computed palette, which is exactly how theme switching
+   broke. Keep this file to structural lengths only. */
+:root {
+  --shell-header-height: 40px;
+  --shell-sidebar-width: 208px;
+}

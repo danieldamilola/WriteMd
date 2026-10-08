@@ -1,7 +1,7 @@
 import { test, expect, type Page } from '@playwright/test'
 import { writeFileSync, readFileSync } from 'fs'
 import { join } from 'path'
-import { makeFixture, launch, firstWindow } from './fixtures'
+import { makeFixture, launch, firstWindow, openSettings } from './fixtures'
 
 /**
  * Windows reports SPI_GETCLIENTAREAANIMATION = 0 when "Animation effects" is
@@ -24,7 +24,7 @@ async function writeConfig(vault: string, motion: string): Promise<string> {
           openTabs: [join(vault, 'README.md')],
           activeTabPath: join(vault, 'README.md')
         },
-        appearance: { theme: 'dark', panelOrientation: 'horizontal', motion }
+        appearance: { designVersion: 1, theme: 'dark', panelOrientation: 'horizontal', motion }
       },
       null,
       2
@@ -248,13 +248,14 @@ test.describe('Motion preference', () => {
     await page.waitForTimeout(1200)
     expect(await motionAttribute(page)).toBe('reduced')
 
-    await page.locator('writemd-icon-button[title="Settings"]').click()
+    await openSettings(page)
     const modal = page.locator('writemd-settings-modal')
     await expect(modal).toBeVisible()
     await modal.locator('.nav-btn', { hasText: 'Appearance' }).click()
-    const select = modal.locator('select[aria-label="Animation"]')
-    await expect(select).toHaveValue('reduced')
-    await select.selectOption('full')
+    const select = modal.locator('wa-select[aria-label="Motion"]')
+    await expect(select).toHaveJSProperty('value', 'reduced')
+    await select.click()
+    await select.locator('wa-option[value="full"]').click()
 
     expect(await motionAttribute(page)).toBe('full')
     const stored = JSON.parse(readFileSync(configPath, 'utf-8')) as {

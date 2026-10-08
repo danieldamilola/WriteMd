@@ -1,6 +1,8 @@
 out
 dist
 pnpm-lock.yaml
+# Vendored reference snapshots and scratch scripts kept for comparison only.
+artifacts/
 # The file is LICENSE, with no extension. Naming LICENSE.md here meant prettier
 # still tried to format it.
 LICENSE

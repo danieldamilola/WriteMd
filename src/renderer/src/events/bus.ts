@@ -15,7 +15,9 @@
 
 export interface AppEvents {
   /** Open the find/replace panel. */
-  'find:open': { mode: 'find' | 'replace' }
+  'find:open': { mode: 'find' | 'replace'; pane?: 'primary' | 'secondary' }
+  /** Opening a menu dismisses menus owned by other components. */
+  'menu:open': { owner: HTMLElement }
   /** Follow a `[[wiki link]]` by its label. */
   'wiki:open': { name: string }
   /**

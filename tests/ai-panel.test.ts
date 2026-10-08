@@ -4,6 +4,7 @@ import '../src/renderer/src/components/AiPanel'
 import { AiPanel, type AiMessage } from '../src/renderer/src/components/AiPanel'
 import type { ThoughtLine as WriteMdThoughtLine } from '../src/renderer/src/components/ThoughtLine'
 import type { AttachedFile } from '../src/shared/electron-api'
+import type { Background } from '../src/renderer/src/components/Background'
 
 /**
  * The AI panel under jsdom.
@@ -60,6 +61,23 @@ describe('writemd-ai-panel composer', () => {
   beforeEach(() => {
     document.body.innerHTML = ''
   })
+
+  it.each([false, true])(
+    'retains AI artwork as messages change (configured: %s)',
+    async (configured) => {
+      const el = panel({ configured })
+      await flush(el)
+      const background = el.shadowRoot?.querySelector<Background>('writemd-background[target="ai"]')
+      expect(background).toBeTruthy()
+      expect(background?.empty).toBe(true)
+
+      el.messages = [{ role: 'user', content: 'A question' }]
+      await flush(el)
+
+      expect(el.shadowRoot?.querySelector('writemd-background[target="ai"]')).toBe(background)
+      expect(background?.empty).toBe(false)
+    }
+  )
 
   it('renders a textarea and a send control, not a bare input', async () => {
     const el = panel()

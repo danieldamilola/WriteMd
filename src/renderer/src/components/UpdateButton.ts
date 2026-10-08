@@ -1,15 +1,16 @@
 import { css, html, LitElement } from 'lit'
-import { customElement, state } from 'lit/decorators.js'
+import { customElement, property, state } from 'lit/decorators.js'
 import './IconButton'
 import { api } from '../api'
 import { SettingsStore } from '../state/settings'
 import { scrollbarStyles } from './scrollbars'
 import { summarizeNotesForVersion } from '../services/whats-new'
+import { chromeIcon } from '../design/icons'
 
 type UpStatus = 'idle' | 'checking' | 'available' | 'downloading' | 'downloaded' | 'error'
 
 /**
- * The toolbar update affordance.
+ * Update action in the vertical sidebar or horizontal toolbar.
  *
  * The button only exists while there is something to act on: idle, error and
  * checking all render nothing so the bar stays quiet. The three live states
@@ -25,6 +26,40 @@ export class WriteMdUpdateButton extends LitElement {
       :host {
         display: inline-flex;
         position: relative;
+      }
+      :host([sidebar]) {
+        display: block;
+        font-family: var(--font-ui);
+      }
+      .sidebar-action {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        width: 100%;
+        min-height: 34px;
+        padding: 6px 8px;
+        border: 0;
+        border-radius: var(--radius-sm);
+        background: transparent;
+        color: var(--text);
+        font: 500 14px var(--font-ui);
+        cursor: pointer;
+        text-align: left;
+      }
+      .sidebar-action:hover {
+        background: var(--bg-hover);
+      }
+      .sidebar-action:focus-visible {
+        outline: 2px solid var(--border-focus);
+        outline-offset: -2px;
+      }
+      .sidebar-action svg {
+        flex-shrink: 0;
+        color: var(--accent);
+      }
+      .sidebar-action:disabled {
+        cursor: default;
+        color: var(--text-secondary);
       }
 
       .wrap {
@@ -195,6 +230,7 @@ export class WriteMdUpdateButton extends LitElement {
   ]
 
   @state() private status: UpStatus = 'idle'
+  @property({ type: Boolean, reflect: true }) sidebar = false
   @state() private version = ''
   @state() private percent = 0
   @state() private cardOpen = false
@@ -320,6 +356,24 @@ export class WriteMdUpdateButton extends LitElement {
         : this.status === 'downloaded'
           ? 'Ready to install - click to restart'
           : 'Update available - click to download'
+
+    if (this.sidebar) {
+      const label =
+        this.status === 'downloaded'
+          ? 'Restart to update'
+          : this.status === 'downloading'
+            ? `Downloading ${this.percent}%`
+            : 'Update available'
+      return html`<button
+        class="sidebar-action"
+        title=${`${title}${this.version ? ` (v${this.version})` : ''}`}
+        ?disabled=${this.status === 'downloading'}
+        @click=${this.handleClick}
+      >
+        ${chromeIcon(this.status === 'downloaded' ? 'refresh' : 'download')}
+        <span role="status">${label}</span>
+      </button>`
+    }
 
     // The ring's fill proportion mirrors the download progress; the whole
     // circle keeps spinning so a stalled transfer still reads as "working".

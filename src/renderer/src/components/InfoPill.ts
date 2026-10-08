@@ -49,6 +49,7 @@ export class InfoPill extends LitElement {
       position: absolute;
       bottom: 12px;
       right: 16px;
+      max-width: calc(100% - 32px);
       display: inline-flex;
       align-items: center;
       z-index: 50;
@@ -59,14 +60,14 @@ export class InfoPill extends LitElement {
       display: inline-flex;
       align-items: center;
       gap: 10px;
-      height: 23px;
+      min-height: 30px;
       padding: 0 10px;
       background: var(--bg-card);
       border: 1px solid var(--border-subtle);
       border-radius: 6px;
-      font-family: 'Geist Mono', monospace;
-      font-size: 10px;
-      color: var(--text-muted);
+      font-family: var(--font-ui);
+      font-size: 12px;
+      color: var(--text-secondary);
       box-shadow: var(--shadow-2);
       backdrop-filter: blur(8px);
     }
@@ -76,7 +77,11 @@ export class InfoPill extends LitElement {
       align-items: center;
       justify-content: center;
       cursor: pointer;
-      color: var(--text-muted);
+      color: var(--text);
+      border: 0;
+      background: transparent;
+      min-width: 22px;
+      min-height: 24px;
       transition: color 120ms ease;
       padding: 2px;
       margin-left: -2px;
@@ -84,6 +89,10 @@ export class InfoPill extends LitElement {
 
     .mode-btn:hover {
       color: var(--text);
+    }
+    .mode-btn:focus-visible {
+      outline: 2px solid var(--border-focus);
+      border-radius: var(--radius-sm);
     }
 
     .mode-btn svg {
@@ -212,9 +221,16 @@ export class InfoPill extends LitElement {
       }
 
       <div class="pill">
-        <div class="mode-btn" title="Change Editor Mode" @click=${this.toggleMenu}>
+        <button
+          class="mode-btn"
+          title="Change Editor Mode"
+          aria-label="Change editor mode"
+          aria-expanded=${this.menuOpen}
+          aria-haspopup="menu"
+          @click=${this.toggleMenu}
+        >
           ${this.renderModeIcon()}
-        </div>
+        </button>
         <div class="counts">
           <span class="count-item">${formattedWords} words</span>
           <span class="count-item">${formattedChars} characters</span>

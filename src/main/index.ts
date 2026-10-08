@@ -11,6 +11,7 @@ import { ensureVault } from './vault'
 import { seedWelcomeNote } from './welcome-note'
 import { registerFileAssociations } from './file-associations'
 import { setupUpdater } from './updater'
+import { applyWindowMaterial } from './appearance'
 
 let mainWindow: BrowserWindow | null = null
 
@@ -69,6 +70,7 @@ function createWindow(): void {
   })
 
   mainWindow.on('ready-to-show', () => {
+    applyWindowMaterial(mainWindow)
     mainWindow?.show()
   })
 
