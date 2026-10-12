@@ -44,86 +44,6 @@ export interface ExportResult {
   reason?: string
 }
 
-/** An image attached to a prompt, base64 with no data: prefix. */
-export interface ChatImage {
-  /** Base64 payload. Prefixed onto a data URL only for OpenAI-shaped APIs. */
-  data: string
-  /** IANA subtype, e.g. `image/png`. Gemini and Anthropic want this verbatim. */
-  mediaType: string
-  /** File name, shown in the transcript so the user can see what they sent. */
-  name: string
-}
-
-/** A single chat message sent to an AI provider. */
-export interface ChatMessage {
-  role: 'user' | 'assistant' | 'system'
-  content: string
-  /**
-   * Images attached alongside `content`, vision-capable providers only.
-   *
-   * Every provider spells this differently, so the shape stays uniform here and
-   * each adapter translates it. A message with images but empty content is
-   * legitimate (a bare screenshot with no prompt), which is why `content`
-   * cannot be folded into the images themselves.
-   */
-  images?: ChatImage[]
-}
-
-/**
- * One file the user attached to a prompt.
- *
- * `kind` decides how it reaches the provider: text is inlined into the message
- * content, images ride along as vision parts.
- */
-export interface AttachedFile {
-  path: string
-  name: string
-  kind: 'text' | 'image'
-  /** Byte length, for the transcript chip. */
-  size: number
-  /** Populated for `kind: 'text'`; the content inlined into the prompt. */
-  text?: string
-  /** Populated for `kind: 'image'`; base64 with no data: prefix. */
-  data?: string
-  mediaType?: string
-}
-
-/** A stored conversation. `docPath` is null for a scratch chat with no file. */
-export interface ChatSession {
-  id: string
-  /** Derived from the first user message; empty until there is one. */
-  title: string
-  docPath: string | null
-  createdAt: number
-  updatedAt: number
-  /**
-   * `thinking` entries are a local record of elapsed time, rendered by the
-   * panel and filtered out before any provider sees them.
-   */
-  messages: Array<{
-    role: 'user' | 'assistant' | 'thinking'
-    content: string
-    filePath?: string
-    elapsed?: number
-    /**
-     * Names of files this prompt carried. Metadata only: the image bytes are
-     * never stored, so a restored session shows what was sent without keeping
-     * megabytes of base64 on disk.
-     */
-    attachments?: Array<{ name: string; kind: 'text' | 'image'; size: number }>
-  }>
-}
-
-/** What the history list needs, without shipping every message. */
-export interface ChatSessionSummary {
-  id: string
-  title: string
-  docPath: string | null
-  createdAt: number
-  updatedAt: number
-  messageCount: number
-}
-
 /** Update info pushed by electron-updater. Only version is contractual. */
 export interface UpdateInfo {
   version?: string
@@ -179,14 +99,9 @@ export interface ElectronAPI {
       filters?: { name: string; extensions: string[] }[]
     }) => Promise<Electron.SaveDialogReturnValue>
     exists: (path: string) => Promise<boolean>
-    /**
-     * Read one file the user picked in the attach dialog, as text or as base64
-     * depending on its extension. Paths must have come from `showOpenDialog`.
-     */
-    readAttachment: (path: string) => Promise<AttachedFile>
     /** Electron 32+ removed File.path; this is the supported way back. */
     getPathForFile: (file: File) => string
-    /** Register dropped paths so the guards in read-attachment allow them. */
+    /** Register dropped paths so the guards allow them to be opened. */
     registerDroppedPaths: (paths: string[]) => Promise<void>
     saveImage: (docPath: string, base64Data: string, ext: string) => Promise<SavedImageResult>
     resolveAsset: (docPath: string, relativePath: string) => Promise<string | null>
@@ -206,77 +121,6 @@ export interface ElectronAPI {
   settings: {
     get: () => Promise<WriteMdSettings>
     set: (settings: WriteMdSettingsPatch) => Promise<void>
-  }
-  net: {
-    fetchModels: (provider: string, apiKey: string) => Promise<string[]>
-    chat: (
-      provider: string,
-      model: string,
-      apiKey: string,
-      messages: ChatMessage[],
-      systemPrompt?: string
-    ) => Promise<string>
-    /**
-     * Streams an answer token by token. `onChunk` fires per delta as it arrives;
-     * the returned promise resolves with the same full text once the stream
-     * closes, so the caller can post-process it.
-     */
-    chatStream: (
-      provider: string,
-      model: string,
-      apiKey: string,
-      messages: ChatMessage[],
-      onChunk: (delta: string) => void,
-      systemPrompt?: string,
-      sessionId?: string
-    ) => Promise<string>
-    /**
-     * Abort the in-flight stream. The promise from `chatStream` then resolves
-     * with whatever text had already arrived instead of rejecting, so a stopped
-     * reply keeps its partial answer. Pass `sessionId` to abort a specific
-     * conversation, or omit it to abort any stream for this window.
-     */
-    cancelChat: (sessionId?: string) => Promise<void>
-  }
-  chat: {
-    /** Create an empty session bound to a document, or null for a scratch chat. */
-    createSession: (docPath: string | null) => Promise<ChatSession>
-    loadSession: (id: string) => Promise<ChatSession | null>
-    saveSession: (session: ChatSession) => Promise<void>
-    deleteSession: (id: string) => Promise<void>
-    /** Summaries for one document, newest first. */
-    listSessions: (docPath: string | null) => Promise<ChatSessionSummary[]>
-  }
-  opencode: {
-    /**
-     * Deliberately reports only whether the managed server is up, never its URL.
-     *
-     * `opencode serve` is unauthenticated: loopback bind plus an ephemeral port
-     * are the only things protecting it. Handing the port to the renderer gave
-     * that away, and a renderer holding the URL can create its own session with
-     * `permission: allow` and run tools as the user, which is exactly what the
-     * `permission: deny` sessions this app creates exist to prevent. The UI
-     * needs the boolean and nothing more.
-     */
-    getStatus: (customPath?: string) => Promise<{
-      cliFound: boolean
-      cliPath: string | null
-      cliVersion: string | null
-      cliMajor: number | null
-      loginCommand: string
-      auth: { loggedIn: boolean; detail: string }
-      managedServerUp: boolean
-      searchHints: string[]
-      debug: string[]
-    }>
-    getModels: () => Promise<string[]>
-  }
-  web: {
-    search: (
-      query: string,
-      maxResults?: number
-    ) => Promise<Array<{ title: string; url: string; snippet: string }>>
-    searchContext: (query: string) => Promise<string>
   }
   dialog: {
     showOpenDialog: (options: Electron.OpenDialogOptions) => Promise<Electron.OpenDialogReturnValue>

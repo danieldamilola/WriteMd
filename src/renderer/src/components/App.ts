@@ -5,8 +5,10 @@ import { customElement, state } from 'lit/decorators.js'
 import './TopBar'
 import './Tab'
 import { TabDragController } from '../controllers/tab-drag'
+import { groupRowIcon, renderGroupIconPicker, renderGroupMenuIcon } from './group-icons'
 import { chromeKey } from '../state/chrome-selector'
 import './VerticalTabBar'
+import type { VerticalTabBar } from './VerticalTabBar'
 import './RailFrame'
 import './Shell'
 import './Sidebar'
@@ -25,22 +27,12 @@ import { SettingsStore } from '../state/settings'
 import { FileState, type ConflictInfo, type TabDoc, type TabGroup } from '../state/file-state'
 import { COMMANDS, bindingFromEvent, bindingsEqual, effectiveBindings } from '../state/shortcuts'
 import { initAutoHideScrollbars } from '../utils/auto-hide-scrollbars'
+import { showSecondaryDocument } from '../utils/secondary-document'
 import {
   applyMotionPreference,
   watchSystemMotionPreference,
   type MotionPreference
 } from '../utils/motion'
-
-const PRESET_COLORS = [
-  'transparent',
-  '#f24e1e',
-  '#3b82f6',
-  '#10b981',
-  '#f59e0b',
-  '#8b5cf6',
-  '#ec4899',
-  '#06b6d4'
-]
 
 interface HorizontalContextMenuState {
   type: 'tab' | 'group'
@@ -168,6 +160,11 @@ export class WriteMdApp extends LitElement {
         color: var(--text);
         background: var(--bg-hover);
       }
+      .tab-add svg {
+        width: var(--icon-size, 18px);
+        height: var(--icon-size, 18px);
+        flex-shrink: 0;
+      }
 
       .h-group-wrap {
         display: inline-flex;
@@ -179,15 +176,17 @@ export class WriteMdApp extends LitElement {
       .h-group-pill {
         display: inline-flex;
         align-items: center;
-        gap: 6px;
+        gap: 8px;
         height: 26px;
-        padding: 0 8px 0 6px;
+        padding: 0 10px 0 11px;
+        box-sizing: border-box;
         border-radius: 5px;
         cursor: pointer;
         color: var(--text-secondary);
-        font-family: 'Geist Mono', monospace;
-        font-size: 12px;
-        font-weight: 500;
+        font-family: var(--font-ui);
+        font-size: 13px;
+        line-height: 18px;
+        font-weight: 400;
         -webkit-app-region: no-drag;
         user-select: none;
         transition:
@@ -199,36 +198,33 @@ export class WriteMdApp extends LitElement {
         background: var(--bg-hover);
       }
       .h-group-pill.drag-over {
-        outline: 1px dashed var(--accent-primary, #f24e1e);
+        background: var(--bg-hover);
+        color: var(--text);
+        outline: 1px dashed var(--accent);
+        outline-offset: -1px;
       }
       [data-drop-target] {
         outline: 1px solid var(--border-focus);
         outline-offset: -1px;
       }
-      .h-group-chevron {
+      .h-group-icon {
         display: flex;
         align-items: center;
         justify-content: center;
-        width: 12px;
-        height: 12px;
-        color: var(--text-muted);
-        transition: transform 140ms ease;
-      }
-      .h-group-chevron.collapsed {
-        transform: rotate(-90deg);
-      }
-      .h-group-color {
-        width: 7px;
-        height: 7px;
-        border-radius: 50%;
+        width: var(--icon-size, 18px);
+        height: var(--icon-size, 18px);
         flex-shrink: 0;
+      }
+      .h-group-icon svg {
+        width: 100%;
+        height: 100%;
       }
       .h-group-label {
         max-width: 120px;
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
-        font-size: 12px;
+        font-size: inherit;
       }
       .h-group-rename-input {
         width: 90px;
@@ -239,7 +235,7 @@ export class WriteMdApp extends LitElement {
         border-radius: 3px;
         color: var(--text);
         font-family: inherit;
-        font-size: 12px;
+        font-size: inherit;
         padding: 1px 4px;
         outline: none;
       }
@@ -257,38 +253,6 @@ export class WriteMdApp extends LitElement {
         margin: 0 4px;
         flex-shrink: 0;
       }
-      .color-palette {
-        display: flex;
-        gap: 6px;
-        padding: 4px 10px;
-      }
-      .color-dot-btn {
-        width: 14px;
-        height: 14px;
-        border-radius: 50%;
-        border: 1px solid var(--border-subtle);
-        cursor: pointer;
-        transition: transform 100ms ease;
-        box-sizing: border-box;
-      }
-      .color-dot-btn:hover {
-        transform: scale(1.2);
-      }
-      .color-dot-btn.none-color {
-        background: transparent !important;
-        border: 1px dashed var(--text-muted);
-        position: relative;
-      }
-      .color-dot-btn.none-color::after {
-        content: '';
-        position: absolute;
-        top: 50%;
-        left: 1px;
-        right: 1px;
-        height: 1px;
-        background: var(--text-muted);
-        transform: rotate(-45deg);
-      }
       .m-panel {
         position: fixed;
         z-index: 100;
@@ -298,8 +262,8 @@ export class WriteMdApp extends LitElement {
 
   @state() private showWelcome = true
   @state() private showSettings = false
-  // Which Settings tab to land on. Set by the AI panel's "not configured"
-  // action so it opens on the section that fixes it.
+  // Which Settings tab to land on, so a deep link can open the exact section
+  // it wants rather than leaving the user to find it.
   @state() private settingsTab = 'general'
   @state() private showPalette = false
   @state() private splitActive = false
@@ -404,6 +368,12 @@ export class WriteMdApp extends LitElement {
     this.focusRenameInputHorizontal(id)
   }
 
+  /** The vertical tab bar owns its own rename input, so it creates the group. */
+  private handleCreateGroupVertical = (): void => {
+    const bar = this.renderRoot?.querySelector('writemd-vertical-tab-bar') as VerticalTabBar | null
+    bar?.createGroup()
+  }
+
   private handleRenameGroupSubmit(groupId: string, newName: string): void {
     if (newName.trim()) {
       this.fileState.updateTabGroup(groupId, { label: newName.trim() })
@@ -481,29 +451,16 @@ export class WriteMdApp extends LitElement {
           @contextmenu=${(e: MouseEvent) => this.handleHorizontalGroupContextMenu(e, g.id)}
         >
           <div
-            class="h-group-chevron ${g.collapsed ? 'collapsed' : ''}"
+            class="h-group-icon"
+            data-no-drag
             @click=${(e: MouseEvent) => {
               e.stopPropagation()
               if (this.tabDrag.suppressClick) return
               this.fileState.toggleTabGroupCollapse(g.id)
             }}
           >
-            <svg
-              width="10"
-              height="10"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="2.5"
-            >
-              <polyline points="6 9 12 15 18 9"></polyline>
-            </svg>
+            ${groupRowIcon(g)}
           </div>
-          ${
-            g.color && g.color !== 'transparent'
-              ? html`<span class="h-group-color" style="background-color: ${g.color};"></span>`
-              : ''
-          }
           ${
             this.renamingGroupId === g.id
               ? html`
@@ -552,6 +509,7 @@ export class WriteMdApp extends LitElement {
   private renderHorizontalContextMenu(): TemplateResult | string {
     if (!this.hContextMenu) return ''
     const { type, index, groupId, x, y } = this.hContextMenu
+    const openGroup = this.tabGroups?.find((group) => group.id === groupId)
 
     return html`
       <writemd-context-menu
@@ -605,14 +563,7 @@ export class WriteMdApp extends LitElement {
                           this.hContextMenu = null
                         }}
                       >
-                        ${
-                          g.color && g.color !== 'transparent'
-                            ? html`<span
-                                class="h-group-color"
-                                style="background-color: ${g.color}; margin-right: 4px;"
-                              ></span>`
-                            : ''
-                        }
+                        ${renderGroupMenuIcon(g)}
                         <span>Move to ${g.label}</span>
                       </div>
                     `
@@ -670,21 +621,10 @@ export class WriteMdApp extends LitElement {
                     <span>Rename group</span>
                   </div>
                   <div class="m-divider"></div>
-                  <div class="color-palette">
-                    ${PRESET_COLORS.map(
-                      (c) => html`
-                        <div
-                          class="color-dot-btn ${c === 'transparent' ? 'none-color' : ''}"
-                          style="background-color: ${c}"
-                          title=${c === 'transparent' ? 'No color' : c}
-                          @click=${() => {
-                            this.fileState.updateTabGroup(groupId, { color: c })
-                            this.hContextMenu = null
-                          }}
-                        ></div>
-                      `
-                    )}
-                  </div>
+                  ${renderGroupIconPicker(openGroup?.icon, (id) => {
+                    this.fileState.updateTabGroup(groupId, { icon: id })
+                    this.hContextMenu = null
+                  })}
                   <div class="m-divider"></div>
                   <div
                     class="m-item"
@@ -935,8 +875,11 @@ export class WriteMdApp extends LitElement {
       case 'split-backlinks':
         this.fileState.setSplitSurface('backlinks')
         break
-      case 'split-ai':
-        this.fileState.setSplitSurface('ai')
+      case 'split-document':
+        void showSecondaryDocument(this.fileState)
+        break
+      case 'split-preview':
+        this.fileState.setSplitSurface('preview')
         break
       case 'open-settings':
         this.showSettings = true
@@ -999,6 +942,20 @@ export class WriteMdApp extends LitElement {
     this.verticalPanelCollapsed = !this.verticalPanelCollapsed
   }
 
+  /**
+   * A group icon in the collapsed strip opens the panel on that folder.
+   *
+   * The panel has to expand first, or the click lands on chrome that is not
+   * there yet, and a group saved shut is reopened so the folder you chose is
+   * actually the thing you see. The open document is left alone: the click
+   * asked for a folder, not for an edit to steal focus.
+   */
+  private handleOpenGroup = (e: CustomEvent<{ groupId: string }>): void => {
+    this.verticalPanelCollapsed = false
+    const group = (this.tabGroups ?? []).find((g) => g.id === e.detail.groupId)
+    if (group?.collapsed) this.fileState.toggleTabGroupCollapse(group.id)
+  }
+
   private async openFileDialog(): Promise<void> {
     const result = await api()?.file?.openDialog?.({
       properties: ['openFile'],
@@ -1006,17 +963,6 @@ export class WriteMdApp extends LitElement {
     })
     if (result && !result.canceled && result.filePaths[0]) {
       await this.fileState.openFile(result.filePaths[0])
-    }
-  }
-
-  private handleOpenVault = async (): Promise<void> => {
-    const vaultPath = await api()
-      ?.vault?.getPath?.()
-      .catch(() => undefined)
-    if (vaultPath) {
-      await api()
-        ?.shell?.openPath?.(vaultPath)
-        .catch(() => undefined)
     }
   }
 
@@ -1159,13 +1105,14 @@ export class WriteMdApp extends LitElement {
                 ><writemd-sidebar
                   .collapsed=${this.verticalPanelCollapsed}
                   .welcome=${this.showWelcome}
+                  .tabGroups=${this.tabGroups}
                   @new-file=${() => void this.fileState.newFile()}
                   @open-file=${() => void this.openFileDialog()}
+                  @new-group=${this.handleCreateGroupVertical}
                   @open-menu=${() => (this.showPalette = true)}
                   @toggle-panel=${this.toggleVerticalPanel}
+                  @open-group=${this.handleOpenGroup}
                   @open-settings=${() => (this.showSettings = true)}
-                  @open-vault=${() => void this.handleOpenVault()}
-                  @open-ai=${() => this.fileState.setSplitSurface('ai')}
                   >${
                     this.showWelcome
                       ? ''
@@ -1196,7 +1143,6 @@ export class WriteMdApp extends LitElement {
                     .vertical=${this.panelOrientation === 'vertical'}
                     @new-file=${() => void this.fileState.newFile()}
                     @open-file=${() => void this.openFileDialog()}
-                    @open-vault=${() => void this.handleOpenVault()}
                     @open-settings=${() => (this.showSettings = true)}
                     @open-recent=${(e: CustomEvent<{ path: string }>) =>
                       void this.fileState.openFile(e.detail.path)}

@@ -2,9 +2,6 @@ import { describe, it, expect } from 'vitest'
 import { validatePatch, DEFAULT_SETTINGS, settingKeys } from '../src/shared/settings-schema'
 import { isAllowedExternalProtocol } from '../src/shared/external-url'
 
-/** Keys the main process derives; they are readable but never settable. */
-const DERIVED_KEYS = new Set(['ai.apiKeySet', 'ai.apiKeyUndecryptable'])
-
 describe('validatePatch', () => {
   it('accepts a well-formed nested patch', () => {
     const { clean, problems } = validatePatch({ editor: { fontSize: 18, wordWrap: false } })
@@ -61,17 +58,6 @@ describe('validatePatch', () => {
     expect(clean).toEqual({})
   })
 
-  it('refuses to let a client set the derived api flags', () => {
-    const { clean, problems } = validatePatch({
-      ai: { apiKeySet: true, apiKeyUndecryptable: true }
-    })
-    expect(problems).toEqual([
-      'ai.apiKeySet is derived and cannot be set',
-      'ai.apiKeyUndecryptable is derived and cannot be set'
-    ])
-    expect(clean).toEqual({})
-  })
-
   it('treats null and undefined as no-ops rather than errors', () => {
     const { clean, problems } = validatePatch({ editor: { fontSize: null } })
     expect(problems).toEqual([])
@@ -98,10 +84,6 @@ describe('validatePatch', () => {
       const defaults = DEFAULT_SETTINGS as unknown as Record<string, Record<string, unknown>>
       const value = defaults[section][name]
       const patch = { [section]: { [name]: value } }
-      if (DERIVED_KEYS.has(key)) {
-        // Intentionally not settable; covered separately above.
-        continue
-      }
       const { problems } = validatePatch(patch)
       expect(problems, `${key} cannot be set`).toEqual([])
     }

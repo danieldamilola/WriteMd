@@ -3,7 +3,7 @@ import { customElement, property, state } from 'lit/decorators.js'
 import { animate } from 'motion'
 import { WorkspaceState } from '../state/workspace'
 import { SettingsStore } from '../state/settings'
-import { reducedMotionNow } from '../utils/motion'
+import { PANEL_RESIZE_MOTION, reducedMotionNow } from '../utils/motion'
 import { resizeHandleStyles } from '../design/controls'
 
 @customElement('writemd-rail-frame')
@@ -79,12 +79,7 @@ export class RailFrame extends LitElement {
       changed.get('collapsed') === undefined
     )
       this.style.width = `${target}px`
-    else
-      this.animation = animate(
-        this,
-        { width: `${target}px` },
-        { duration: 0.18, ease: [0.22, 1, 0.36, 1] }
-      )
+    else this.animation = animate(this, { width: `${target}px` }, PANEL_RESIZE_MOTION)
   }
   private down = (event: PointerEvent): void => {
     if (event.button !== 0) return

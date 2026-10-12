@@ -11,12 +11,13 @@ export class BackgroundStore {
   private settings = SettingsStore.getInstance()
   private listeners = new Set<() => void>()
   private asset: BackgroundAsset | null = null
-  private cache = new Map<Effect, string>()
+  private cache = new Map<string, string>()
   private worker: Worker | null = null
   private revision = 0
   private initialized = false
   private requestedId: string | null = null
   private requestedEffect: Effect | null = null
+  private requestedLight = false
   url = ''
   error = ''
   loading = false
@@ -35,14 +36,21 @@ export class BackgroundStore {
   private sync(): void {
     const id = this.settings.get('appearance.backgroundId', '')
     const effect = this.settings.get<Effect>('appearance.backgroundEffect', 'none')
+    const light = this.isLight()
     if (id !== this.requestedId) {
       this.requestedId = id
       this.requestedEffect = effect
+      this.requestedLight = light
       void this.load()
-    } else if (effect !== this.requestedEffect) {
+    } else if (effect !== this.requestedEffect || light !== this.requestedLight) {
       this.requestedEffect = effect
+      this.requestedLight = light
       if (this.asset?.id === id) void this.process()
     }
+  }
+  /** Effects that draw ink invert for light themes, so the artwork is reworked. */
+  private isLight(): boolean {
+    return document.documentElement.dataset.colorScheme === 'light'
   }
   private notify(): void {
     this.listeners.forEach((callback) => callback())
@@ -86,7 +94,9 @@ export class BackgroundStore {
       this.notify()
       return
     }
-    const cached = this.cache.get(effect)
+    const light = this.isLight()
+    const key = `${effect}:${light}`
+    const cached = this.cache.get(key)
     if (cached) {
       this.url = cached
       this.notify()
@@ -112,7 +122,7 @@ export class BackgroundStore {
         this.loading = false
         if (event.data.blob) {
           const url = URL.createObjectURL(event.data.blob)
-          this.cache.set(effect, url)
+          this.cache.set(key, url)
           this.url = url
           this.error = ''
         } else this.error = event.data.error ?? 'Could not apply image effect'
@@ -128,7 +138,7 @@ export class BackgroundStore {
         this.worker = null
         this.notify()
       }
-      worker.postMessage({ bitmap, effect }, [bitmap])
+      worker.postMessage({ bitmap, effect, light }, [bitmap])
     } catch (error) {
       if (revision !== this.revision) return
       this.loading = false

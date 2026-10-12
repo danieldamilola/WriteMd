@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import {
+  COMMANDS,
   parseBinding,
   normalizeBinding,
   bindingsEqual,
@@ -11,6 +12,39 @@ import {
 } from '../src/renderer/src/state/shortcuts'
 
 describe('shortcut registry', () => {
+  it('ships no two commands on the same default binding', () => {
+    // Nothing surfaces a collision to the user until they press the key and one
+    // of the two commands silently wins, so the registry itself has to hold.
+    const seen = new Map<string, string>()
+    const clashes: string[] = []
+    for (const cmd of COMMANDS) {
+      for (const binding of [cmd.defaultBinding, ...(cmd.aliases ?? [])]) {
+        const parsed = parseBinding(binding)
+        if (!parsed) {
+          if (binding) clashes.push(`${cmd.id}: unparseable "${binding}"`)
+          continue
+        }
+        const owner = seen.get(binding)
+        if (owner) clashes.push(`${binding}: ${owner} and ${cmd.id}`)
+        else seen.set(binding, cmd.id)
+      }
+    }
+    expect(clashes).toEqual([])
+  })
+
+  it('gives all four split surfaces their own shortcut', () => {
+    const surfaces = COMMANDS.filter((c) => c.id.startsWith('split-'))
+    expect(surfaces.map((c) => c.id)).toEqual([
+      'split-files',
+      'split-backlinks',
+      'split-document',
+      'split-preview'
+    ])
+    for (const surface of surfaces) {
+      expect(surface.defaultBinding).not.toBe('')
+    }
+  })
+
   it('parses standard bindings', () => {
     expect(parseBinding('Ctrl+Shift+S')).toEqual({ mod: true, shift: true, alt: false, key: 's' })
     expect(parseBinding('Ctrl+,')).toEqual({ mod: true, shift: false, alt: false, key: ',' })

@@ -124,6 +124,10 @@ export const controlStyles = css`
   svg {
     flex-shrink: 0;
   }
+  svg[data-icon] {
+    width: var(--icon-size, 18px);
+    height: var(--icon-size, 18px);
+  }
   [hidden] {
     display: none !important;
   }

@@ -1,7 +1,7 @@
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, expect, beforeEach, vi } from 'vitest'
 import '../src/renderer/src/components/VerticalTabBar'
 import { VerticalTabBar } from '../src/renderer/src/components/VerticalTabBar'
-import type { TabGroup } from '../src/renderer/src/state/file-state'
+import { FileState, type TabGroup } from '../src/renderer/src/state/file-state'
 
 function mountRail(): VerticalTabBar {
   const el = document.createElement('writemd-vertical-tab-bar') as VerticalTabBar
@@ -46,26 +46,23 @@ describe('writemd-vertical-tab-bar component', () => {
 
     const pinnedSection = el.shadowRoot?.querySelector('.pinned-section')
     expect(pinnedSection).not.toBeNull()
-    const pinnedDivider = el.shadowRoot?.querySelector('.pinned-divider')
-    expect(pinnedDivider).not.toBeNull()
-    expect(pinnedDivider?.getAttribute('role')).toBe('separator')
+    // Pinned and unpinned are told apart by their order, not by a drawn rule.
+    expect(el.shadowRoot?.querySelector('.pinned-divider')).toBeNull()
 
     const pinnedTab = pinnedSection?.querySelector('writemd-tab')
     expect(pinnedTab?.hasAttribute('pinned')).toBe(true)
   })
 
-  it('omits the pinned separator when there is no unpinned section', async () => {
+  it('draws no divider whether or not there is an unpinned section', async () => {
     const el = mountRail()
     el.tabs = [{ path: 'pinned.md', dirty: false, isPinned: true }]
     await flush(el)
     expect(el.shadowRoot?.querySelector('.pinned-divider')).toBeNull()
   })
 
-  it('renders tab groups with collapsible header and color dot', async () => {
+  it('renders tab groups with a collapsible header and the chosen icon', async () => {
     const el = mountRail()
-    const groups: TabGroup[] = [
-      { id: 'group-1', label: 'Docs', color: '#3b82f6', collapsed: false }
-    ]
+    const groups: TabGroup[] = [{ id: 'group-1', label: 'Docs', icon: 'star', collapsed: false }]
     el.tabGroups = groups
     el.tabs = [
       { path: 'grouped.md', dirty: false, groupId: 'group-1' },
@@ -76,13 +73,40 @@ describe('writemd-vertical-tab-bar component', () => {
     const groupHeader = el.shadowRoot?.querySelector('.group-header')
     expect(groupHeader).not.toBeNull()
     expect(groupHeader?.querySelector('.group-label')?.textContent?.trim()).toBe('Docs')
+    expect(groupHeader?.querySelector('svg[data-icon="star"]')).not.toBeNull()
+    expect(groupHeader?.querySelector('.group-chevron')).toBeNull()
     expect(groupHeader?.querySelector('.group-count')).toBeNull()
-
-    const dot = groupHeader?.querySelector('.group-color-dot') as HTMLElement
-    expect(dot?.style.backgroundColor).toContain('rgb(59, 130, 246)')
 
     const groupTabsContainer = el.shadowRoot?.querySelector('.group-tabs')
     expect(groupTabsContainer?.classList.contains('collapsed')).toBe(false)
+  })
+
+  it('shows the chosen icon whether the group is open or closed', async () => {
+    const el = mountRail()
+    el.tabGroups = [{ id: 'group-1', label: 'Docs', icon: 'star', collapsed: true }]
+    el.tabs = [{ path: 'grouped.md', dirty: false, groupId: 'group-1' }]
+    await flush(el)
+    expect(el.shadowRoot?.querySelector('svg[data-icon="star"]')).not.toBeNull()
+    expect(el.shadowRoot?.querySelector('.group-tabs.collapsed')).not.toBeNull()
+  })
+
+  it('shows a closed folder for collapsed groups with no icon set', async () => {
+    const el = mountRail()
+    el.tabGroups = [{ id: 'group-1', label: 'Docs', collapsed: true }]
+    el.tabs = [{ path: 'grouped.md', dirty: false, groupId: 'group-1' }]
+    await flush(el)
+    expect(el.shadowRoot?.querySelector('svg[data-icon="folder"]')).not.toBeNull()
+    expect(el.shadowRoot?.querySelector('svg[data-icon="folder-open"]')).toBeNull()
+    expect(el.shadowRoot?.querySelector('.group-tabs.collapsed')).not.toBeNull()
+  })
+
+  it('falls back to the folder pair for an icon that is not a preset', async () => {
+    const el = mountRail()
+    el.tabGroups = [{ id: 'group-1', label: 'Docs', icon: 'not-a-real-icon', collapsed: false }]
+    el.tabs = [{ path: 'grouped.md', dirty: false, groupId: 'group-1' }]
+    await flush(el)
+    expect(el.shadowRoot?.querySelector('svg[data-icon="folder-open"]')).not.toBeNull()
+    expect(el.shadowRoot?.querySelector('.group-color-dot')).toBeNull()
   })
 
   it('provides an aria-live announcement region for accessible drag reporting', async () => {
@@ -94,24 +118,9 @@ describe('writemd-vertical-tab-bar component', () => {
     expect(live).not.toBeNull()
   })
 
-  it('does not render group color dot when color is transparent', async () => {
-    const el = mountRail()
-    const groups: TabGroup[] = [
-      { id: 'group-clean', label: 'Plain', color: 'transparent', collapsed: false }
-    ]
-    el.tabGroups = groups
-    el.tabs = [{ path: 'note.md', dirty: false, groupId: 'group-clean' }]
-    await flush(el)
-
-    const groupHeader = el.shadowRoot?.querySelector('.group-header')
-    expect(groupHeader).not.toBeNull()
-    const dot = groupHeader?.querySelector('.group-color-dot')
-    expect(dot).toBeNull()
-  })
-
   it('labels the pinned area Space with no count and keeps groups on top', async () => {
     const el = mountRail()
-    el.tabGroups = [{ id: 'group-1', label: 'Docs', color: '#3b82f6', collapsed: false }]
+    el.tabGroups = [{ id: 'group-1', label: 'Docs', icon: 'star', collapsed: false }]
     el.tabs = [
       { path: 'pinned.md', dirty: false, isPinned: true },
       { path: 'grouped.md', dirty: false, groupId: 'group-1' },
@@ -142,6 +151,62 @@ describe('writemd-vertical-tab-bar component', () => {
     expect(tab?.hasAttribute('pinned')).toBe(true)
     expect(tab?.shadowRoot?.querySelector('.pin-icon')).toBeNull()
     expect(tab?.shadowRoot?.querySelector('svg[data-icon="file-text"]')).not.toBeNull()
+  })
+
+  it('creates an empty group and puts the caret in its label', async () => {
+    const el = mountRail()
+    el.tabs = [
+      { path: 'doc1.md', dirty: false },
+      { path: 'doc2.md', dirty: false }
+    ]
+    const fileState = FileState.getInstance()
+    const created: TabGroup = {
+      id: 'group-1',
+      label: 'Group 1',
+      icon: 'star',
+      collapsed: false
+    }
+    const create = vi.spyOn(fileState, 'createTabGroup').mockReturnValue(created.id)
+    // The rail is driven by props, so mirror what FileState would have stored.
+    create.mockImplementation(() => {
+      el.tabGroups = [...el.tabGroups, created]
+      return created.id
+    })
+    await flush(el)
+
+    el.createGroup()
+    // An empty group: no tab index is passed, so nothing is swept out of place.
+    expect(create).toHaveBeenCalledWith('Group 1', undefined, [])
+    await flush(el)
+    const input = el.shadowRoot?.querySelector('.group-rename-input') as HTMLInputElement | null
+    expect(input).not.toBeNull()
+    expect(input?.value).toBe('Group 1')
+    create.mockRestore()
+  })
+
+  it('moves a named tab into the group when one is given', async () => {
+    const el = mountRail()
+    el.tabs = [
+      { path: 'doc1.md', dirty: false },
+      { path: 'doc2.md', dirty: false }
+    ]
+    const create = vi.spyOn(FileState.getInstance(), 'createTabGroup').mockReturnValue('group-1')
+    await flush(el)
+
+    el.createGroup(1)
+    expect(create).toHaveBeenCalledWith('Group 1', undefined, [1])
+    create.mockRestore()
+  })
+
+  it('numbers the default label from the existing groups', async () => {
+    const el = mountRail()
+    el.tabGroups = [{ id: 'a', label: 'Work', icon: 'star', collapsed: false }]
+    const create = vi.spyOn(FileState.getInstance(), 'createTabGroup').mockReturnValue('group-2')
+    await flush(el)
+
+    el.createGroup()
+    expect(create).toHaveBeenCalledWith('Group 2', undefined, [])
+    create.mockRestore()
   })
 
   it('uses only CSS custom properties or theme tokens in stylesheet', () => {

@@ -1,4 +1,4 @@
-import type { LitElement, ReactiveController } from 'lit'
+import { render, type LitElement, type ReactiveController } from 'lit'
 import {
   DragDropManager,
   Droppable,
@@ -15,6 +15,7 @@ import { FileState } from '../state/file-state'
 import { placeTab } from '../state/tab-order'
 import type { TabDestination } from '../state/tab-order'
 import { reducedMotionNow } from '../utils/motion'
+import { groupRowIcon } from '../components/group-icons'
 import type { WriteMdTab } from '../components/Tab'
 
 interface Entry {
@@ -127,7 +128,7 @@ export class TabDragController implements ReactiveController {
               .some(
                 (node) =>
                   node instanceof Element &&
-                  node.matches('button,input,select,textarea,.group-chevron,[data-no-drag]')
+                  node.matches('button,input,select,textarea,[data-no-drag]')
               )
         })
       ],
@@ -167,9 +168,17 @@ export class TabDragController implements ReactiveController {
         clone.style.width = '100%'
         overlay.append(clone)
       } else {
-        overlay.textContent =
-          this.fileState.getState().tabGroups?.find((g) => g.id === this.source?.id)?.label ??
-          'Group'
+        // A group drags as its icon and label together, matching the row it
+        // came from. A group with no icon set falls back to the folder pair,
+        // so the preview is never a bare word.
+        const group = this.fileState.getState().tabGroups?.find((g) => g.id === this.source?.id)
+        const holder = document.createElement('span')
+        holder.className = 'writemd-drag-preview-icon'
+        render(groupRowIcon(group ?? { collapsed: false }), holder)
+        const name = document.createElement('span')
+        name.className = 'writemd-drag-preview-group'
+        name.textContent = group?.label ?? 'Group'
+        overlay.append(holder, name)
       }
       document.body.append(overlay)
       this.overlay = overlay
@@ -190,8 +199,10 @@ export class TabDragController implements ReactiveController {
         this.announcement.textContent = event.canceled ? 'Tab drag canceled.' : 'Tab order updated.'
       this.clear()
       if (!event.canceled && source) {
-        if (source.kind === 'tab' && destination) this.fileState.dropTab(source.id, destination)
-        else if (
+        if (source.kind === 'tab' && destination) {
+          this.fileState.dropTab(source.id, destination)
+          this.revealGroup(destination.groupId)
+        } else if (
           source.kind === 'group' &&
           this.container &&
           this.point.x >= this.container.getBoundingClientRect().left &&
@@ -253,7 +264,10 @@ export class TabDragController implements ReactiveController {
     ) {
       this.destination = null
       this.groupBefore = null
-      for (const entry of this.entries.values()) entry.element.removeAttribute('data-drop-target')
+      for (const entry of this.entries.values()) {
+        entry.element.removeAttribute('data-drop-target')
+        entry.element.classList.remove('drag-over')
+      }
       return
     }
     const delta = this.scrollPosition() - this.scrollOrigin
@@ -277,12 +291,20 @@ export class TabDragController implements ReactiveController {
       const box = geometry(entry)
       return entry.kind === 'group' && position >= box.start && position <= box.end
     })
+    // A tab's own folder header is not an "into this folder" target. Treating
+    // it as one produced a destination with no neighbour, which `placeTab`
+    // reads as "append", so hovering your own group silently teleported the
+    // tab to the bottom of it. There is nothing to do there, so the header
+    // falls through to the ordinary before/after logic and the drop means
+    // "reorder me relative to my siblings".
+    const intoGroup =
+      hoveredGroup && hoveredGroup.id !== this.source.element.dataset.groupId ? hoveredGroup : null
     const before = candidates.find(
       (entry) => position < (geometry(entry).start + geometry(entry).end) / 2
     )
     const anchor = before ?? candidates.at(-1)
     let next: TabDestination | null = null
-    if (hoveredGroup) next = { section: 'group', groupId: hoveredGroup.id }
+    if (intoGroup) next = { section: 'group', groupId: intoGroup.id }
     else if (!before && (!anchor || position > geometry(anchor).end + 6))
       next = { section: 'ungrouped' }
     else if (anchor)
@@ -298,8 +320,19 @@ export class TabDragController implements ReactiveController {
       }
     if (JSON.stringify(next) === JSON.stringify(this.destination)) return
     this.destination = next
-    for (const entry of this.entries.values()) entry.element.removeAttribute('data-drop-target')
-    ;(hoveredGroup ?? anchor)?.element.setAttribute('data-drop-target', '')
+    for (const entry of this.entries.values()) {
+      entry.element.removeAttribute('data-drop-target')
+      entry.element.classList.remove('drag-over')
+    }
+    if (intoGroup) {
+      // A distinct treatment from the solid insertion outline: hovering a
+      // folder means "into it", which is a different gesture from "between
+      // these two rows", and reusing the same outline made the two
+      // indistinguishable.
+      intoGroup.element.classList.add('drag-over')
+    } else {
+      anchor?.element?.setAttribute('data-drop-target', '')
+    }
     const items = [...candidates, this.source].filter((entry) => {
       const source = this.source!
       return (
@@ -340,6 +373,22 @@ export class TabDragController implements ReactiveController {
     }
   }
 
+  /**
+   * Open a folder the tab was just dropped into, if it was closed.
+   *
+   * A closed folder renders no rows, so committing into one put the tab
+   * somewhere the user cannot see and had no way to find. This expands after
+   * the drop rather than on hover: `this.rects` is a dragstart snapshot and
+   * `hostUpdated` deliberately refuses to re-sync mid-gesture, so growing the
+   * list while dragging would shift every row below it out from under the
+   * pointer and leave the insertion markers pointing at the wrong places.
+   */
+  private revealGroup(groupId: string | null | undefined): void {
+    if (!groupId) return
+    const group = (this.fileState.getState().tabGroups ?? []).find((g) => g.id === groupId)
+    if (group?.collapsed) this.fileState.toggleTabGroupCollapse(groupId)
+  }
+
   private clear(): void {
     cancelAnimationFrame(this.frame)
     this.overlay?.remove()
@@ -349,6 +398,7 @@ export class TabDragController implements ReactiveController {
       entry.element.style.removeProperty('transform')
       entry.element.style.removeProperty('opacity')
       entry.element.removeAttribute('data-drop-target')
+      entry.element.classList.remove('drag-over')
     }
     this.animations.clear()
     this.source = null

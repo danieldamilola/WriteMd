@@ -4,7 +4,35 @@ import { api } from '../api'
 import { showConfirm } from '../services/confirm'
 import { sameFilePath } from '../utils/paths'
 import { placeTab, type TabDestination } from './tab-order'
+import { isGroupIcon } from './group-icons'
 import type { FileWriteResult } from '../../../shared/electron-api'
+
+/**
+ * Drop anything a group no longer understands.
+ *
+ * Groups persisted before icon presets carry a `color`, and a profile could
+ * carry any string at all if a preset was removed later. Both are discarded
+ * here rather than at render, so the row only ever sees an icon it can draw.
+ */
+export function normalizeTabGroups(groups: unknown): TabGroup[] {
+  if (!Array.isArray(groups)) return []
+  return groups
+    .filter(
+      (group): group is TabGroup & { color?: string } =>
+        !!group && typeof group === 'object' && typeof (group as TabGroup).id === 'string'
+    )
+    .map((group) => {
+      // Built field by field rather than spread, so a `color` left over from
+      // an older profile cannot ride along as an untyped extra key.
+      const next: TabGroup = {
+        id: group.id,
+        label: group.label,
+        collapsed: !!group.collapsed
+      }
+      if (isGroupIcon(group.icon)) next.icon = group.icon
+      return next
+    })
+}
 
 /**
  * Modes the primary pane can render.
@@ -16,7 +44,15 @@ import type { FileWriteResult } from '../../../shared/electron-api'
  */
 export type ViewMode = 'live' | 'reading' | 'source' | 'wysiwyg'
 
-export type SplitSurface = 'launcher' | 'file' | 'files' | 'backlinks' | 'ai'
+/**
+ * What the second pane shows.
+ *
+ * There is no `'launcher'` here. Surfaces used to be reached through a picker
+ * in the pane, so changing one meant going back through the picker first. They
+ * are tabs now, each one click away from every other, and `'files'` is what the
+ * pane opens on.
+ */
+export type SplitSurface = 'files' | 'backlinks' | 'file' | 'preview'
 
 /**
  * Whether the secondary pane's CodeMirror view should exist.
@@ -62,7 +98,8 @@ export interface ConflictInfo {
 export interface TabGroup {
   id: string
   label: string
-  color?: string
+  /** Name of a group icon preset. Absent means the folder pair. */
+  icon?: string
   collapsed: boolean
 }
 
@@ -134,7 +171,7 @@ export class FileState {
     isVaultFile: false,
     quickTogglePair: ['live', 'reading'],
     splitActive: false,
-    splitSurface: 'launcher',
+    splitSurface: 'files',
     secondaryDoc: null,
     conflict: null,
     tabs: [],
@@ -308,6 +345,7 @@ export class FileState {
     } catch {
       // Fallback on corrupt group metadata
     }
+    restoredGroups = normalizeTabGroups(restoredGroups)
     const vaultPath = await api()
       ?.vault?.getPath?.()
       .catch(() => undefined)
@@ -467,26 +505,20 @@ export class FileState {
 
   /**
    * Create a new tab group and optionally assign tabs to it.
+   *
+   * New groups start on the folder icon rather than cycling presets. A preset
+   * the user never chose is noise, and every group sharing one glyph made the
+   * icons pointless; the picker in the group menu is how anyone changes it.
    */
-  createTabGroup(label: string, color?: string, tabIndices: number[] = []): string {
+  createTabGroup(label: string, icon?: string, tabIndices: number[] = []): string {
     const currentGroups = this.state.tabGroups ?? []
     const id = `group-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`
-    const groupColors = [
-      '#f24e1e',
-      '#3b82f6',
-      '#10b981',
-      '#f59e0b',
-      '#8b5cf6',
-      '#ec4899',
-      '#06b6d4'
-    ]
-    const assignedColor = color ?? groupColors[currentGroups.length % groupColors.length]
     const newGroup: TabGroup = {
       id,
       label: label.trim() || 'New Group',
-      color: assignedColor,
       collapsed: false
     }
+    if (icon) newGroup.icon = icon
 
     const indicesSet = new Set(tabIndices)
     const tabs = this.state.tabs.map((tab, idx) => {
@@ -711,7 +743,7 @@ export class FileState {
         remainingActive >= 0 ? remainingActive : Math.min(this.state.activeTab, tabs.length - 1)
       ),
       ...(secondaryMatches
-        ? { splitActive: false, splitSurface: 'launcher', secondaryDoc: null }
+        ? { splitActive: false, splitSurface: 'files', secondaryDoc: null }
         : {}),
       conflict: sameFilePath(this.state.conflict?.path, path) ? null : this.state.conflict
     }
@@ -1091,7 +1123,7 @@ export class FileState {
       this.state = {
         ...this.state,
         splitActive: false,
-        splitSurface: 'launcher',
+        splitSurface: 'files',
         secondaryDoc: null
       }
     } else {
@@ -1227,7 +1259,7 @@ export class FileState {
     this.state = {
       ...this.state,
       splitActive: false,
-      splitSurface: 'launcher',
+      splitSurface: 'files',
       secondaryDoc: null
     }
     this.notify()

@@ -23,10 +23,21 @@ export class SearchBar extends LitElement {
     .field {
       flex: 1;
       min-width: 0;
+      /*
+       * The launcher is a <button>, and a button is shrink-to-fit even when it
+       * is a flex container. Without an explicit width it collapsed to its
+       * content and left most of the sidebar row empty.
+       */
+      width: 100%;
       display: flex;
       align-items: center;
       gap: 8px;
-      padding: 7px 10px;
+      /*
+       * 8px vertical and 12px horizontal, both on the 4px scale. This is the
+       * field's internal padding, so by the internal <= external rule the gap
+       * around it has to be at least 8px, which is what the sidebar gives it.
+       */
+      padding: 8px 12px;
       border: 1px solid transparent;
       border-radius: var(--radius-md);
       background: var(--bg-hover);
@@ -52,6 +63,11 @@ export class SearchBar extends LitElement {
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
+    }
+    svg {
+      width: var(--icon-size, 18px);
+      height: var(--icon-size, 18px);
+      flex-shrink: 0;
     }
     .field input {
       flex: 1;

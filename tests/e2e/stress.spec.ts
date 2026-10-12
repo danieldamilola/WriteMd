@@ -228,9 +228,7 @@ test.describe('Stress sweep', () => {
     const tab = window.locator('writemd-tab', { hasText: name })
     await tab.first().click()
     await expect(window.locator('writemd-editor .cm-content')).toBeVisible()
-    await expect(window.locator('writemd-doc-bar input[aria-label="Document title"]')).toHaveValue(
-      name.replace(/\.md$/i, '')
-    )
+    await expect(window.locator('.cm-inline-title')).toHaveValue(name.replace(/\.md$/i, ''))
   }
 
   test('every fixture opens and paints inside budget', async () => {
@@ -369,31 +367,34 @@ test.describe('Stress sweep', () => {
       // innerText never sees it.
       await panel.locator('input').first().fill('measure')
       await expect(panel.locator('.match-count')).toHaveText(/\d+ of \d+/, { timeout: 30_000 })
+      // Close it. The panel is an overlay on the whole workspace rather than on
+      // the editor, so leaving it open parks it over the split pane and
+      // swallows the clicks the vault-tree test makes next.
+      await window.keyboard.press('Escape')
+      await expect(panel).toHaveCount(0)
     })
     const m = metrics[metrics.length - 1]
     expect(m.worstTask, `find blocked ${m.worstTask}ms`).toBeLessThan(BUDGET.longTaskMs)
   })
 
   /**
-   * Open a split-pane surface from a known state.
+   * Put the split pane on a named surface, from a known state.
    *
-   * The split button is a switch, not a menu, so a pane left open by an earlier
-   * scenario has to be closed before the launcher will appear.
+   * The split button is a switch, so a pane left open by an earlier scenario
+   * has to be closed first. The pane then opens on Files and the surface is a
+   * tab, so reaching Backlinks is one click rather than a launcher round trip.
    */
   async function openSurface(label: string): Promise<void> {
     const toggle = window.locator('writemd-icon-button[title="Split view"]')
-    const openPanes = window.locator(
-      'writemd-surface-launcher, writemd-vault-explorer, writemd-backlinks-panel'
-    )
+    const pane = window.locator('.surface-tabs')
     for (let i = 0; i < 3; i++) {
-      if ((await openPanes.count()) === 0) break
+      if ((await pane.count()) === 0) break
       await toggle.click()
       await window.waitForTimeout(200)
     }
-    const launcher = window.locator('writemd-surface-launcher')
-    if ((await launcher.count()) === 0) await toggle.click()
-    await expect(launcher).toBeVisible()
-    await launcher.locator('.row', { hasText: label }).click()
+    if ((await pane.count()) === 0) await toggle.click()
+    await expect(pane).toBeVisible()
+    await pane.locator('.surface-tab', { hasText: label }).click()
   }
 
   test('the whole vault tree renders inside budget', async () => {
@@ -489,10 +490,7 @@ test.describe('Stress sweep', () => {
       await expect(link).toBeVisible({ timeout: 20_000 })
       await link.click()
       await expect
-        .poll(
-          () => window.locator('writemd-doc-bar input[aria-label="Document title"]').inputValue(),
-          { timeout: 15_000 }
-        )
+        .poll(() => window.locator('.cm-inline-title').inputValue(), { timeout: 15_000 })
         .toBe('note-42')
     })
     expect(m.worstTask, `following the link blocked ${m.worstTask}ms`).toBeLessThan(

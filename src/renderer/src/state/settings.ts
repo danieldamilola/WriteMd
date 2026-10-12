@@ -148,8 +148,11 @@ export class SettingsStore {
       target = target[k] as Record<string, unknown>
     }
     target[keys[keys.length - 1]] = value
-    this.notify(key, value)
+    // Apply to the DOM before notifying, the same order setMany uses. A
+    // subscriber that reads a resolved value such as data-colorScheme would
+    // otherwise see the previous theme.
     applySettingsToDOM(this)
+    this.notify(key, value)
     this.persist()
   }
 

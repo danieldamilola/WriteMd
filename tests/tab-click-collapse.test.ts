@@ -67,7 +67,7 @@ describe('tab click selection and group collapse', () => {
     expect(selectedIndex, 'Clicking tab row must emit select-tab').toBe(1)
   })
 
-  it('collapses and expands group when clicking chevron or group header', async () => {
+  it('collapses and expands group when clicking folder or group header', async () => {
     const el = mountRail()
     const gid = fileState.createTabGroup('My Group')
     el.tabGroups = fileState.getState().tabGroups ?? []
@@ -77,11 +77,11 @@ describe('tab click selection and group collapse', () => {
     const initialCollapsed = (fileState.getState().tabGroups ?? [])[0].collapsed
     expect(initialCollapsed).toBe(false)
 
-    const chevron = el.shadowRoot?.querySelector('.group-chevron') as HTMLElement
-    expect(chevron).not.toBeNull()
+    const folder = el.shadowRoot?.querySelector('.group-icon') as HTMLElement
+    expect(folder).not.toBeNull()
 
-    // Simulate click on chevron
-    chevron.dispatchEvent(
+    // Simulate click on folder
+    folder.dispatchEvent(
       new PointerEvent('pointerdown', {
         bubbles: true,
         cancelable: true,
@@ -90,7 +90,7 @@ describe('tab click selection and group collapse', () => {
         button: 0
       })
     )
-    chevron.dispatchEvent(
+    folder.dispatchEvent(
       new PointerEvent('pointerup', {
         bubbles: true,
         cancelable: true,
@@ -99,10 +99,10 @@ describe('tab click selection and group collapse', () => {
         button: 0
       })
     )
-    chevron.click()
+    folder.click()
 
     const afterFirstClick = (fileState.getState().tabGroups ?? [])[0].collapsed
-    expect(afterFirstClick, 'Clicking chevron must toggle group collapsed').toBe(!initialCollapsed)
+    expect(afterFirstClick, 'Clicking folder must toggle group collapsed').toBe(!initialCollapsed)
 
     // Clicking group header row should toggle collapse back
     const header = el.shadowRoot?.querySelector('.group-header') as HTMLElement

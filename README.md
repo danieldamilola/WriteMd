@@ -24,7 +24,6 @@ _Design inspired by OpenCode._
 - **Live Preview (WYSIWYG)** - Obsidian-style editing powered by CodeMirror 6, plus a source mode and split view
 - **Private by default** - everything stays on your machine; no telemetry, no sync, no lock-in (see [PRIVACY.md](PRIVACY.md))
 - **Links that work** - `[[wiki-links]]` with click-to-open, file picker, cross-folder backlinks panel, and smart website-link insertion
-- **AI assistant (optional)** - bring your own key (OpenAI, Gemini, Anthropic, Ollama, Nvidia, or OpenCode with no key at all) to draft and edit in place
 - **Rich Markdown** - tables, math (KaTeX), Mermaid diagrams, frontmatter, footnotes
 - **Keyboard-first** - command palette (`Ctrl+P`), customizable shortcuts, find/replace (`Ctrl+F` / `Ctrl+H`)
 
@@ -49,7 +48,7 @@ WriteMd registers itself for `.md`, `.markdown`, `.mdown`, and `.mkd` so files o
 - **New note** `Ctrl+N` → created in your vault, no Save dialog
 - **Open** `Ctrl+O`, drag-drop a file onto the window, or double-click in Explorer
 - **Save** is automatic (debounced) - `Ctrl+S` forces it, `Ctrl+Shift+S` saves elsewhere
-- **Views** - Live / Source / Split via the floating pill or `Ctrl+E`; split pane hosts files, backlinks, AI, or another document
+- **Views** - Live / Source / Split via the floating pill or `Ctrl+E`; split pane hosts files, backlinks, or another document
 - **Find/Replace** - `Ctrl+F` / `Ctrl+H`, with match count, case / whole-word / regex toggles
 - **Links** - right-click → Add link (pick any open, recent, or vault file, or browse anywhere) inserts `[[note]]`; Add external link inserts `[text](https://…)` using your clipboard URL when there is one; clicking a `[[link]]` opens or creates the note
 - **Images** - paste or drop; stored in a sibling `_assets/` folder and referenced relatively
@@ -71,14 +70,13 @@ Settings → Shortcuts. `Ctrl` is the `mod` slot, so it renders as `Cmd` on macO
 | Split view          | `Ctrl+Alt+S`                   | `Cmd+Opt+S`                 |
 | Show files panel    | `Ctrl+Shift+E`                 | `Cmd+Shift+E`               |
 | Show backlinks      | `Ctrl+Shift+B`                 | `Cmd+Shift+B`               |
-| Show AI panel       | `Ctrl+Alt+A`                   | `Cmd+Opt+A`                 |
 | Zoom in / out / 0   | `Ctrl+=` / `Ctrl+-` / `Ctrl+0` | `Cmd+=` / `Cmd+-` / `Cmd+0` |
 
 Export has no default binding. Run it from the note menu or the palette.
 
 ## Configuration
 
-Settings persist to `config.json` in the app data folder and cover editor (font, line height, Vim/typewriter modes), appearance (7 themes + accent, panel orientation), vault location, recent files, open tabs, export defaults, AI provider/model/key, and shortcut overrides. See `docs/PRD.md` §9 for the full schema.
+Settings persist to `config.json` in the app data folder and cover editor (font, line height, Vim/typewriter modes), appearance (7 themes + accent, panel orientation), vault location, recent files, open tabs, export defaults, and shortcut overrides. See `docs/PRD.md` §9 for the full schema.
 
 Recent files live in `config.json` under `files.recentFiles`. There is no
 IndexedDB and no separate `recent-files.json`.
@@ -90,9 +88,7 @@ IndexedDB and no separate `recent-files.json`.
   <br><br>
   <img src="docs/readme-screenshots/just-download-vertical.png" alt="The same note with the vertical tab rail, showing the file list down the left edge" width="880">
   <br><br>
-  <img src="docs/readme-screenshots/readme-surface.png" alt="The surface launcher open in the split pane, listing Files, Split view, Backlinks and AI with their shortcuts" width="880">
-  <br><br>
-  <img src="docs/readme-screenshots/ai-panel.png" alt="The AI assistant panel open beside a feature table, with a prompt and the model's reply" width="880">
+  <img src="docs/readme-screenshots/readme-surface.png" alt="The surface launcher open in the split pane, listing Files, Split view and Backlinks with their shortcuts" width="880">
 </div>
 
 ## Development
@@ -119,11 +115,11 @@ pnpm build:mac
 pnpm build:linux
 ```
 
-Project layout: `src/main` (Electron main process), `src/renderer` (UI: `components/`, `state/`, `utils/`), `src/shared` (IPC types), `tests/`, `docs/` (`PRD.md` product spec, `phases.md` roadmap, release notes, screenshots). Conventions live in `AGENTS.md`.
+Project layout: `src/main` (Electron main process), `src/renderer` (UI: `components/`, `state/`, `utils/`), `src/shared` (IPC types), `tests/`, `docs/` (`PRD.md` product spec, `phases.md` roadmap, screenshots), `CHANGELOG.md` (release notes). Conventions live in `AGENTS.md`.
 
 ## Privacy
 
-Local-first: notes never leave your device. The only network traffic is opt-in - your AI provider (when you configure one) and update checks against GitHub releases. Details in [PRIVACY.md](PRIVACY.md).
+Local-first: notes never leave your device. WriteMd makes no network requests at all apart from the update check against GitHub releases, which can be disabled in Settings. Details in [PRIVACY.md](PRIVACY.md).
 
 ## License
 

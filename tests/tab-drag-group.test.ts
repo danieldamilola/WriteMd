@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
-import { FileState } from '../src/renderer/src/state/file-state'
+import { FileState, normalizeTabGroups } from '../src/renderer/src/state/file-state'
 import { SettingsStore } from '../src/renderer/src/state/settings'
 
 const { confirm } = vi.hoisted(() => ({ confirm: vi.fn(async () => true) }))
@@ -77,13 +77,13 @@ describe('tab reordering, pinning, and grouping in FileState', () => {
   })
 
   it('creates, collapses, updates and deletes tab groups', async () => {
-    const groupId = fileState.createTabGroup('Project Notes', '#3b82f6', [0, 1])
+    const groupId = fileState.createTabGroup('Project Notes', 'star', [0, 1])
     let s = fileState.getState()
     const groups = s.tabGroups ?? []
     expect(groups.length).toBe(1)
     expect(groups[0].id).toBe(groupId)
     expect(groups[0].label).toBe('Project Notes')
-    expect(groups[0].color).toBe('#3b82f6')
+    expect(groups[0].icon).toBe('star')
     expect(groups[0].collapsed).toBe(false)
 
     // Tabs 0 and 1 are in the group
@@ -97,10 +97,10 @@ describe('tab reordering, pinning, and grouping in FileState', () => {
     expect((s.tabGroups ?? [])[0].collapsed).toBe(true)
 
     // Update group properties
-    fileState.updateTabGroup(groupId, { label: 'Renamed Group', color: '#10b981' })
+    fileState.updateTabGroup(groupId, { label: 'Renamed Group', icon: 'book' })
     s = fileState.getState()
     expect((s.tabGroups ?? [])[0].label).toBe('Renamed Group')
-    expect((s.tabGroups ?? [])[0].color).toBe('#10b981')
+    expect((s.tabGroups ?? [])[0].icon).toBe('book')
 
     // Move tab 2 into group
     fileState.setTabGroup(2, groupId)
@@ -117,6 +117,16 @@ describe('tab reordering, pinning, and grouping in FileState', () => {
     s = fileState.getState()
     expect((s.tabGroups ?? []).length).toBe(0)
     expect(s.tabs.every((t) => t.groupId === null)).toBe(true)
+  })
+
+  it('leaves a new group on the folder icon instead of cycling presets', () => {
+    const a = fileState.createTabGroup('Group A')
+    const b = fileState.createTabGroup('Group B')
+    const groups = fileState.getState().tabGroups ?? []
+    expect(groups.map((g) => g.id)).toEqual([a, b])
+    // Neither group gets an icon, so both rows draw the folder pair.
+    expect(groups[0].icon).toBeUndefined()
+    expect(groups[1].icon).toBeUndefined()
   })
 
   it('reorders groups relative to each other', () => {
@@ -180,5 +190,38 @@ describe('tab reordering, pinning, and grouping in FileState', () => {
     expect(confirm).not.toHaveBeenCalled()
     const state = fileState.getState()
     expect(state.tabs[state.activeTab].id).toBe(activeId)
+  })
+})
+
+describe('restoring groups persisted before icon presets', () => {
+  it('drops the old colour and keeps a valid icon', () => {
+    const restored = normalizeTabGroups([
+      { id: 'g1', label: 'Docs', color: '#3b82f6', collapsed: false },
+      { id: 'g2', label: 'Ideas', icon: 'star', collapsed: true }
+    ])
+
+    expect(restored).toEqual([
+      { id: 'g1', label: 'Docs', collapsed: false },
+      { id: 'g2', label: 'Ideas', collapsed: true, icon: 'star' }
+    ])
+    expect('color' in (restored[0] as object)).toBe(false)
+  })
+
+  it('discards an icon that is no longer a preset so the row can fall back', () => {
+    const [group] = normalizeTabGroups([
+      { id: 'g1', label: 'Docs', icon: 'retired-preset', collapsed: false }
+    ])
+    expect(group.icon).toBeUndefined()
+  })
+
+  it('keeps the folder default when the profile predates icons entirely', () => {
+    const [group] = normalizeTabGroups([{ id: 'g1', label: 'Docs', collapsed: false }])
+    expect(group.icon).toBeUndefined()
+  })
+
+  it('survives metadata that is not a list of groups', () => {
+    expect(normalizeTabGroups(null)).toEqual([])
+    expect(normalizeTabGroups({ g1: 'Docs' })).toEqual([])
+    expect(normalizeTabGroups([null, 7, { label: 'No id' }])).toEqual([])
   })
 })

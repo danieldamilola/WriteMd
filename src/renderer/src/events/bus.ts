@@ -16,18 +16,22 @@
 export interface AppEvents {
   /** Open the find/replace panel. */
   'find:open': { mode: 'find' | 'replace'; pane?: 'primary' | 'secondary' }
+  /**
+   * Focus the inline document title.
+   *
+   * The title renders inside CodeMirror's shadow DOM, so the Rename item in
+   * the document header cannot focus it directly.
+   */
+  'editor:focus-inline-title': { pane: 'primary' | 'secondary' }
   /** Opening a menu dismisses menus owned by other components. */
   'menu:open': { owner: HTMLElement }
   /** Follow a `[[wiki link]]` by its label. */
   'wiki:open': { name: string }
   /**
-   * Open Settings, optionally on a specific tab. The AI panel's "not
-   * configured" state uses this to deep-link straight to the section that
-   * fixes it, instead of leaving the user to find it.
+   * Open Settings, optionally on a specific tab, so a caller can deep-link
+   * straight to the section it wants instead of leaving the user to find it.
    */
   'settings:open': { tab?: string }
-  /** A successful Settings fetch updates the composer picker immediately. */
-  'ai:models-updated': { models: string[] }
 }
 
 type Handler<K extends keyof AppEvents> = (detail: AppEvents[K]) => void

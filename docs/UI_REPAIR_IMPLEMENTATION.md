@@ -127,7 +127,7 @@ Screenshots: [default vertical home](screenshots/ui-v1.4.0/welcome-vertical-grap
 
 ## v1.4.0 release validation
 
-The package version is 1.4.0. [Release notes](release-notes/RELEASE_NOTES_v1.4.0.md) describe the final workspace, settings, and home behavior and the one-time orientation/font migrations.
+The package version is 1.4.0. [CHANGELOG.md](../CHANGELOG.md) describes the final workspace, settings, and home behavior and the one-time orientation/font migrations.
 
 - `pnpm build` passed, including main, renderer, and test typechecks.
 - `pnpm test --maxWorkers=1` passed all 685 unit tests across 63 files.

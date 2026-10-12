@@ -54,10 +54,9 @@ test.describe('Welcome screen design', () => {
 
   test('defaults to vertical mode and shares editor chrome without the old frame', async () => {
     await expect(page.locator('writemd-shell')).toHaveAttribute('vertical', '')
-    await expect(page.locator('writemd-sidebar [aria-current="page"]')).toHaveText('Home')
-    await expect(
-      page.locator('writemd-sidebar .footer button', { hasText: 'AI Assistant' })
-    ).toBeDisabled()
+    await expect(page.locator('writemd-sidebar .home-hint')).toHaveText('Nothing')
+    await expect(page.locator('writemd-sidebar nav')).toHaveCount(0)
+    await expect(page.getByRole('button', { name: /vault folder/i })).toHaveCount(0)
     const welcome = page.locator('writemd-welcome-screen')
     await expect(welcome.locator('.recent-item')).toHaveCount(4)
     await expect(welcome.locator('writemd-panel')).toHaveJSProperty('empty', true)
@@ -69,6 +68,47 @@ test.describe('Welcome screen design', () => {
       page.locator('writemd-top-bar writemd-icon-button[title="Split view"]')
     ).toHaveCount(0)
     await page.screenshot({ path: 'artifacts/ui-review/welcome-vertical-graphite.png' })
+  })
+
+  test('action and navigation icons stay at 18px on home and in both editor layouts', async () => {
+    const homeIcons = page.locator('writemd-sidebar svg, writemd-welcome-screen svg')
+    expect(await homeIcons.count()).toBeGreaterThan(8)
+    for (const size of await homeIcons.evaluateAll((icons) =>
+      icons.map((icon) => {
+        const bounds = icon.getBoundingClientRect()
+        return [bounds.width, bounds.height]
+      })
+    )) {
+      expect(size).toEqual([18, 18])
+    }
+    await page.locator('writemd-sidebar writemd-icon-button[title="Collapse panel"]').click()
+    const expand = page.locator('writemd-sidebar writemd-icon-button[title="Expand panel"]')
+    await expect(expand.locator('svg')).toHaveCSS('width', '18px')
+    await expand.click()
+    await page.locator('writemd-welcome-screen .recent-item').first().click()
+    await expect(page.locator('writemd-editor')).toBeVisible()
+    for (const orientation of ['vertical', 'horizontal']) {
+      await prefs({ 'appearance.panelOrientation': orientation })
+      const icons = page.locator(
+        'writemd-sidebar svg, writemd-doc-bar .icon-action svg, writemd-editor .icon-action svg, writemd-tab svg[data-icon], writemd-app .tab-add svg, writemd-info-pill .mode-btn svg, writemd-top-bar writemd-icon-button:not([size="caption"]) svg'
+      )
+      expect(await icons.count()).toBeGreaterThan(0)
+      for (const size of await icons.evaluateAll((icons) =>
+        icons.map((icon) => {
+          const bounds = icon.getBoundingClientRect()
+          return [bounds.width, bounds.height]
+        })
+      )) {
+        expect(size).toEqual([18, 18])
+      }
+      await page.screenshot({ path: `artifacts/ui-review/icons-editor-${orientation}.png` })
+    }
+    await page.locator('writemd-doc-bar .icon-action[title="More Options"]').click()
+    await page.locator('writemd-doc-bar [data-id="backlinks"]').click()
+    const rescan = page.locator('writemd-backlinks-panel .toolbar button svg')
+    await expect(rescan).toHaveCSS('width', '18px')
+    await expect(rescan).toHaveCSS('height', '18px')
+    await page.screenshot({ path: 'artifacts/ui-review/icons-backlinks.png' })
   })
 
   test('fits both tab layouts and compact windows across all themes', async () => {
@@ -116,8 +156,8 @@ test.describe('Welcome screen design', () => {
       window.setMinimumSize(800, 400)
       window.setSize(800, 420)
     })
-    await page.locator('writemd-welcome-screen .utility').scrollIntoViewIfNeeded()
-    await expect(page.locator('writemd-welcome-screen .utility')).toBeVisible()
+    await page.locator('writemd-welcome-screen .actions').scrollIntoViewIfNeeded()
+    await expect(page.locator('writemd-welcome-screen .actions')).toBeVisible()
     await page.screenshot({ path: 'artifacts/ui-review/welcome-short-window.png' })
   })
 
@@ -128,9 +168,8 @@ test.describe('Welcome screen design', () => {
     await recent.focus()
     await page.keyboard.press('Space')
     await expect(page.locator('writemd-editor')).toBeVisible()
-    await expect(page.locator('writemd-doc-bar input.title-input')).toHaveValue('Project notes')
+    await expect(page.locator('.cm-inline-title')).toHaveValue('Project notes')
     await expect(sidebar).toHaveAttribute('data-probe', 'home-sidebar')
-    await expect(sidebar.locator('.footer button', { hasText: 'AI Assistant' })).toBeEnabled()
     await page.evaluate(async () => {
       const files = (document.querySelector('writemd-app') as unknown as Host).fileState
       await files.closeTab(files.getState().activeTab)
@@ -142,7 +181,7 @@ test.describe('Welcome screen design', () => {
     await expect(page.locator('writemd-vertical-tab-bar')).toBeVisible()
   })
 
-  test('file picker cancellation and failed reads keep home; file/vault actions use the bridge', async () => {
+  test('file picker cancellation and failed reads keep home; file actions use the bridge', async () => {
     const open = page.locator('writemd-welcome-screen .actions button', { hasText: 'Open file' })
     await app.evaluate(({ dialog }) => {
       dialog.showOpenDialog = async () => ({ canceled: true, filePaths: [] })
@@ -163,16 +202,7 @@ test.describe('Welcome screen design', () => {
     await click
     await expect(page.locator('writemd-welcome-screen')).toBeVisible()
     await expect(page.locator('writemd-editor')).toHaveCount(0)
-    await app.evaluate(({ ipcMain, BrowserWindow }) => {
-      ipcMain.removeHandler('shell:open-path')
-      ipcMain.handle('shell:open-path', (_, path: string) => {
-        BrowserWindow.getAllWindows()[0].setTitle(path)
-      })
-    })
-    await page.locator('writemd-welcome-screen .utility').click()
-    await expect
-      .poll(() => app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].getTitle()))
-      .toBe(fixture.vault)
+    await expect(page.getByRole('button', { name: /vault folder/i })).toHaveCount(0)
     await app.evaluate(
       ({ dialog }, path) => {
         dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [path] })
@@ -180,7 +210,7 @@ test.describe('Welcome screen design', () => {
       join(fixture.vault, names[3])
     )
     await open.click()
-    await expect(page.locator('writemd-doc-bar input.title-input')).toHaveValue('Draft')
+    await expect(page.locator('.cm-inline-title')).toHaveValue('Draft')
   })
 
   test('home settings and search remain usable while changing tab layout', async () => {
@@ -206,9 +236,9 @@ test.describe('Welcome screen design', () => {
 
   test('empty vault shows a readable start state with working keyboard creation', async () => {
     await expect(page.locator('writemd-welcome-screen .recent-item')).toHaveCount(0)
-    await expect(page.locator('writemd-welcome-screen .empty-state')).toContainText(
-      'No recent notes yet'
-    )
+    await expect(page.locator('writemd-welcome-screen .empty-state')).toHaveText('Nothing')
+    await expect(page.locator('writemd-sidebar .home-hint')).toHaveText('Nothing')
+    await expect(page.getByRole('button', { name: /vault folder/i })).toHaveCount(0)
     await page.screenshot({ path: 'artifacts/ui-review/welcome-empty-vault.png' })
     await page.keyboard.press('Control+n')
     await expect(page.locator('writemd-editor')).toBeVisible()
@@ -249,7 +279,5 @@ test.describe('Welcome screen design', () => {
     const background = page.locator('writemd-welcome-screen writemd-background img')
     await expect(background).toHaveCSS('opacity', '0.31')
     await page.screenshot({ path: 'artifacts/ui-review/welcome-image-background.png' })
-    await prefs({ 'appearance.backgroundTarget': 'ai' })
-    await expect(background).toHaveCSS('opacity', '0')
   })
 })

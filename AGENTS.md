@@ -8,6 +8,8 @@
 
 **Phases:** `docs/phases.md` - implementation roadmap with acceptance criteria per task.
 
+**Changelog:** `CHANGELOG.md` - Keep a Changelog format, newest at the top. Add every user-visible change under `## [Unreleased]` as it lands, under `### Added`, `### Changed`, or `### Fixed`. Move it under a dated `## [x.y.z]` heading when a release is cut. The app's "What's new" dialog reads this file, so a missing entry means a silent update.
+
 **Figma Design:** https://www.figma.com/design/ctsfPaeg9sQl7OfXhy4eUT/Projects--UI?node-id=114-127&m=dev
 
 ---

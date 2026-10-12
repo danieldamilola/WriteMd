@@ -7,6 +7,7 @@ import { menuStyles, menuIcon } from './menu-styles'
 import { FileState, type TabGroup } from '../state/file-state'
 import './Tab'
 import { TabDragController } from '../controllers/tab-drag'
+import { groupRowIcon, renderGroupIconPicker, renderGroupMenuIcon } from './group-icons'
 
 export interface VerticalTabItem {
   id?: string
@@ -27,17 +28,6 @@ interface ContextMenuState {
 function tabLabel(path: string | null): string {
   return path?.split(/[/\\]/).pop() ?? 'Untitled.md'
 }
-
-const PRESET_COLORS = [
-  'transparent',
-  '#f24e1e',
-  '#3b82f6',
-  '#10b981',
-  '#f59e0b',
-  '#8b5cf6',
-  '#ec4899',
-  '#06b6d4'
-]
 
 @customElement('writemd-vertical-tab-bar')
 export class VerticalTabBar extends LitElement {
@@ -90,16 +80,6 @@ export class VerticalTabBar extends LitElement {
         margin-bottom: 6px;
       }
 
-      .pinned-divider {
-        height: 1px;
-        width: 48px;
-        max-width: 40%;
-        flex-shrink: 0;
-        align-self: center;
-        margin: 8px 0;
-        background: var(--border);
-      }
-
       .tab-group-container {
         display: flex;
         flex-direction: column;
@@ -109,14 +89,15 @@ export class VerticalTabBar extends LitElement {
       .group-header {
         display: flex;
         align-items: center;
-        gap: 6px;
-        height: 28px;
-        padding: 0 6px;
+        gap: 8px;
+        height: 30px;
+        padding: 0 10px 0 11px;
         border-radius: 5px;
         cursor: pointer;
         color: var(--text-secondary);
-        font-size: 12px;
-        font-weight: 500;
+        font-size: 13px;
+        line-height: 18px;
+        font-weight: 400;
         transition:
           background 100ms ease,
           color 100ms ease;
@@ -135,33 +116,31 @@ export class VerticalTabBar extends LitElement {
 
       .group-header.drag-over {
         background: var(--bg-hover);
-        outline: 1px dashed var(--accent-primary, #f24e1e);
+        color: var(--text);
+        /* Dashed, not solid: a solid outline means "insert between these two
+           rows" and is applied by the drag controller to whichever row is the
+           insertion anchor. A folder takes the whole row instead, so it gets
+           its own shape to keep the two gestures apart. */
+        outline: 1px dashed var(--accent);
+        outline-offset: -1px;
       }
       [data-drop-target] {
         outline: 1px solid var(--border-focus);
         outline-offset: -1px;
       }
 
-      .group-chevron {
+      .group-icon {
         display: flex;
         align-items: center;
         justify-content: center;
-        width: 14px;
-        height: 14px;
-        color: var(--text-muted);
-        transition: transform 140ms ease;
+        width: var(--icon-size, 18px);
+        height: var(--icon-size, 18px);
         flex-shrink: 0;
       }
 
-      .group-chevron.collapsed {
-        transform: rotate(-90deg);
-      }
-
-      .group-color-dot {
-        width: 7px;
-        height: 7px;
-        border-radius: 50%;
-        flex-shrink: 0;
+      .group-icon svg {
+        width: 100%;
+        height: 100%;
       }
 
       .group-label {
@@ -169,7 +148,7 @@ export class VerticalTabBar extends LitElement {
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
-        font-size: 12px;
+        font-size: inherit;
       }
 
       .group-rename-input {
@@ -183,7 +162,7 @@ export class VerticalTabBar extends LitElement {
         border-radius: 3px;
         color: var(--text);
         font-family: inherit;
-        font-size: 12px;
+        font-size: inherit;
         padding: 1px 6px;
         outline: none;
       }
@@ -213,43 +192,6 @@ export class VerticalTabBar extends LitElement {
         max-width: none;
         flex: 1;
         height: 30px;
-      }
-
-      .color-palette {
-        display: flex;
-        gap: 6px;
-        padding: 4px 10px;
-      }
-
-      .color-dot-btn {
-        width: 14px;
-        height: 14px;
-        border-radius: 50%;
-        border: 1px solid var(--border-subtle);
-        cursor: pointer;
-        transition: transform 100ms ease;
-        box-sizing: border-box;
-      }
-
-      .color-dot-btn:hover {
-        transform: scale(1.2);
-      }
-
-      .color-dot-btn.none-color {
-        background: transparent !important;
-        border: 1px dashed var(--text-muted);
-        position: relative;
-      }
-
-      .color-dot-btn.none-color::after {
-        content: '';
-        position: absolute;
-        top: 50%;
-        left: 1px;
-        right: 1px;
-        height: 1px;
-        background: var(--text-muted);
-        transform: rotate(-45deg);
       }
 
       .m-panel {
@@ -320,8 +262,20 @@ export class VerticalTabBar extends LitElement {
 
   private handleCreateGroupWithTab(index: number): void {
     this.closeContextMenu()
+    this.createGroup(index)
+  }
+
+  /**
+   * Create a group and put the caret in its label, so the name can be typed
+   * straight away. An empty group is created unless a tab is dragged in.
+   */
+  createGroup(tabIndex?: number): void {
     const defaultLabel = `Group ${(this.tabGroups?.length ?? 0) + 1}`
-    const id = this.fileState.createTabGroup(defaultLabel, undefined, [index])
+    const id = this.fileState.createTabGroup(
+      defaultLabel,
+      undefined,
+      tabIndex === undefined ? [] : [tabIndex]
+    )
     this.renamingGroupId = id
     this.focusRenameInput(id)
   }
@@ -406,29 +360,16 @@ export class VerticalTabBar extends LitElement {
           @contextmenu=${(e: MouseEvent) => this.handleGroupContextMenu(e, group.id)}
         >
           <div
-            class="group-chevron ${group.collapsed ? 'collapsed' : ''}"
+            class="group-icon"
+            data-no-drag
             @click=${(e: MouseEvent) => {
               e.stopPropagation()
               if (this.tabDrag.suppressClick) return
               this.fileState.toggleTabGroupCollapse(group.id)
             }}
           >
-            <svg
-              width="10"
-              height="10"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="2.5"
-            >
-              <polyline points="6 9 12 15 18 9"></polyline>
-            </svg>
+            ${groupRowIcon(group)}
           </div>
-          ${
-            group.color && group.color !== 'transparent'
-              ? html`<span class="group-color-dot" style="background-color: ${group.color}"></span>`
-              : ''
-          }
           ${
             this.renamingGroupId === group.id
               ? html`
@@ -475,6 +416,7 @@ export class VerticalTabBar extends LitElement {
   private renderContextMenu(): TemplateResult | string {
     if (!this.contextMenu) return ''
     const { type, index, groupId, x, y } = this.contextMenu
+    const openGroup = this.tabGroups?.find((group) => group.id === groupId)
 
     return html`
       <writemd-context-menu
@@ -527,14 +469,7 @@ export class VerticalTabBar extends LitElement {
                           this.closeContextMenu()
                         }}
                       >
-                        ${
-                          g.color && g.color !== 'transparent'
-                            ? html`<span
-                                class="group-color-dot"
-                                style="background-color: ${g.color}; margin-right: 4px;"
-                              ></span>`
-                            : ''
-                        }
+                        ${renderGroupMenuIcon(g)}
                         <span>Move to ${g.label}</span>
                       </div>
                     `
@@ -595,21 +530,10 @@ export class VerticalTabBar extends LitElement {
                     <span>Rename group</span>
                   </div>
                   <div class="m-divider"></div>
-                  <div class="color-palette">
-                    ${PRESET_COLORS.map(
-                      (c) => html`
-                        <div
-                          class="color-dot-btn ${c === 'transparent' ? 'none-color' : ''}"
-                          style="background-color: ${c}"
-                          title=${c === 'transparent' ? 'No color' : c}
-                          @click=${() => {
-                            this.fileState.updateTabGroup(groupId, { color: c })
-                            this.closeContextMenu()
-                          }}
-                        ></div>
-                      `
-                    )}
-                  </div>
+                  ${renderGroupIconPicker(openGroup?.icon, (id) => {
+                    this.fileState.updateTabGroup(groupId, { icon: id })
+                    this.closeContextMenu()
+                  })}
                   <div class="m-divider"></div>
                   <div
                     class="m-item"
@@ -682,7 +606,6 @@ export class VerticalTabBar extends LitElement {
                       `
                     : ''
                 }
-                ${ungroupedTabs.length > 0 ? html`<div class="pinned-divider" role="separator" aria-label="Pinned and unpinned documents"></div>` : ''}
               `
             : ''
         }

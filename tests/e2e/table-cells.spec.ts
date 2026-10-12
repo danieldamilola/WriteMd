@@ -65,10 +65,9 @@ test.describe('Live table cell editing', () => {
       .locator('writemd-tab', { hasText: name.replace(/\.md$/i, '') })
       .first()
       .click()
-    await expect(window.locator('writemd-doc-bar input[aria-label="Document title"]')).toHaveValue(
-      name.replace(/\.md$/i, ''),
-      { timeout: 15_000 }
-    )
+    await expect(window.locator('.cm-inline-title')).toHaveValue(name.replace(/\.md$/i, ''), {
+      timeout: 15_000
+    })
   }
 
   test('clicking a cell edits it in place instead of dumping source', async () => {

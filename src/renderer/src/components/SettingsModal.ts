@@ -12,9 +12,7 @@ import { nativeModalAvailable } from './Modal'
 import { api } from '../api'
 import { deepActiveElement } from '../utils/links'
 import { MOTION_LABELS, MOTION_PREFERENCES, type MotionPreference } from '../utils/motion'
-import { DEFAULT_AI_SYSTEM_PROMPT } from '../../../shared/settings-schema'
 import { SettingsStore } from '../state/settings'
-import { emit } from '../events/bus'
 import { showConfirm } from './ConfirmDialog'
 import { icon } from './icons'
 import { scrollbarStyles } from './scrollbars'
@@ -63,7 +61,6 @@ const NAV_ICONS: Record<SettingsTab, string> = {
   files: 'folder-open',
   appearance: 'palette',
   shortcuts: 'keyboard',
-  ai: 'bot',
   advanced: 'settings',
   about: 'info'
 }
@@ -120,32 +117,6 @@ const ACCENT_COLORS = [
   '#f26419', // Orange
   '#00c4cc' // Cyan
 ]
-
-/**
- * Known models per provider, shown until the live list arrives. This lived as
- * two identical literals inside the class; a third partial copy sits in the
- * shared schema. One definition, referenced by both call sites.
- */
-const PROVIDER_MODEL_DEFAULTS: Record<string, string[]> = {
-  OpenAI: ['gpt-4o', 'gpt-4-turbo', 'gpt-3.5-turbo'],
-  Anthropic: ['claude-3-5-sonnet-20240620', 'claude-3-opus-20240229', 'claude-3-haiku-20240307'],
-  GoogleGemini: ['gemini-1.5-pro', 'gemini-1.5-flash'],
-  Mistral: ['mistral-large-latest', 'open-mixtral-8x22b'],
-  Groq: ['llama3-70b-8192', 'llama3-8b-8192', 'mixtral-8x7b-32768'],
-  DeepSeek: ['deepseek-chat', 'deepseek-coder'],
-  xAI: ['grok-2', 'grok-2-mini'],
-  OpenRouter: ['openai/gpt-4o', 'anthropic/claude-3.5-sonnet', 'google/gemini-1.5-pro'],
-  // Local CLI: model is free-text provider/model (or empty for CLI default).
-  OpenCode: [],
-  Nvidia: [
-    'meta/llama-3.3-70b-instruct',
-    'deepseek-ai/deepseek-r1',
-    'qwen/qwen2.5-coder-32b-instruct',
-    'nvidia/llama-3.1-nemotron-70b-instruct',
-    'mistralai/mixtral-8x22b-instruct-v0.1'
-  ],
-  Ollama: ['llama3', 'mistral', 'phi3']
-}
 
 @customElement('writemd-settings-modal')
 export class SettingsModal extends LitElement {
@@ -245,8 +216,8 @@ export class SettingsModal extends LitElement {
       }
 
       .nav-btn svg {
-        width: 16px;
-        height: 16px;
+        width: var(--icon-size, 18px);
+        height: var(--icon-size, 18px);
         opacity: 0.7;
         flex-shrink: 0;
       }
@@ -615,15 +586,6 @@ export class SettingsModal extends LitElement {
         flex: 0 0 88px;
         width: 88px;
       }
-      textarea.text-input.prompt-input {
-        width: 100%;
-        min-height: 160px;
-        resize: vertical;
-        line-height: 1.5;
-        font-family: inherit;
-        box-sizing: border-box;
-        flex-shrink: 1;
-      }
 
       .danger-btn {
         background: transparent;
@@ -733,7 +695,7 @@ export class SettingsModal extends LitElement {
   @state() private tab: SettingsTab = 'general'
   @state() private searchQuery = ''
 
-  /** Jump to a tab from outside, e.g. the AI panel's "not configured" state. */
+  /** Jump to a tab from outside, e.g. a deep link from another component. */
   @property({ type: Boolean }) embedded = false
   @property({ type: String }) initialTab: SettingsTab = 'general'
 
@@ -755,6 +717,7 @@ export class SettingsModal extends LitElement {
   @state() private wordWrap = true
   @state() private autoSave = true
   @state() private lineNumbers = false
+  @state() private showFilePath = true
   @state() private enableMermaid = true
   @state() private defaultNewFileName = 'Untitled.md'
   @state() private pdfPageSize = 'A4'
@@ -777,29 +740,6 @@ export class SettingsModal extends LitElement {
 
   private updaterUnsubs: Array<() => void> = []
 
-  // AI State
-  @state() private aiProvider = 'OpenAI'
-  @state() private aiModel = 'gpt-4o'
-  @state() private aiApiKey = ''
-  @state() private aiKeyStored = false
-  @state() private aiKeyUndecryptable = false
-  @state() private aiSystemPrompt = DEFAULT_AI_SYSTEM_PROMPT
-  @state() private availableModels: string[] = []
-  @state() private isFetchingModels = false
-  @state() private fetchError = ''
-  @state() private opencodeCliFound: boolean | null = null
-  @state() private opencodeCliPath: string | null = null
-  @state() private opencodeCliVersion: string | null = null
-  @state() private opencodeLoginCommand = 'opencode auth login opencode'
-  @state() private opencodeAuthLoggedIn: boolean | null = null
-  @state() private opencodeAuthDetail = ''
-  @state() private opencodeCopied = false
-  @state() private opencodeCustomPath = ''
-  @state() private opencodeManagedUp: boolean | null = null
-  @state() private opencodeDebug: string[] = []
-  @state() private opencodeChecking = false
-  @state() private webSearchEnabled = false
-
   private settingsStore = SettingsStore.getInstance()
   private settingsSubscriptions: (() => void)[] = []
 
@@ -819,7 +759,6 @@ export class SettingsModal extends LitElement {
       ?.app?.getVersion?.()
       .then((v) => (this.appVersion = v))
       .catch(() => undefined)
-    void this.checkOpencodeStatus()
 
     const updater = api()?.updater
     if (updater) {
@@ -886,6 +825,7 @@ export class SettingsModal extends LitElement {
     this.wordWrap = s.get('editor.wordWrap', true)
     this.autoSave = s.get('editor.autoSave', true)
     this.lineNumbers = s.get('editor.showLineNumbers', false)
+    this.showFilePath = s.get('editor.showFilePath', true)
     this.vaultPath = s.get('files.vaultPath', '')
     this.enableMermaid = s.get('advanced.enableMermaid', true)
     this.defaultNewFileName = s.get('files.defaultNewFileName', 'Untitled.md')
@@ -895,22 +835,7 @@ export class SettingsModal extends LitElement {
     this.panelOrientation = s.get('appearance.panelOrientation', 'vertical') as
       'horizontal' | 'vertical'
     this.motion = s.get('appearance.motion', 'system') as MotionPreference
-    this.aiProvider = s.get('ai.provider', 'OpenAI')
-    this.aiModel = s.get('ai.model', 'gpt-4o')
-    this.aiApiKey = s.get('ai.apiKey', '')
-    this.aiKeyStored = s.get<boolean>('ai.apiKeySet', false)
-    this.aiKeyUndecryptable = s.get<boolean>('ai.apiKeyUndecryptable', false)
-    this.aiSystemPrompt = s.get('ai.systemPrompt', DEFAULT_AI_SYSTEM_PROMPT)
-    this.opencodeCustomPath = s.get('ai.opencodeCliPath', '')
-    this.webSearchEnabled = s.get<boolean>('ai.webSearchEnabled', false)
     this.autoCheckForUpdates = s.get('updates.autoCheckForUpdates', true)
-
-    if (this.availableModels.length === 0) {
-      this.availableModels = [...(PROVIDER_MODEL_DEFAULTS[this.aiProvider] ?? [])]
-      if (this.aiModel && !this.availableModels.includes(this.aiModel)) {
-        this.availableModels.unshift(this.aiModel)
-      }
-    }
   }
 
   private updateSetting(key: string, value: unknown): void {
@@ -1211,140 +1136,6 @@ export class SettingsModal extends LitElement {
     }
   }
 
-  /**
-   * The stored key is never readable, so the field is write-only: an empty
-   * input leaves the existing key alone, and typing one replaces it. Clearing
-   * the field does not delete the key, because there is no way to confirm the
-   * intent without being able to see the value.
-   */
-  private handleApiKeyInput = (e: Event): void => {
-    const value = (e.target as HTMLInputElement).value.trim()
-    if (!value) {
-      ;(e.target as HTMLInputElement).value = ''
-      return
-    }
-    this.aiApiKey = ''
-    this.updateSetting('ai.apiKey', value)
-  }
-
-  private async fetchModels(): Promise<void> {
-    this.fetchError = ''
-    if (
-      !this.aiApiKey &&
-      !this.aiKeyStored &&
-      this.aiProvider !== 'Ollama' &&
-      this.aiProvider !== 'OpenCode'
-    ) {
-      this.fetchError = 'API Key required'
-      return
-    }
-    this.isFetchingModels = true
-    this.availableModels = []
-    try {
-      const electron = api()
-      if (!electron) throw new Error('No electron API')
-
-      const models = await electron.net.fetchModels(this.aiProvider, this.aiApiKey)
-      if (models && models.length > 0) {
-        this.availableModels = models
-        emit('ai:models-updated', { models })
-        if (!this.availableModels.includes(this.aiModel)) {
-          this.aiModel = this.availableModels[0]
-          this.updateSetting('ai.model', this.aiModel)
-        }
-      } else if (this.aiProvider === 'OpenCode') {
-        // The CLI model field is free-text (provider/model, or empty for the
-        // CLI default); an empty list is not a failure.
-        this.availableModels = this.aiModel ? [this.aiModel] : []
-        this.fetchError = ''
-      } else {
-        throw new Error('No models returned')
-      }
-    } catch (e) {
-      console.error('Failed to fetch models', e)
-      this.fetchError = e instanceof Error ? e.message : 'Failed to fetch'
-    } finally {
-      this.isFetchingModels = false
-    }
-  }
-
-  private async checkOpencodeStatus(customPath?: string): Promise<void> {
-    const electron = api()
-    const getStatus = electron?.opencode?.getStatus
-    if (!getStatus) return
-    this.opencodeChecking = true
-    try {
-      const s = await getStatus(customPath ?? this.opencodeCustomPath ?? '')
-      this.opencodeCliFound = s.cliFound
-      this.opencodeCliPath = s.cliPath
-      this.opencodeCliVersion = s.cliVersion
-      this.opencodeLoginCommand = s.loginCommand ?? this.opencodeLoginCommand
-      this.opencodeAuthLoggedIn = s.auth?.loggedIn ?? null
-      this.opencodeAuthDetail = s.auth?.detail ?? ''
-      this.opencodeManagedUp = s.managedServerUp ?? null
-      this.opencodeDebug = Array.isArray(s.debug) ? s.debug : []
-    } catch {
-      this.opencodeCliFound = false
-      this.opencodeCliPath = null
-      this.opencodeAuthLoggedIn = null
-    } finally {
-      this.opencodeChecking = false
-    }
-  }
-
-  /** Copy the Console login command; runs in the user's own terminal (browser flow). */
-  private async handleOpencodeCopyLogin(): Promise<void> {
-    try {
-      await navigator.clipboard.writeText(this.opencodeLoginCommand)
-      this.opencodeCopied = true
-      window.setTimeout(() => (this.opencodeCopied = false), 2000)
-    } catch {
-      // Clipboard unavailable (permissions); the command is still visible to type.
-      this.opencodeCopied = false
-    }
-  }
-
-  /** Open the Console (opencode.ai) where the login session starts. */
-  private handleOpencodeOpenConsole(): void {
-    void api()?.shell?.openExternal?.('https://opencode.ai')
-  }
-
-  /** Let the user point at opencode.cmd directly (npm global bin not on PATH). */
-  private async handleOpencodeBrowse(): Promise<void> {
-    const electron = api()
-    const dialog = electron?.dialog?.showOpenDialog
-    if (!dialog) return
-    try {
-      const result = await dialog({
-        properties: ['openFile'],
-        filters: [
-          { name: 'Executables', extensions: ['cmd', 'exe', 'bat', '*'] },
-          { name: 'All files', extensions: ['*'] }
-        ]
-      })
-      if (!result.canceled && result.filePaths[0]) {
-        this.opencodeCustomPath = result.filePaths[0]
-        this.updateSetting('ai.opencodeCliPath', result.filePaths[0])
-        await this.checkOpencodeStatus(result.filePaths[0])
-      }
-    } catch (e) {
-      console.error('Failed to pick opencode binary:', e)
-    }
-  }
-
-  private handleProviderChange(e: Event): void {
-    const provider = String((e.currentTarget as WaSelect).value ?? '')
-    this.updateSetting('ai.provider', provider)
-
-    // Show known models immediately so the dropdown is not empty while the
-    // network fetch for the live list is in flight.
-    this.availableModels = [...(PROVIDER_MODEL_DEFAULTS[provider] ?? [])]
-    if (this.availableModels.length > 0) {
-      this.updateSetting('ai.model', this.availableModels[0])
-    }
-    void this.fetchModels()
-  }
-
   private async handleCheckForUpdates(): Promise<void> {
     const updater = api()?.updater
     if (!updater) return
@@ -1493,7 +1284,6 @@ export class SettingsModal extends LitElement {
               ${this.tab === 'files' ? this.renderFiles() : ''}
               ${this.tab === 'shortcuts' ? this.renderShortcuts() : ''}
               ${this.tab === 'advanced' ? this.renderAdvanced() : ''}
-              ${this.tab === 'ai' ? this.renderAI() : ''}
               ${this.tab === 'about' ? this.renderAbout() : ''}
             </div>
           </div>
@@ -1718,6 +1508,20 @@ export class SettingsModal extends LitElement {
             @click=${() => this.updateSetting('editor.showLineNumbers', !this.lineNumbers)}
           ></button>
         </div>
+
+        <div class="setting-row">
+          <div>
+            <div class="setting-label">File Path</div>
+            <div class="setting-desc">Show the document path on the left of the footer</div>
+          </div>
+          <button
+            class="toggle-switch"
+            role="switch"
+            aria-checked="${this.showFilePath}"
+            aria-label="File path"
+            @click=${() => this.updateSetting('editor.showFilePath', !this.showFilePath)}
+          ></button>
+        </div>
       </div>
     `
   }
@@ -1884,248 +1688,6 @@ export class SettingsModal extends LitElement {
             <div class="setting-desc">Restore all options to their factory defaults</div>
           </div>
           <button class="control-btn danger-btn" @click=${this.handleReset}>Reset All</button>
-        </div>
-      </div>
-    `
-  }
-
-  private renderAI(): unknown {
-    return html`
-      <div class="section-title">AI Assistant Config</div>
-      <div class="section">
-        <div class="setting-row">
-          <div>
-            <div class="setting-label">Provider</div>
-            <div class="setting-desc">Select your AI backend provider</div>
-          </div>
-          <wa-select
-            size="small"
-            class="select-input"
-            label="Provider"
-            aria-label="Provider"
-            .value=${this.aiProvider}
-            @change=${this.handleProviderChange}
-          >
-            <wa-option value="OpenAI">OpenAI</wa-option>
-            <wa-option value="Anthropic"> Anthropic </wa-option>
-            <wa-option value="GoogleGemini"> Google Gemini </wa-option>
-            <wa-option value="Mistral">Mistral</wa-option>
-            <wa-option value="Groq">Groq</wa-option>
-            <wa-option value="OpenRouter"> OpenRouter </wa-option>
-            <wa-option value="OpenCode"> OpenCode (Console login) </wa-option>
-            <wa-option value="Nvidia">Nvidia</wa-option>
-            <wa-option value="DeepSeek">DeepSeek</wa-option>
-            <wa-option value="xAI">xAI (Grok)</wa-option>
-            <wa-option value="Ollama">Ollama (Local)</wa-option>
-          </wa-select>
-        </div>
-
-        <div class="setting-row">
-          <div>
-            <div class="setting-label">Web search</div>
-            <div class="setting-desc">
-              Ground answers with a keyless web search before sending. Works with any provider.
-            </div>
-          </div>
-          <button
-            class="toggle-switch"
-            role="switch"
-            aria-checked="${this.webSearchEnabled}"
-            aria-label="Web search"
-            @click=${() => this.updateSetting('ai.webSearchEnabled', !this.webSearchEnabled)}
-          ></button>
-        </div>
-
-        <div class="setting-row">
-          <div>
-            <div class="setting-label">Model</div>
-            <div class="setting-desc">
-              ${
-                this.aiProvider === 'OpenCode'
-                  ? 'provider/model from your CLI (e.g. opencode/big-pickle), or empty for its default. Fetch lists `opencode models` when available.'
-                  : 'Specify the model to use (e.g. gpt-4o, claude-3.5-sonnet, gemini-1.5-pro, llama3)'
-              }
-            </div>
-          </div>
-          <div class="control-stack">
-            <div class="control-group">
-              ${
-                this.aiProvider === 'OpenCode'
-                  ? html`
-                      <input
-                        type="text"
-                        class="text-input"
-                        list="ai-model-suggestions"
-                        placeholder="opencode/big-pickle or empty"
-                        .value=${this.aiModel}
-                        @change=${(e: Event) => {
-                          const v = (e.target as HTMLInputElement).value.trim()
-                          this.aiModel = v
-                          this.updateSetting('ai.model', v)
-                        }}
-                      />
-                      <datalist id="ai-model-suggestions">
-                        ${this.availableModels.map((m) => html`<option value=${m}></option>`)}
-                      </datalist>
-                    `
-                  : html`
-                      <wa-select
-                        size="small"
-                        class="select-input"
-                        label="Model"
-                        aria-label="Model"
-                        .value=${this.aiModel}
-                        @change=${(e: Event) => this.updateSetting('ai.model', String((e.currentTarget as WaSelect).value ?? ''))}
-                      >
-                        ${
-                          this.availableModels.length > 0
-                            ? this.availableModels.map(
-                                (m) => html`<wa-option value=${m}> ${m} </wa-option>`
-                              )
-                            : html`<wa-option value=${this.aiModel}>${this.aiModel}</wa-option>`
-                        }
-                      </wa-select>
-                    `
-              }
-              <button
-                class="control-btn"
-                @click=${this.fetchModels}
-                ?disabled=${this.isFetchingModels}
-              >
-                ${this.isFetchingModels ? 'Loading...' : 'Fetch'}
-              </button>
-            </div>
-            ${this.fetchError ? html`<div class="setting-desc" style="color: var(--danger);">${this.fetchError}</div>` : ''}
-          </div>
-        </div>
-
-        <div class="setting-row">
-          <div>
-            <div class="setting-label">API Key</div>
-            <div class="setting-desc">
-              ${
-                this.aiKeyUndecryptable
-                  ? html`<span style="color: var(--warning)"
-                      >A key is stored but this install cannot decrypt it. Type a new one to replace
-                      it.</span
-                    >`
-                  : this.aiKeyStored
-                    ? 'A key is stored on this machine. Type a new one to replace it.'
-                    : 'Your secret API key (saved locally)'
-              }
-            </div>
-          </div>
-          <input
-            type="password"
-            class="text-input"
-            placeholder=${this.aiKeyStored ? 'stored - type to replace' : 'sk-...'}
-            autocomplete="off"
-            .value=${this.aiApiKey}
-            @change=${this.handleApiKeyInput}
-          />
-        </div>
-        ${
-          this.aiProvider === 'OpenCode'
-            ? html`<div class="setting-row">
-                  <div>
-                    <div class="setting-label">Connect via Console</div>
-                    <div class="setting-desc">
-                      ${
-                        this.opencodeAuthLoggedIn
-                          ? `Logged in - ${this.opencodeAuthDetail}.`
-                          : this.opencodeAuthDetail
-                            ? `${this.opencodeAuthDetail}.`
-                            : 'Login happens in your browser: open the Console, sign in, then run the command in a terminal.'
-                      }
-                      1) Open console.opencode.ai and sign in. 2) Run the command, complete the
-                      browser login. 3) Back here, Recheck, then /models in the CLI to pick a model.
-                    </div>
-                  </div>
-                  <div class="control-group">
-                    <code
-                      class="text-input"
-                      style="padding: 8px 12px; font-size: 12px; user-select: all;"
-                      >${this.opencodeLoginCommand}</code
-                    >
-                    <button class="control-btn" @click=${this.handleOpencodeCopyLogin}>
-                      ${this.opencodeCopied ? 'Copied' : 'Copy'}
-                    </button>
-                    <button class="control-btn" @click=${this.handleOpencodeOpenConsole}>
-                      Open console
-                    </button>
-                  </div>
-                </div>
-                <div class="setting-row">
-                  <div>
-                    <div class="setting-label">CLI path</div>
-                    <div class="setting-desc">
-                      ${
-                        this.opencodeChecking
-                          ? 'Checking…'
-                          : this.opencodeCliFound
-                            ? `Found: ${this.opencodeCliPath ?? 'opencode'}${this.opencodeCliVersion ? ` (${this.opencodeCliVersion})` : ''}. Chat runs through a managed server WriteMd starts itself - no manual serve needed, no API key needed.`
-                            : 'Not found. npm installs land at %APPDATA%\\npm\\opencode.cmd - pick it below if it is not on PATH.'
-                      }
-                      ${this.opencodeManagedUp ? ' Managed server running.' : ''}
-                    </div>
-                  </div>
-                  <div class="control-group">
-                    <button class="control-btn" @click=${this.handleOpencodeBrowse}>
-                      ${this.opencodeCustomPath ? 'Change…' : 'Browse…'}
-                    </button>
-                    <button
-                      class="control-btn"
-                      @click=${() => void this.checkOpencodeStatus()}
-                      ?disabled=${this.opencodeChecking}
-                    >
-                      ${this.opencodeChecking ? 'Checking…' : 'Recheck'}
-                    </button>
-                  </div>
-                </div>
-                ${
-                  !this.opencodeCliFound && this.opencodeDebug.length > 0
-                    ? html`<div class="setting-row">
-                        <div>
-                          <div class="setting-label">Why wasn't it found?</div>
-                          <div
-                            class="setting-desc"
-                            style="font-family: var(--font-mono); font-size: 11px; white-space: pre-wrap;"
-                          >
-                            ${this.opencodeDebug.join('\n')}
-                          </div>
-                        </div>
-                      </div>`
-                    : ''
-                }`
-            : ''
-        }
-      </div>
-
-      <div class="section-title">System Prompt</div>
-      <div class="section">
-        <div class="setting-desc" style="margin-bottom: 8px;">
-          Instructions sent with every request. The open file's content is appended automatically.
-        </div>
-        <textarea
-          class="text-input prompt-input"
-          rows="10"
-          .value=${this.aiSystemPrompt}
-          @change=${(e: Event) => {
-            const v = (e.target as HTMLTextAreaElement).value
-            this.aiSystemPrompt = v
-            this.updateSetting('ai.systemPrompt', v)
-          }}
-        ></textarea>
-        <div style="display: flex; justify-content: flex-end; margin-top: 8px;">
-          <button
-            class="control-btn"
-            @click=${() => {
-              this.aiSystemPrompt = DEFAULT_AI_SYSTEM_PROMPT
-              this.updateSetting('ai.systemPrompt', DEFAULT_AI_SYSTEM_PROMPT)
-            }}
-          >
-            Reset to default
-          </button>
         </div>
       </div>
     `

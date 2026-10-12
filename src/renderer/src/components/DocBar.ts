@@ -8,7 +8,6 @@ import {
   type SecondaryDocState
 } from '../state/file-state'
 import { api } from '../api'
-import { displayPath, displayTitle } from '../utils/links'
 import { showConfirm } from '../services/confirm'
 import { emit } from '../events/bus'
 import './ContextMenu'
@@ -28,18 +27,33 @@ export class DocBar extends LitElement {
         display: flex;
         min-width: 0;
         min-height: 0;
-        /* Top-bar slot is a window-drag region; opt out so clicks land. */
+        /*
+         * Only the compact variant sits in the top bar. In horizontal tabs
+         * this header is inside the document panel, where a drag region would
+         * hijack text selection, so it stays no-drag there.
+         */
         -webkit-app-region: no-drag;
       }
       :host([compact]) {
         flex: 1;
+        /*
+         * The compact bar fills the middle of the top bar, so marking the whole
+         * host no-drag made every empty part of the header undraggable and the
+         * window could only be moved by its edges. The header is a drag region
+         * and just the controls opt out, so blank space moves the window while
+         * the reading toggle and menu still take their clicks.
+         */
+        -webkit-app-region: drag;
+      }
+      :host([compact]) .icon-action,
+      :host([compact]) .menu-wrap {
+        -webkit-app-region: no-drag;
       }
       .sub-header {
         position: relative;
-        display: grid;
-        grid-template-columns: repeat(3, minmax(0, 1fr));
+        display: flex;
         align-items: center;
-        justify-content: space-between;
+        justify-content: flex-end;
         height: 49px;
         width: 100%;
         padding: 0 20px;
@@ -48,49 +62,6 @@ export class DocBar extends LitElement {
         font-family: var(--font-ui);
         font-size: 13px;
         box-sizing: border-box;
-      }
-      .sub-header-left {
-        display: flex;
-        align-items: center;
-        color: var(--text-muted);
-        font-size: 13px;
-        overflow: hidden;
-        white-space: nowrap;
-        -webkit-mask-image: linear-gradient(to right, black 80%, transparent 100%);
-        mask-image: linear-gradient(to right, black 80%, transparent 100%);
-        flex: 1;
-      }
-      .sub-header-center {
-        color: var(--text);
-        font-size: 14px;
-        font-weight: 500;
-        text-align: center;
-        flex: 1;
-        overflow: hidden;
-        white-space: nowrap;
-        min-width: 0;
-        width: 100%;
-        max-width: 240px;
-        justify-self: center;
-      }
-      input.title-input {
-        background: transparent;
-        border: 1px solid transparent;
-        color: inherit;
-        font-family: inherit;
-        font-size: inherit;
-        font-weight: inherit;
-        text-align: center;
-        width: 100%;
-        outline: none;
-        padding: 2px 4px;
-        border-radius: 4px;
-        box-sizing: border-box;
-      }
-      input.title-input:hover,
-      input.title-input:focus {
-        background: var(--bg-hover);
-        border-color: var(--border);
       }
       .sub-header-right {
         display: flex;
@@ -123,8 +94,8 @@ export class DocBar extends LitElement {
         background: var(--bg-hover);
       }
       .icon-action svg {
-        width: 14px;
-        height: 14px;
+        width: var(--icon-size, 18px);
+        height: var(--icon-size, 18px);
       }
       .menu-wrap {
         position: relative;
@@ -147,26 +118,13 @@ export class DocBar extends LitElement {
         height: var(--shell-header-height);
         padding: 0 24px;
       }
-      :host([compact]) .sub-header-left {
-        display: flex;
-        font-size: 12px;
-        min-width: 0;
-      }
       :host([compact]) .sub-header-right {
         flex: 0 0 auto;
         padding-right: var(--document-caption-inset, 0px);
         pointer-events: auto;
       }
-      :host([compact]) .sub-header-center {
-        width: calc(100% - 80px);
-        pointer-events: auto;
-      }
       :host([compact]) .sub-header-left {
         pointer-events: auto;
-      }
-      :host([compact]) .icon-action svg {
-        width: 18px;
-        height: 18px;
       }
     `
   ]
@@ -177,6 +135,8 @@ export class DocBar extends LitElement {
   private menuAnchor: HTMLElement | null = null
   @property({ type: Boolean, reflect: true }) compact = false
   @property({ type: Boolean, reflect: true }) secondary = false
+  /** Renders only the controls, no sub-header wrapper. See `render`. */
+  @property({ type: Boolean, reflect: true }) bare = false
   private fileState = FileState.getInstance()
   private unsubscribe: (() => void) | null = null
   private get document(): FileStateData | SecondaryDocState | null {
@@ -300,9 +260,9 @@ export class DocBar extends LitElement {
         this.fileState.closeSecondaryFile()
         break
       case 'rename': {
-        const input = this.shadowRoot?.querySelector('.title-input') as HTMLInputElement | null
-        input?.focus()
-        input?.select()
+        // The title moved into the editor, so ask the editor to focus it rather
+        // than reaching into a field this header no longer renders.
+        emit('editor:focus-inline-title', { pane: this.secondary ? 'secondary' : 'primary' })
         break
       }
       case 'move':
@@ -373,117 +333,101 @@ export class DocBar extends LitElement {
     }
   }
 
-  private async handleRename(e: Event): Promise<void> {
-    const input = e.target as HTMLInputElement
-    const newName = input.value.trim()
-    if (!newName) {
-      input.value = displayTitle(this.filePath)
-      input.blur()
-      return
-    }
-    await this.fileState.renameFile(newName, this.secondary)
-  }
-
-  private handleRenameKeyDown(e: KeyboardEvent): void {
-    if (e.key === 'Enter') {
-      e.preventDefault()
-      ;(e.target as HTMLInputElement).blur()
-    } else if (e.key === 'Escape') {
-      e.preventDefault()
-      const input = e.target as HTMLInputElement
-      input.value = displayTitle(this.filePath)
-      input.blur()
-    }
-  }
-
   render(): unknown {
-    return html`
-      <div class="sub-header">
-        <div class="sub-header-left" title=${this.filePath ?? ''}>
-          ${displayPath(this.filePath)}
+    // The title and the path both left this header. The title now renders
+    // inside the editor above the first line, where it scrolls with the
+    // document, and the path is on the left of the footer. What is left is the
+    // reading toggle and the menu, both pushed to the trailing edge.
+    // `bare` drops the sub-header wrapper and the close button, for the split
+    // pane where these controls sit in the surface tab strip instead. It used
+    // to render a second header row under the strip, which meant two stacked
+    // bars and two close buttons for one pane.
+    const controls = html`
+      <div
+        class="icon-action"
+        role="button"
+        tabindex="0"
+        aria-label="Toggle Reading / Live Mode"
+        title="Toggle Reading / Live Mode"
+        @click=${() => (this.secondary ? this.setMode(this.viewMode === 'reading' ? 'live' : 'reading') : this.fileState.quickToggle())}
+        @keydown=${this.handleIconKey}
+      >
+        ${this.renderToggleIcon(this.viewMode)}
+      </div>
+      <div class="menu-wrap">
+        <div
+          class="icon-action"
+          role="button"
+          tabindex="0"
+          aria-label="More Options"
+          aria-haspopup="menu"
+          aria-expanded=${this.showMoreMenu ? 'true' : 'false'}
+          title="More Options"
+          @click=${this.toggleMoreMenu}
+          @keydown=${this.handleIconKey}
+        >
+          <svg viewBox="0 0 24 24" fill="currentColor">
+            <circle cx="5" cy="12" r="2" />
+            <circle cx="12" cy="12" r="2" />
+            <circle cx="19" cy="12" r="2" />
+          </svg>
         </div>
-        <div class="sub-header-center">
-          <input
-            type="text"
-            class="title-input"
-            aria-label=${this.secondary ? 'Split pane document title' : 'Document title'}
-            .value=${displayTitle(this.filePath)}
-            @blur=${(e: Event) => void this.handleRename(e)}
-            @keydown=${this.handleRenameKeyDown}
-          />
-        </div>
-        <div class="sub-header-right">
-          <div
-            class="icon-action"
-            role="button"
-            tabindex="0"
-            aria-label="Toggle Reading / Live Mode"
-            title="Toggle Reading / Live Mode"
-            @click=${() => (this.secondary ? this.setMode(this.viewMode === 'reading' ? 'live' : 'reading') : this.fileState.quickToggle())}
-            @keydown=${this.handleIconKey}
-          >
-            ${this.renderToggleIcon(this.viewMode)}
-          </div>
-          <div class="menu-wrap">
-            <div
+        ${
+          this.showMoreMenu
+            ? html`
+                <writemd-context-menu
+                  .anchor=${this.menuAnchor}
+                  placement="bottom-end"
+                  @menu-dismiss=${() => {
+                    this.showMoreMenu = false
+                    this.menuAnchor = null
+                  }}
+                >
+                  <div class="m-panel note-menu" role="menu" aria-label="Document options">
+                    ${this.noteMenuItems().map(
+                      (item) => html`
+                        ${
+                          item.dividerBefore
+                            ? html`<div class="m-divider" role="separator"></div>`
+                            : ''
+                        }
+                        <div
+                          class=${item.danger ? 'm-item danger' : 'm-item'}
+                          role="menuitem"
+                          tabindex="-1"
+                          data-id=${item.id}
+                          @click=${() => void this.handleNoteAction(item.id)}
+                        >
+                          ${menuIcon(item.icon)}
+                          <span>${item.label}</span>
+                          ${item.checked ? menuCheck() : ''}
+                        </div>
+                      `
+                    )}
+                  </div>
+                </writemd-context-menu>
+              `
+            : ''
+        }
+      </div>
+      ${
+        this.secondary && !this.bare
+          ? html`<div
               class="icon-action"
               role="button"
               tabindex="0"
-              aria-label="More Options"
-              aria-haspopup="menu"
-              aria-expanded=${this.showMoreMenu ? 'true' : 'false'}
-              title="More Options"
-              @click=${this.toggleMoreMenu}
+              aria-label="Close split pane"
+              title="Close split pane"
+              @click=${() => this.fileState.closeSecondaryFile()}
               @keydown=${this.handleIconKey}
             >
-              <svg viewBox="0 0 24 24" fill="currentColor">
-                <circle cx="5" cy="12" r="2" />
-                <circle cx="12" cy="12" r="2" />
-                <circle cx="19" cy="12" r="2" />
-              </svg>
-            </div>
-            ${
-              this.showMoreMenu
-                ? html`
-                    <writemd-context-menu
-                      .anchor=${this.menuAnchor}
-                      placement="bottom-end"
-                      @menu-dismiss=${() => {
-                        this.showMoreMenu = false
-                        this.menuAnchor = null
-                      }}
-                    >
-                      <div class="m-panel note-menu" role="menu" aria-label="Document options">
-                        ${this.noteMenuItems().map(
-                          (item) => html`
-                            ${
-                              item.dividerBefore
-                                ? html`<div class="m-divider" role="separator"></div>`
-                                : ''
-                            }
-                            <div
-                              class=${item.danger ? 'm-item danger' : 'm-item'}
-                              role="menuitem"
-                              tabindex="-1"
-                              data-id=${item.id}
-                              @click=${() => void this.handleNoteAction(item.id)}
-                            >
-                              ${menuIcon(item.icon)}
-                              <span>${item.label}</span>
-                              ${item.checked ? menuCheck() : ''}
-                            </div>
-                          `
-                        )}
-                      </div>
-                    </writemd-context-menu>
-                  `
-                : ''
-            }
-          </div>
-          ${this.secondary ? html`<div class="icon-action" role="button" tabindex="0" aria-label="Close split pane" title="Close split pane" @click=${() => this.fileState.closeSecondaryFile()} @keydown=${this.handleIconKey}>${menuIcon('x')}</div>` : ''}
-        </div>
-      </div>
+              ${menuIcon('x')}
+            </div>`
+          : ''
+      }
     `
+    if (this.bare) return controls
+    return html`<div class="sub-header"><div class="sub-header-right">${controls}</div></div>`
   }
 }
 

@@ -6,15 +6,7 @@ WriteMd uses a hybrid vault model. By default, new files created in the app are 
 
 ## Does WriteMd require an internet connection?
 
-No! The core editor is 100% offline. WriteMd does not have accounts or telemetry. Network connections are only used if you configure an AI Assistant and select a cloud provider like OpenAI or Anthropic.
-
-## How do I configure the AI Assistant?
-
-1. Open Settings (`Ctrl+,`).
-2. Navigate to the **AI Assistant Config** section.
-3. Select your provider (e.g. OpenAI, Anthropic, or Ollama for local offline AI).
-4. Enter your API key (stored securely and locally on your machine).
-5. Click **Fetch** to retrieve available models and select one.
+No! The editor is 100% offline. WriteMd does not have accounts, telemetry, or any network feature that touches your notes. The only outbound request is the update check against GitHub releases, and that can be turned off in Settings.
 
 ## How do I update WriteMd?
 

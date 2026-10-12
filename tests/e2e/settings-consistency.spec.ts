@@ -9,7 +9,6 @@ const categories = [
   'Files & vault',
   'Appearance',
   'Keyboard shortcuts',
-  'AI Assistant',
   'Advanced',
   'About WriteMd'
 ]
@@ -40,10 +39,16 @@ async function contrast(
           return linear[0] * 0.2126 + linear[1] * 0.7152 + linear[2] * 0.0722
         }
         const fg = luminance(getComputedStyle(element, pseudo).getPropertyValue(foreground))
+        // The footer's text is transparent-backgrounded, so contrast is measured
+        // against the footer's own material surface. closest() does not cross
+        // the shadow boundary, so walk out through the root node's host.
         const surface =
           background === 'parent'
             ? getComputedStyle(element.closest('.section')!).backgroundColor
-            : getComputedStyle(element).getPropertyValue(background)
+            : background === 'footer-surface'
+              ? getComputedStyle((element.getRootNode() as ShadowRoot).host as HTMLElement)
+                  .backgroundColor
+              : getComputedStyle(element).getPropertyValue(background)
         const bg = luminance(surface)
         return (Math.max(fg, bg) + 0.05) / (Math.min(fg, bg) + 0.05)
       },
@@ -200,18 +205,21 @@ test.describe('Settings consistency', () => {
     await expect(page.locator('.cm-editor').first()).toHaveCSS('font-family', /Manrope/)
   })
 
-  test('file path and floating mode control stay visible in both document layouts', async () => {
+  test('file path and footer mode control stay visible in both document layouts', async () => {
     await prefs(page, { 'appearance.theme': 'graphite', 'appearance.accentColor': '#ffffff' })
     for (const orientation of ['vertical', 'horizontal']) {
       await prefs(page, { 'appearance.panelOrientation': orientation })
-      const path = page.locator('writemd-doc-bar .sub-header-left').first()
+      const path = page.locator('writemd-info-pill .path').first()
       await expect(path).toBeVisible()
       await expect(path).toContainText('README.md')
       await expect(path).toHaveAttribute('title', /README\.md$/)
       const pill = page.locator('writemd-info-pill').first()
       await expect(pill.locator('.counts')).toBeVisible()
+      // The counts are read against the footer's own surface, which is the
+      // material layer they actually sit on rather than the pill's transparent
+      // background.
       expect(
-        await contrast(page, 'writemd-info-pill .pill', 'color', 'background-color')
+        await contrast(page, 'writemd-info-pill .pill', 'color', 'footer-surface')
       ).toBeGreaterThanOrEqual(4.5)
       await pill.locator('.mode-btn').click()
       await expect(pill.locator('writemd-mode-menu')).toBeVisible()

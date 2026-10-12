@@ -15,6 +15,13 @@ export interface WriteMdSettings {
     showLineNumbers: boolean
     highlightActiveLine: boolean
     /**
+     * Show the document path on the left of the document footer.
+     *
+     * The path used to live in the document header, which had no way to hide
+     * it. It moved to the footer, so the toggle moved with it.
+     */
+    showFilePath: boolean
+    /**
      * Where the user last dragged the floating table toolbar, in pixels from the
      * spot CodeMirror anchors it to. Per-editor while the session lives (so the
      * two split panes can sit on different tables); this copy seeds new editors
@@ -41,7 +48,7 @@ export interface WriteMdSettings {
     railWidth: number
     backgroundId: string
     backgroundEffect: 'none' | 'haze' | 'dither' | 'ascii' | 'halftone' | 'scanlines'
-    backgroundTarget: 'workspace' | 'ai'
+    backgroundTarget: 'workspace'
     backgroundShowOn: 'all' | 'empty'
     backgroundEmptyOpacity: number
     backgroundContentOpacity: number
@@ -81,43 +88,12 @@ export interface WriteMdSettings {
   shortcuts: {
     bindings: Record<string, string>
   }
-  ai: {
-    provider: string
-    model: string
-    apiKey: string
-    /**
-     * Whether a key is stored, without revealing it. Derived in the main
-     * process and stripped before the config is written, so the renderer can
-     * show "configured" state without the plaintext ever crossing the bridge.
-     */
-    apiKeySet: boolean
-    /** A key is stored but this install cannot decrypt it; the user must retype. */
-    apiKeyUndecryptable: boolean
-    systemPrompt: string
-    /** Explicit opencode CLI path (e.g. %APPDATA%\npm\opencode.cmd); empty = autodetect. */
-    opencodeCliPath: string
-    /** Ground answers with a keyless web search before sending to the model. */
-    webSearchEnabled: boolean
-  }
 }
 
 /** A nested-partial settings object, e.g. `{ files: { vaultPath: '...' } }`. */
 export type WriteMdSettingsPatch = {
   [K in keyof WriteMdSettings]?: Partial<WriteMdSettings[K]>
 }
-
-/** Default instruction sent with every AI request (file context is appended at runtime). */
-export const DEFAULT_AI_SYSTEM_PROMPT = `You are the AI assistant inside the WriteMd markdown editor. Write direct, concise, human-sounding markdown. No filler openers ("Here is...", "I'll help..."), no exclamations ("Great!", "Perfect!"), no preamble, postamble, or summaries unless asked. If filler slips in, stop, delete, rewrite.
-
-FILE EDITS: when the user asks to change the file, output the entire updated file and nothing else inside one \`\`\`writemd-replace block:
-\`\`\`writemd-replace
-(entire new file content)
-\`\`\`
-The app applies that block to the document automatically.
-
-FILE TRACKING: every user message names its file. If it differs from the file the conversation started in, stop and ask which file to work in before editing anything.
-
-WEB SEARCH: appended live results count as pages you opened: answer from them, cite sources with links. Never discuss search mechanics, tools, or your own capabilities. With no results supplied, answer from your own knowledge.`
 
 export const DEFAULT_SETTINGS: WriteMdSettings = {
   editor: {
@@ -130,6 +106,7 @@ export const DEFAULT_SETTINGS: WriteMdSettings = {
     autoSaveDelay: 500,
     showLineNumbers: false,
     highlightActiveLine: true,
+    showFilePath: true,
     tableToolbarOffset: { x: 0, y: 0 }
   },
   appearance: {
@@ -179,16 +156,6 @@ export const DEFAULT_SETTINGS: WriteMdSettings = {
   },
   shortcuts: {
     bindings: {}
-  },
-  ai: {
-    provider: 'OpenAI',
-    model: 'gpt-4o',
-    apiKey: '',
-    apiKeySet: false,
-    apiKeyUndecryptable: false,
-    systemPrompt: DEFAULT_AI_SYSTEM_PROMPT,
-    opencodeCliPath: '',
-    webSearchEnabled: false
   }
 }
 
@@ -233,7 +200,7 @@ const STRING_UNIONS: Record<string, readonly string[]> = {
   'appearance.motion': ['system', 'full', 'reduced'],
   'appearance.panelOrientation': ['horizontal', 'vertical'],
   'appearance.backgroundEffect': ['none', 'haze', 'dither', 'ascii', 'halftone', 'scanlines'],
-  'appearance.backgroundTarget': ['workspace', 'ai'],
+  'appearance.backgroundTarget': ['workspace'],
   'appearance.backgroundShowOn': ['all', 'empty'],
   'appearance.windowMaterial': ['none', 'mica', 'acrylic']
 }
@@ -284,12 +251,6 @@ export function validatePatch(patch: unknown): {
       const dotted = `${section}.${key}`
       if (!(key in (defaults as Record<string, unknown>))) {
         problems.push(`unknown key: ${dotted}`)
-        continue
-      }
-      // apiKeySet and apiKeyUndecryptable are derived in the main process and
-      // must not be client-set.
-      if (dotted === 'ai.apiKeySet' || dotted === 'ai.apiKeyUndecryptable') {
-        problems.push(`${dotted} is derived and cannot be set`)
         continue
       }
       if (value === null || value === undefined) continue

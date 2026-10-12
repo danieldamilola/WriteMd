@@ -71,6 +71,16 @@ export class WriteMdIconButton extends LitElement {
       color: var(--text);
     }
 
+    button:disabled {
+      cursor: default;
+      opacity: 0.4;
+    }
+
+    button:disabled:hover {
+      background: none;
+      color: var(--text-muted);
+    }
+
     :host([variant='close']) button:hover {
       background: var(--danger);
       color: var(--text);
@@ -87,14 +97,9 @@ export class WriteMdIconButton extends LitElement {
     }
 
     ::slotted(svg) {
-      width: 18px;
-      height: 18px;
+      width: var(--icon-size, 18px);
+      height: var(--icon-size, 18px);
       flex-shrink: 0;
-    }
-
-    :host([size='md']) ::slotted(svg) {
-      width: 12px;
-      height: 12px;
     }
 
     :host([size='caption']) {
@@ -111,10 +116,16 @@ export class WriteMdIconButton extends LitElement {
   @property({ type: String, reflect: true }) variant: 'default' | 'close' = 'default'
   @property({ type: String }) title = ''
   @property({ type: String, attribute: 'aria-label' }) ariaLabel = ''
+  @property({ type: Boolean, reflect: true }) disabled = false
 
   render(): unknown {
     return html`
-      <button type="button" title="${this.title}" aria-label="${this.ariaLabel || this.title}">
+      <button
+        type="button"
+        title="${this.title}"
+        aria-label="${this.ariaLabel || this.title}"
+        ?disabled=${this.disabled}
+      >
         <slot></slot>
       </button>
     `

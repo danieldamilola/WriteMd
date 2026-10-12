@@ -82,7 +82,7 @@ test.describe('Settings search', () => {
     await expect(modal.locator('.search-status')).toHaveText('1 matching section')
     await search.fill('')
     await expect(modal.locator('.nav-section:visible')).toHaveCount(3)
-    await expect(modal.locator('.nav-btn:visible')).toHaveCount(8)
+    await expect(modal.locator('.nav-btn:visible')).toHaveCount(7)
     await expect(modal.locator('.search-status')).toHaveCount(0)
     await modal.locator('.nav-btn', { hasText: 'About WriteMd' }).click()
     await expect(modal.locator('.content-panel')).toHaveAttribute('data-tab', 'about')

@@ -4,7 +4,9 @@ import type { ViewMode } from '../state/file-state'
 import './ModeMenu'
 
 /**
- * Words and characters, counted in one pass.
+ * The document footer: word and character counts, and the editor mode button.
+ *
+ * Counts run in one pass.
  *
  * This ran on every render, and the pill re-renders on every keystroke, so the
  * old `text.trim().split(/\s+/)` cost 350ms per keystroke on a 6 MB note and
@@ -45,31 +47,95 @@ const COUNT_DELAY_MS = 250
 @customElement('writemd-info-pill')
 export class InfoPill extends LitElement {
   static styles = css`
+    /*
+     * A full-width footer rather than a floating box over the text.
+     *
+     * The box was absolutely positioned in the pane's bottom-right corner, so
+     * it covered the last line of a document and only had room for itself in
+     * wide panes. In normal flow the editor gives up the height instead: the
+     * text always ends above the footer, and narrow panes get a real bar
+     * instead of a squeezed one.
+     *
+     * No border and no rule. The document content is masked so it fades out as
+     * it reaches this bar, which does the separating without drawing a line
+     * across the pane.
+     *
+     * The bar is a material layer rather than a flat one: it paints the same
+     * editor surface the pane does and blurs whatever sits behind it, so it
+     * follows the translucent appearance and window material the user picked
+     * rather than inventing its own opacity. At full surface opacity the blur
+     * is 0px and this is indistinguishable from the pane.
+     */
     :host {
-      position: absolute;
-      bottom: 12px;
-      right: 16px;
-      max-width: calc(100% - 32px);
-      display: inline-flex;
+      position: relative;
+      display: flex;
+      flex: 0 0 auto;
+      width: 100%;
+      min-height: 30px;
+      box-sizing: border-box;
+      padding: 0 8px;
+      justify-content: space-between;
       align-items: center;
+      gap: 12px;
+      background: var(--editor-surface);
+      backdrop-filter: blur(var(--surface-blur, 0px));
       z-index: 50;
       user-select: none;
+    }
+
+    /*
+     * The path sits on the left and the counts on the right, with the mode
+     * button beside them. Long paths fade out at the left edge instead of
+     * being cut mid-glyph, matching how the document header showed it.
+     */
+    .path {
+      display: flex;
+      align-items: center;
+      min-width: 0;
+      flex: 1 1 auto;
+      overflow: hidden;
+      white-space: nowrap;
+      color: var(--text-muted);
+      font-size: 12px;
+      -webkit-mask-image: linear-gradient(to right, black 82%, transparent 100%);
+      mask-image: linear-gradient(to right, black 82%, transparent 100%);
+    }
+
+    .path:hover {
+      color: var(--text-secondary);
+    }
+
+    .right {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      flex: 0 0 auto;
+      max-width: 100%;
+      /*
+       * Keeps the counts on the right when the path is hidden. With
+       * space-between and the path removed, .right is the only child and
+       * lands at flex-start, which slid the whole control to the left edge.
+       */
+      margin-left: auto;
     }
 
     .pill {
       display: inline-flex;
       align-items: center;
       gap: 10px;
+      max-width: 100%;
       min-height: 30px;
-      padding: 0 10px;
-      background: var(--bg-card);
-      border: 1px solid var(--border-subtle);
-      border-radius: 6px;
       font-family: var(--font-ui);
       font-size: 12px;
       color: var(--text-secondary);
-      box-shadow: var(--shadow-2);
-      backdrop-filter: blur(8px);
+    }
+
+    /*
+     * The menu anchors to the host, which is now the full pane width, so it
+     * needs the footer's own inset or it opens flush against the window edge.
+     */
+    writemd-mode-menu {
+      right: 8px;
     }
 
     .mode-btn {
@@ -96,14 +162,17 @@ export class InfoPill extends LitElement {
     }
 
     .mode-btn svg {
-      width: 12px;
-      height: 12px;
+      width: var(--icon-size, 18px);
+      height: var(--icon-size, 18px);
+      flex-shrink: 0;
     }
 
     .counts {
       display: flex;
+      flex-wrap: wrap;
       align-items: center;
-      gap: 8px;
+      justify-content: flex-end;
+      gap: 4px 8px;
       white-space: nowrap;
     }
 
@@ -114,6 +183,8 @@ export class InfoPill extends LitElement {
 
   @property({ type: String }) content = ''
   @property({ type: String }) mode: ViewMode = 'live'
+  /** Short document path shown on the left. Empty hides the label entirely. */
+  @property({ type: String }) path = ''
   @state() private menuOpen = false
   @state() private words = 0
   @state() private chars = 0
@@ -219,8 +290,15 @@ export class InfoPill extends LitElement {
             ></writemd-mode-menu>`
           : ''
       }
+      ${
+        this.path
+          ? html`<div class="path" title=${this.path}>${this.path}</div>`
+          : // Nothing at all rather than an empty box, so hiding the path does
+            // not leave a gap on the left of the bar.
+            ''
+      }
 
-      <div class="pill">
+      <div class="pill right">
         <button
           class="mode-btn"
           title="Change Editor Mode"

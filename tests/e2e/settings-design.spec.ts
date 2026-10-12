@@ -105,7 +105,6 @@ test.describe('Settings and flat workspace layout', () => {
       'Files & vault',
       'Appearance',
       'Keyboard shortcuts',
-      'AI Assistant',
       'Advanced',
       'About WriteMd'
     ])

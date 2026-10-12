@@ -1,5 +1,5 @@
 import { svg, type TemplateResult } from 'lit'
-import { chromeIcon } from '../design/icons'
+import { chromeIcon, DEFAULT_ICON_SIZE } from '../design/icons'
 
 /**
  * WriteMd's icon set.
@@ -132,7 +132,7 @@ export const ICON_NAMES = Object.keys(PATHS)
  * crisp at any dimension without a stroke-weight override the way a stroked
  * outline set would need.
  */
-export function icon(name: string, size = 16): TemplateResult {
+export function icon(name: string, size = DEFAULT_ICON_SIZE): TemplateResult {
   const chrome = chromeIcon(name, size)
   if (chrome) return chrome
   const body = PATHS[name]
@@ -142,6 +142,7 @@ export function icon(name: string, size = 16): TemplateResult {
   }
   return svg`<svg
     xmlns="http://www.w3.org/2000/svg"
+    data-icon=${name}
     viewBox="0 0 32 32"
     width=${size}
     height=${size}

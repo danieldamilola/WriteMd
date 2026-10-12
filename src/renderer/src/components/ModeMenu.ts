@@ -66,14 +66,14 @@ export class ModeMenu extends LitElement {
       display: flex;
       align-items: center;
       justify-content: center;
-      width: 14px;
-      height: 14px;
+      width: var(--icon-size, 18px);
+      height: var(--icon-size, 18px);
       flex-shrink: 0;
     }
 
     .icon svg {
-      width: 12px;
-      height: 12px;
+      width: var(--icon-size, 18px);
+      height: var(--icon-size, 18px);
     }
   `
 

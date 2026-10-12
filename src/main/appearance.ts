@@ -1,4 +1,4 @@
-import { app, dialog, nativeImage, type BrowserWindow } from 'electron'
+import { app, dialog, nativeImage, type BrowserWindow, type NativeImage } from 'electron'
 import { mkdir, readFile, writeFile, rename, unlink, stat } from 'fs/promises'
 import { join, basename, extname } from 'path'
 import { randomUUID } from 'crypto'
@@ -7,11 +7,29 @@ import type { BackgroundAsset, MaterialSupport } from '../shared/electron-api'
 import { getSettings } from './settings'
 
 const MAX_BYTES = 20 * 1024 * 1024
-const ASSET_ID = /^[0-9a-f-]{36}\.png$/
+const MAX_EDGE = 2560
+const JPEG_QUALITY = 85
+/** Ids are generated here, so both owned extensions are safe to accept. PNG keeps
+ *  assets written before v1.4.1 readable. */
+const ASSET_ID = /^[0-9a-f-]{36}\.(?:jpg|png)$/
+
+function mediaType(id: string): string {
+  return id.endsWith('.png') ? 'image/png' : 'image/jpeg'
+}
 
 export function backgroundPath(id: string): string {
   if (!ASSET_ID.test(id)) throw new Error('Invalid background asset')
   return join(app.getPath('userData'), 'backgrounds', id)
+}
+
+/**
+ * `nativeImage` exposes no alpha flag, so read it out of the BGRA bitmap. Only the
+ * downscaled image is scanned, which caps the buffer at 2560 * 2560 * 4 bytes.
+ */
+function hasTransparency(image: NativeImage): boolean {
+  const bitmap = image.toBitmap()
+  for (let index = 3; index < bitmap.length; index += 4) if (bitmap[index] < 255) return true
+  return false
 }
 
 export async function getBackground(id: string): Promise<BackgroundAsset | null> {
@@ -21,7 +39,11 @@ export async function getBackground(id: string): Promise<BackgroundAsset | null>
     const info = await stat(path)
     if (info.size > MAX_BYTES) throw new Error('Background exceeds 20 MB')
     const data = await readFile(path)
-    return { id, name: 'Background image', url: `data:image/png;base64,${data.toString('base64')}` }
+    return {
+      id,
+      name: 'Background image',
+      url: `data:${mediaType(id)};base64,${data.toString('base64')}`
+    }
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null
     throw error
@@ -48,7 +70,7 @@ export async function importBackground(
   const image = nativeImage.createFromBuffer(bytes)
   if (image.isEmpty()) throw new Error('This image could not be opened')
   const size = image.getSize()
-  const ratio = Math.min(1, 2560 / Math.max(size.width, size.height))
+  const ratio = Math.min(1, MAX_EDGE / Math.max(size.width, size.height))
   const normalized =
     ratio < 1
       ? image.resize({
@@ -56,20 +78,29 @@ export async function importBackground(
           height: Math.round(size.height * ratio)
         })
       : image
-  const png = normalized.toPNG()
-  if (png.length > MAX_BYTES) throw new Error('Image is too large after decoding')
-  const id = `${randomUUID()}.png`
+  // PNG is the only lossless target here, but it inflates a photograph by an order
+  // of magnitude: a 2560px wallpaper is roughly 1 MB as JPEG and 13 MB as PNG. The
+  // stored copy is also base64ed across IPC on every launch, so the difference is
+  // paid twice. Transparency is the only reason to pay it.
+  const transparent = hasTransparency(normalized)
+  const encoded = transparent ? normalized.toPNG() : normalized.toJPEG(JPEG_QUALITY)
+  const id = `${randomUUID()}.${transparent ? 'png' : 'jpg'}`
+  if (encoded.length > MAX_BYTES) throw new Error('Image is too large to store')
   const target = backgroundPath(id)
   await mkdir(join(app.getPath('userData'), 'backgrounds'), { recursive: true })
   const temp = `${target}.tmp`
   try {
-    await writeFile(temp, png, { flag: 'wx' })
+    await writeFile(temp, encoded, { flag: 'wx' })
     await rename(temp, target)
   } catch (error) {
     await unlink(temp).catch(() => undefined)
     throw error
   }
-  return { id, name: basename(path), url: `data:image/png;base64,${png.toString('base64')}` }
+  return {
+    id,
+    name: basename(path),
+    url: `data:${mediaType(id)};base64,${encoded.toString('base64')}`
+  }
 }
 
 export async function removeBackground(id: string): Promise<void> {

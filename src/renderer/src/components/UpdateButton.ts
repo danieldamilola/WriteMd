@@ -54,6 +54,8 @@ export class WriteMdUpdateButton extends LitElement {
         outline-offset: -2px;
       }
       .sidebar-action svg {
+        width: var(--icon-size, 18px);
+        height: var(--icon-size, 18px);
         flex-shrink: 0;
         color: var(--accent);
       }

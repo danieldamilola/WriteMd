@@ -8,19 +8,10 @@ import { makeTempRoot } from './helpers/temp-root'
 const TEST_ROOT = makeTempRoot('settings')
 const CONFIG = join(TEST_ROOT, 'userData', 'config.json')
 
-function mockElectron(encryptAvailable: boolean): void {
+function mockElectron(): void {
   vi.doMock('electron', () => ({
     app: {
       getPath: (name: string) => (name === 'userData' ? `${TEST_ROOT}/userData` : TEST_ROOT)
-    },
-    safeStorage: {
-      isEncryptionAvailable: () => encryptAvailable,
-      encryptString: (plain: string) => Buffer.from(`enc(${plain})`, 'utf-8'),
-      decryptString: (buf: Buffer) => {
-        const s = buf.toString('utf-8')
-        if (s.startsWith('enc(') && s.endsWith(')')) return s.slice(4, -1)
-        throw new Error('not encrypted')
-      }
     }
   }))
 }
@@ -32,41 +23,36 @@ describe('settings persistence', () => {
     vi.resetModules()
   })
 
-  it('encrypts the API key at rest and decrypts it in memory', async () => {
-    mockElectron(true)
+  it('drops settings for the removed AI feature and repairs the background target', async () => {
+    mockElectron()
+    // A config written by a build that still had the AI panel.
+    writeFileSync(
+      CONFIG,
+      JSON.stringify({
+        appearance: { backgroundTarget: 'ai', theme: 'nord' },
+        ai: { provider: 'OpenAI', apiKey: 'sk-should-be-gone' }
+      }),
+      'utf-8'
+    )
     const { getSettings, setSettings } = await import('../src/main/settings')
-    await setSettings({ ai: { ...getSettings().ai, apiKey: 'sk-secret-123' } })
 
-    const raw = readFileSync(CONFIG, 'utf-8')
-    const persisted = JSON.parse(raw)
-    expect(persisted.ai.apiKey).toMatch(/^enc:v1:/)
-    expect(raw).not.toContain('sk-secret-123')
+    const s = getSettings()
+    expect(s).not.toHaveProperty('ai')
+    // Otherwise Background.ts compares against 'workspace' forever and the
+    // artwork never appears again, with nothing on screen to explain it.
+    expect(s.appearance.backgroundTarget).toBe('workspace')
+    expect(s.appearance.theme).toBe('nord')
 
-    // Fresh module load simulates an app restart: key comes back decrypted.
-    vi.resetModules()
-    mockElectron(true)
-    const { getSettings: fresh } = await import('../src/main/settings')
-    expect(fresh().ai.apiKey).toBe('sk-secret-123')
-  })
-
-  it('falls back to plaintext when safeStorage is unavailable', async () => {
-    mockElectron(false)
-    const { getSettings, setSettings } = await import('../src/main/settings')
-    await setSettings({ ai: { ...getSettings().ai, apiKey: 'sk-plain-fallback' } })
-
+    // And it must not come back on the next save.
+    await setSettings({ editor: { fontSize: 17 } })
     const persisted = JSON.parse(readFileSync(CONFIG, 'utf-8'))
-    expect(persisted.ai.apiKey).toBe('sk-plain-fallback')
-  })
-
-  it('reads legacy plaintext keys without mangling them', async () => {
-    mockElectron(true)
-    writeFileSync(CONFIG, JSON.stringify({ ai: { apiKey: 'sk-legacy' } }), 'utf-8')
-    const { getSettings } = await import('../src/main/settings')
-    expect(getSettings().ai.apiKey).toBe('sk-legacy')
+    expect(persisted).not.toHaveProperty('ai')
+    expect(persisted.appearance.backgroundTarget).toBe('workspace')
+    expect(readFileSync(CONFIG, 'utf-8')).not.toContain('sk-should-be-gone')
   })
 
   it('moves a corrupt config aside instead of silently resetting', async () => {
-    mockElectron(false)
+    mockElectron()
     writeFileSync(CONFIG, '{not valid json', 'utf-8')
     const { getSettings } = await import('../src/main/settings')
     expect(getSettings().editor.fontSize).toBe(15)
@@ -74,7 +60,7 @@ describe('settings persistence', () => {
   })
 
   it('deep-merges partial settings over defaults', async () => {
-    mockElectron(false)
+    mockElectron()
     const { getSettings, setSettings } = await import('../src/main/settings')
     await setSettings({ editor: { fontSize: 21 } })
     const s = getSettings()
@@ -84,7 +70,7 @@ describe('settings persistence', () => {
   })
 
   it('recovers the write queue after an atomic rename fails', async () => {
-    mockElectron(false)
+    mockElectron()
     const { setSettings, getSettings } = await import('../src/main/settings')
     getSettings()
     mkdirSync(CONFIG)

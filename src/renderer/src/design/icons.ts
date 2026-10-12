@@ -5,7 +5,9 @@ import ArrowLeft01Icon from '@hugeicons/core-free-icons/ArrowLeft01Icon'
 import BotIcon from '@hugeicons/core-free-icons/BotIcon'
 import Cancel01Icon from '@hugeicons/core-free-icons/Cancel01Icon'
 import FileScriptIcon from '@hugeicons/core-free-icons/FileScriptIcon'
+import Folder01Icon from '@hugeicons/core-free-icons/Folder01Icon'
 import FolderOpenIcon from '@hugeicons/core-free-icons/FolderOpenIcon'
+import FolderAddIcon from '@hugeicons/core-free-icons/FolderAddIcon'
 import FolderTreeIcon from '@hugeicons/core-free-icons/FolderTreeIcon'
 import InformationCircleIcon from '@hugeicons/core-free-icons/InformationCircleIcon'
 import KeyboardIcon from '@hugeicons/core-free-icons/KeyboardIcon'
@@ -32,7 +34,9 @@ const glyphs = {
   x: Cancel01Icon,
   file: FileScriptIcon,
   'file-text': FileScriptIcon,
+  folder: Folder01Icon,
   'folder-open': FolderOpenIcon,
+  'folder-plus': FolderAddIcon,
   'folder-tree': FolderTreeIcon,
   info: InformationCircleIcon,
   keyboard: KeyboardIcon,
@@ -54,7 +58,9 @@ const glyphs = {
 const cache = new Map<string, string>()
 const escape = (value: string | number): string =>
   String(value).replaceAll('&', '&amp;').replaceAll('"', '&quot;').replaceAll('<', '&lt;')
-export function chromeIcon(name: string, size = 16): TemplateResult | null {
+export const DEFAULT_ICON_SIZE = 18
+
+export function chromeIcon(name: string, size = DEFAULT_ICON_SIZE): TemplateResult | null {
   if (!(name in glyphs)) return null
   let markup = cache.get(name)
   if (!markup) {

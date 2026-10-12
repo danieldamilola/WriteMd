@@ -104,6 +104,12 @@ export const EASING = {
   inOut: 'cubic-bezier(0.4, 0, 0.2, 1)'
 } as const
 
+/** Shared sidebar and split allocation timing. Motion uses seconds. */
+export const PANEL_RESIZE_MOTION = {
+  duration: 0.18,
+  ease: [0.22, 1, 0.36, 1] as [number, number, number, number]
+}
+
 export interface MotionOptions {
   duration?: number
   easing?: string

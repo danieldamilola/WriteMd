@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import '../src/renderer/src/components/Sidebar'
 import { Sidebar } from '../src/renderer/src/components/Sidebar'
+import type { WriteMdIconButton } from '../src/renderer/src/components/IconButton'
 
 function mount(collapsed = false): Sidebar {
   const el = document.createElement('writemd-sidebar') as Sidebar
@@ -48,12 +49,13 @@ describe('writemd-sidebar panel', () => {
     await toggled
   })
 
-  it('offers New note and Open file as icon-only buttons', async () => {
+  it('offers New note, Open file and New group as icon-only buttons', async () => {
     const el = mount()
     await el.updateComplete
     for (const [name, event] of [
       ['New note', 'new-file'],
-      ['Open file', 'open-file']
+      ['Open file', 'open-file'],
+      ['New group', 'new-group']
     ] as const) {
       const button = el.shadowRoot?.querySelector(`.actions writemd-icon-button[title="${name}"]`)
       expect(button).not.toBeNull()
@@ -63,16 +65,33 @@ describe('writemd-sidebar panel', () => {
     }
   })
 
+  it('disables New group on home, where there are no tabs to group', async () => {
+    const el = mount()
+    el.welcome = true
+    await el.updateComplete
+    const group = el.shadowRoot?.querySelector<HTMLElement>(
+      '.actions writemd-icon-button[title="New group"]'
+    )
+    expect((group as WriteMdIconButton).disabled).toBe(true)
+    expect(group?.shadowRoot?.querySelector<HTMLButtonElement>('button')?.disabled).toBe(true)
+    el.welcome = false
+    await el.updateComplete
+    expect(
+      (
+        el.shadowRoot?.querySelector<HTMLElement>(
+          '.actions writemd-icon-button[title="New group"]'
+        ) as WriteMdIconButton
+      ).disabled
+    ).toBe(false)
+  })
+
   it('keeps the footer shortcuts as text rows', async () => {
     const el = mount()
     await el.updateComplete
     expect(el.shadowRoot?.querySelector('.footer')?.firstElementChild?.tagName).toBe(
       'WRITEMD-UPDATE-BUTTON'
     )
-    for (const [label, event] of [
-      ['AI', 'open-ai'],
-      ['Settings', 'open-settings']
-    ] as const) {
+    for (const [label, event] of [['Settings', 'open-settings']] as const) {
       const buttons = Array.from(
         el.shadowRoot?.querySelectorAll('.footer button') ?? []
       ) as HTMLButtonElement[]
@@ -83,34 +102,65 @@ describe('writemd-sidebar panel', () => {
     }
   })
 
-  it('collapses to a slim strip holding only the expand button', async () => {
+  it('collapses to a slim strip holding expand, one icon per group, and settings', async () => {
     const el = mount(true)
     await el.updateComplete
     const buttons = Array.from(el.shadowRoot?.querySelectorAll('writemd-icon-button') ?? [])
-    expect(buttons.map((b) => b.getAttribute('title'))).toEqual(['Expand panel'])
+    expect(buttons.map((b) => b.getAttribute('title'))).toEqual(['Expand panel', 'Settings'])
     const toggled = new Promise<Event>((resolve) => el.addEventListener('toggle-panel', resolve))
     ;(buttons[0] as HTMLElement).click()
     await toggled
   })
 
-  it('shows home and vault navigation without enabling document AI actions on home', async () => {
+  it('keeps one icon per group in the collapsed strip', async () => {
+    // Collapsing used to hide the folders entirely, so the strip showed only
+    // expand and settings and every group vanished with the panel.
+    const el = mount(true)
+    el.tabGroups = [
+      { id: 'g1', label: 'Youtube', icon: 'star', collapsed: false },
+      { id: 'g2', label: 'Stride', icon: 'code', collapsed: true }
+    ]
+    await el.updateComplete
+    const groups = Array.from(el.shadowRoot!.querySelectorAll('.slim-group'))
+    expect(groups.map((g) => g.getAttribute('title'))).toEqual(['Youtube', 'Stride'])
+    // The row icon, so the strip matches what the panel shows.
+    expect(groups[0].querySelector('svg')?.getAttribute('data-icon')).toBe('star')
+    expect(groups[1].querySelector('svg')?.getAttribute('data-icon')).toBe('code')
+  })
+
+  it('asks the app to open the group whose icon was clicked', async () => {
+    const el = mount(true)
+    el.tabGroups = [{ id: 'g1', label: 'Youtube', icon: 'star', collapsed: false }]
+    await el.updateComplete
+    const seen = new Promise<CustomEvent>((resolve) =>
+      el.addEventListener('open-group', (e) => resolve(e as CustomEvent))
+    )
+    ;(el.shadowRoot!.querySelector('.slim-group') as HTMLElement).click()
+    expect((await seen).detail).toEqual({ groupId: 'g1' })
+  })
+
+  it('keeps settings reachable from the collapsed strip', async () => {
+    // Settings used to live only in the expanded footer, so hiding the panel
+    // took it with it and the only route back was to expand the strip first.
+    const el = mount(true)
+    await el.updateComplete
+    const settings = el.shadowRoot!.querySelector<HTMLElement>('.slim-bottom writemd-icon-button')
+    expect(settings).not.toBeNull()
+    const seen = new Promise<Event>((resolve) => el.addEventListener('open-settings', resolve))
+    settings!.click()
+    await expect(seen).resolves.toBeTruthy()
+  })
+
+  it('shows Nothing without redundant home or vault navigation', async () => {
     const element = mount()
     element.welcome = true
     await element.updateComplete
-    expect(element.shadowRoot!.querySelector('[aria-current="page"]')!.textContent).toContain(
-      'Home'
-    )
-    const vault = element.shadowRoot!.querySelector<HTMLButtonElement>('.home-nav button')!
-    const opened = new Promise<Event>((resolve) => element.addEventListener('open-vault', resolve))
-    vault.click()
-    await opened
-    const ai = element.shadowRoot!.querySelector<HTMLButtonElement>('.footer button')!
-    expect(ai.disabled).toBe(true)
-    expect(ai.title).toBe('Open a note to use AI Assistant')
+    expect(element.shadowRoot!.querySelector('.home-hint')!.textContent).toBe('Nothing')
+    expect(element.shadowRoot!.querySelector('nav, [aria-current="page"]')).toBeNull()
+    expect(element.shadowRoot!.textContent).not.toContain('Vault folder')
     element.welcome = false
     await element.updateComplete
-    expect(element.shadowRoot!.querySelector<HTMLButtonElement>('.footer button')!.disabled).toBe(
-      false
-    )
+    expect(element.shadowRoot!.querySelector('.home-hint')).toBeNull()
+    expect(element.shadowRoot!.querySelector('slot')).not.toBeNull()
   })
 })

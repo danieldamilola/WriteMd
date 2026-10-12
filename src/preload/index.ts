@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer, webUtils, type IpcRendererEvent } from 'electron'
-import type { ChatMessage, ChatSession, UpdateInfo, UpdateProgress } from '../shared/electron-api'
+import type { UpdateInfo, UpdateProgress } from '../shared/electron-api'
 
 function onChannel(channel: string, callback: (...args: unknown[]) => void): () => void {
   const handler = (_: IpcRendererEvent, ...args: unknown[]): void => callback(...args)
@@ -46,11 +46,6 @@ const writemdAPI = {
     exists: (path: string) => ipcRenderer.invoke('file:exists', path),
     saveImage: (docPath: string, base64Data: string, ext: string) =>
       ipcRenderer.invoke('file:save-image', docPath, base64Data, ext),
-    /**
-     * Read one file the user picked in the attach dialog. Text comes back
-     * decoded, images as bare base64, which is what the provider payloads want.
-     */
-    readAttachment: (path: string) => ipcRenderer.invoke('file:read-attachment', path),
     /** Electron 32+ removed File.path; this is the supported way back. */
     getPathForFile: (file: File) => webUtils.getPathForFile(file),
     /** Dropped files are not dialog results, so nothing registered them yet. */
@@ -75,67 +70,6 @@ const writemdAPI = {
   settings: {
     get: () => ipcRenderer.invoke('settings:get'),
     set: (settings: Record<string, unknown>) => ipcRenderer.invoke('settings:set', settings)
-  },
-  net: {
-    fetchModels: (provider: string, apiKey: string) =>
-      ipcRenderer.invoke('net:fetch-models', provider, apiKey),
-    chat: (
-      provider: string,
-      model: string,
-      apiKey: string,
-      messages: ChatMessage[],
-      systemPrompt?: string
-    ) => ipcRenderer.invoke('net:chat', provider, model, apiKey, messages, systemPrompt),
-    chatStream: (
-      provider: string,
-      model: string,
-      apiKey: string,
-      messages: ChatMessage[],
-      onChunk: (delta: string) => void,
-      systemPrompt?: string,
-      sessionId?: string
-    ): Promise<string> => {
-      // If sessionId is provided, listen on a session-specific channel so
-      // concurrent streams across tabs never mix deltas. Also listen on the
-      // default channel for backward compatibility with un-scoped streams.
-      const specificChannel = sessionId ? `net:chat-chunk:${sessionId}` : null
-      const listener = (_e: Electron.IpcRendererEvent, delta: string): void => onChunk(delta)
-      if (specificChannel) {
-        ipcRenderer.on(specificChannel, listener)
-      } else {
-        ipcRenderer.on('net:chat-chunk', listener)
-      }
-      return ipcRenderer
-        .invoke('net:chat-stream', provider, model, apiKey, messages, systemPrompt, sessionId)
-        .finally(() => {
-          if (specificChannel) {
-            ipcRenderer.removeListener(specificChannel, listener)
-          } else {
-            ipcRenderer.removeListener('net:chat-chunk', listener)
-          }
-        })
-    },
-    /**
-     * Abort the stream this renderer started. Resolves with the text that had
-     * already arrived, so the partial answer is kept rather than lost.
-     */
-    cancelChat: (sessionId?: string) => ipcRenderer.invoke('net:chat-cancel', sessionId)
-  },
-  chat: {
-    createSession: (docPath: string | null) => ipcRenderer.invoke('chat:create', docPath),
-    loadSession: (id: string) => ipcRenderer.invoke('chat:load', id),
-    saveSession: (session: ChatSession) => ipcRenderer.invoke('chat:save', session),
-    deleteSession: (id: string) => ipcRenderer.invoke('chat:delete', id),
-    listSessions: (docPath: string | null) => ipcRenderer.invoke('chat:list', docPath)
-  },
-  opencode: {
-    getStatus: (customPath?: string) => ipcRenderer.invoke('opencode:get-status', customPath),
-    getModels: () => ipcRenderer.invoke('opencode:get-models')
-  },
-  web: {
-    search: (query: string, maxResults?: number) =>
-      ipcRenderer.invoke('web:search', query, maxResults),
-    searchContext: (query: string) => ipcRenderer.invoke('web:search-context', query)
   },
   dialog: {
     showOpenDialog: (options: Electron.OpenDialogOptions) =>

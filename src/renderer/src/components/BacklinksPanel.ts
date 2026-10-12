@@ -63,8 +63,9 @@ export class BacklinksPanel extends LitElement {
         background: var(--bg-hover);
       }
       .toolbar button svg {
-        width: 13px;
-        height: 13px;
+        width: var(--icon-size, 18px);
+        height: var(--icon-size, 18px);
+        flex-shrink: 0;
       }
       .hit {
         display: flex;

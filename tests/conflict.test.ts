@@ -30,7 +30,7 @@ const BASE: FileStateData = {
   isVaultFile: true,
   quickTogglePair: ['live', 'reading'],
   splitActive: false,
-  splitSurface: 'launcher',
+  splitSurface: 'files',
   secondaryDoc: null,
   conflict: {
     path: 'C:/docs/note.md',

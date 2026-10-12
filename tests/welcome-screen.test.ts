@@ -21,6 +21,36 @@ describe('welcome screen data and actions', () => {
     return element
   }
 
+  it('shows Nothing for an empty vault and keeps only useful home actions', async () => {
+    const element = mount()
+    await vi.waitFor(() =>
+      expect(element.shadowRoot?.querySelector('.recent')?.getAttribute('aria-busy')).toBe('false')
+    )
+    expect(element.shadowRoot!.querySelector('.empty-state')!.textContent).toBe('Nothing')
+    expect(element.shadowRoot!.querySelector('.utilities')).toBeNull()
+    expect(element.shadowRoot!.textContent).not.toContain('Open vault folder')
+    for (const [label, event] of [
+      ['New note', 'new-file'],
+      ['Open file', 'open-file']
+    ] as const) {
+      const seen = vi.fn()
+      element.addEventListener(event, seen)
+      const button = Array.from(
+        element.shadowRoot!.querySelectorAll<HTMLButtonElement>('button')
+      ).find((button) => button.textContent?.includes(label))!
+      button.click()
+      expect(seen).toHaveBeenCalledOnce()
+    }
+    element.vertical = false
+    await element.updateComplete
+    const settingsButton = element.shadowRoot!.querySelector<HTMLButtonElement>('.utility')!
+    expect(settingsButton.textContent).toContain('Settings')
+    const opened = vi.fn()
+    element.addEventListener('open-settings', opened)
+    settingsButton.click()
+    expect(opened).toHaveBeenCalledOnce()
+  })
+
   it('opens the complete stored path and refreshes recent notes while mounted', async () => {
     settings.set('files.recentFiles', ['C:/vault/First.md'])
     const element = mount()

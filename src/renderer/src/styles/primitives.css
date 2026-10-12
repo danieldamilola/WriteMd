@@ -1,4 +1,5 @@
 :root {
+  --icon-size: 18px;
   --caption-button-width: 46px;
   --workspace-gutter: 5px;
   --workspace-divider: color-mix(in srgb, var(--border-subtle) 55%, transparent);
@@ -91,6 +92,25 @@ html[data-window-material='acrylic'] body {
   align-items: center;
   justify-content: center;
   will-change: transform;
+}
+
+/* A group drags as its icon and label, so the preview matches the row. */
+.writemd-drag-preview-icon {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.writemd-drag-preview-icon svg {
+  width: var(--icon-size, 18px);
+  height: var(--icon-size, 18px);
+}
+
+.writemd-drag-preview-group {
+  margin-left: 8px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .sr-only {

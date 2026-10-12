@@ -107,12 +107,15 @@ test.describe('Icon set', () => {
           bad.push(`${label}: not stroked through currentColor`)
         if (!svg.children.length) bad.push(`${label}: no path data`)
         const r = svg.getBoundingClientRect()
-        if (Math.abs(r.width - 16) > 0.5) bad.push(`${label}: width ${r.width}`)
+        if (Math.abs(r.width - 18) > 0.5) bad.push(`${label}: width ${r.width}`)
+        if (Math.abs(r.height - 18) > 0.5) bad.push(`${label}: height ${r.height}`)
       }
       return { count, bad }
     })
 
-    expect(report.count).toBeGreaterThanOrEqual(8)
+    // A floor, not an exact count: this asserts the nav actually rendered so the
+    // loop below has something to measure. settings-design.spec.ts owns the list.
+    expect(report.count).toBeGreaterThanOrEqual(7)
     expect(report).toEqual({ count: report.count, bad: [] })
     await window.screenshot({ path: 'test-results/icons-settings-nav.png' })
     await app.close()

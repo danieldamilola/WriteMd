@@ -1,9 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import {
-  createChatMarkdownIt,
-  createDocumentMarkdownIt,
-  createMarkdownIt
-} from '../src/renderer/src/utils/markdown'
+import { createDocumentMarkdownIt, createMarkdownIt } from '../src/renderer/src/utils/markdown'
 
 /**
  * Every markdown-it instance in the app renders untrusted text into either
@@ -14,7 +10,6 @@ import {
 describe('markdown configuration', () => {
   const factories = [
     ['createMarkdownIt', () => createMarkdownIt()],
-    ['createChatMarkdownIt', () => createChatMarkdownIt()],
     ['createDocumentMarkdownIt', () => createDocumentMarkdownIt()],
     [
       'createDocumentMarkdownIt with typographer',
@@ -46,9 +41,8 @@ describe('markdown configuration', () => {
     }
   })
 
-  it('only the chat factory treats a single newline as a break', () => {
+  it('no factory treats a single newline as a break by default', () => {
     const source = 'line one\nline two'
-    expect(createChatMarkdownIt().render(source)).toContain('<br>')
     expect(createDocumentMarkdownIt().render(source)).not.toContain('<br>')
     expect(createMarkdownIt().render(source)).not.toContain('<br>')
   })
