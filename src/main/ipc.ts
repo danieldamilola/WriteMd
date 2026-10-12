@@ -38,6 +38,25 @@ import {
   assertCanAccess,
   isSubpath
 } from './path-guard'
+import { PRESETS, adapterFor } from './ai/providers'
+import { checkEndpoint } from './ai/endpoint'
+import { getApiKey, keyState, setApiKey } from './ai/key-store'
+import {
+  cancelTurn,
+  deleteSavedSession,
+  getJournal,
+  listChanges,
+  readSessions,
+  setEventEmitter,
+  startTurn,
+  writeSession,
+  type AiSendInput
+} from './ai/service'
+import type { PersistedSession } from '../shared/ai/sessions'
+import type { SetKeyResult } from '../shared/electron-api'
+
+/** A model listing is a single small GET; anything slower is a wrong endpoint. */
+const MODEL_LIST_TIMEOUT_MS = 20_000
 
 const watchedPaths = new Map<string, FSWatcher>()
 
@@ -66,6 +85,7 @@ export function closeAllWatchers(): void {
 export function setupIpc(getWindow: () => BrowserWindow | null): void {
   setVaultRootProvider(getVaultPath)
   registerPersistedPaths()
+  setEventEmitter((event) => getWindow()?.webContents.send('ai:event', event))
   ipcMain.handle('appearance:import-background', () => importBackground(getWindow()))
   ipcMain.handle('appearance:get-background', (_, id: string) => getBackground(id))
   ipcMain.handle('appearance:remove-background', (_, id: string) => removeBackground(id))
@@ -383,4 +403,73 @@ export function setupIpc(getWindow: () => BrowserWindow | null): void {
   function assertExportSource(docPath: string | null): void {
     if (docPath) assertCanAccess(docPath)
   }
+
+  // ---------------------------------------------------------------- AI
+
+  ipcMain.handle('ai:presets', () => PRESETS)
+
+  ipcMain.handle('ai:key-state', () => keyState())
+
+  ipcMain.handle('ai:set-key', (_, key: string) => {
+    const result = setApiKey(key)
+    return { ...result, state: keyState() } satisfies SetKeyResult
+  })
+
+  ipcMain.handle('ai:clear-key', () => {
+    const result = setApiKey('')
+    return { ...result, state: keyState() } satisfies SetKeyResult
+  })
+
+  /**
+   * Ask the provider which models this key can reach.
+   *
+   * `apiKey` is only ever a first-run fallback. Once a key is stored, the typed
+   * field is blank by design and main uses the stored one - so the renderer has
+   * no key to send and the Fetch button still works on a reopening of Settings.
+   *
+   * Every guard that matters runs in main. `checkEndpoint` is the real
+   * enforcement point; the renderer runs it too, but only so the user finds out
+   * before a round trip.
+   */
+  ipcMain.handle(
+    'ai:fetch-models',
+    async (_, providerId: string, baseUrl: string, typedKey: string) => {
+      const adapter = adapterFor(providerId)
+      if (!adapter) throw new Error(`Unknown provider: ${providerId}`)
+      const apiKey = typedKey.trim() || getApiKey() || undefined
+      // `checkEndpoint` rejects on a missing model too, which does not apply to a
+      // model listing, so only the endpoint and key checks are relevant here.
+      const check = checkEndpoint(baseUrl, 'unused', apiKey)
+      if (!check.ok) throw new Error(check.message)
+      return adapter.listModels({ baseUrl, apiKey }, AbortSignal.timeout(MODEL_LIST_TIMEOUT_MS))
+    }
+  )
+
+  // Chat. `invoke` returns as soon as the turn is under way and everything after
+  // arrives on the `ai:event` push channel, because a turn can outlast the call
+  // by minutes and a single invoke result would have to buffer all of it.
+  ipcMain.handle('ai:send', (_, requestId: string, input: AiSendInput) =>
+    startTurn(requestId, input)
+  )
+
+  ipcMain.handle('ai:cancel', (_, requestId: string) => {
+    cancelTurn(requestId)
+    return true
+  })
+
+  ipcMain.handle('ai:list-changes', (_, sessionId?: string) => listChanges(sessionId))
+
+  ipcMain.handle('ai:undo-change', (_, journalId: string) => getJournal().undo(journalId))
+
+  ipcMain.handle('ai:list-sessions', () => readSessions())
+
+  ipcMain.handle('ai:save-session', (_, session: PersistedSession) => {
+    writeSession(session)
+    return true
+  })
+
+  ipcMain.handle('ai:delete-session', (_, id: string) => {
+    deleteSavedSession(id)
+    return true
+  })
 }

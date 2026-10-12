@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  TAB_LABELS,
   searchSettingsRows,
   searchSettingsTabs,
   searchTargetTab,
@@ -8,8 +9,11 @@ import {
 
 describe('searchSettingsTabs', () => {
   it('returns every tab on an empty query', () => {
-    expect(searchSettingsTabs('')).toHaveLength(7)
-    expect(searchSettingsTabs('   ')).toHaveLength(7)
+    // Counted from TAB_LABELS rather than hardcoded, so adding a section does
+    // not fail here for a reason unrelated to what this test is about.
+    const total = Object.keys(TAB_LABELS).length
+    expect(searchSettingsTabs('')).toHaveLength(total)
+    expect(searchSettingsTabs('   ')).toHaveLength(total)
   })
 
   it('finds Appearance from an unvisited setting value', () => {

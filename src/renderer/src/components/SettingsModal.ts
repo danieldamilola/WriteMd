@@ -10,6 +10,7 @@ import { chromeIcon } from '../design/icons'
 import './Modal'
 import { nativeModalAvailable } from './Modal'
 import { api } from '../api'
+import type { ProviderPresetView } from '../../../shared/electron-api'
 import { deepActiveElement } from '../utils/links'
 import { MOTION_LABELS, MOTION_PREFERENCES, type MotionPreference } from '../utils/motion'
 import { SettingsStore } from '../state/settings'
@@ -60,6 +61,7 @@ const NAV_ICONS: Record<SettingsTab, string> = {
   editor: 'pencil',
   files: 'folder-open',
   appearance: 'palette',
+  ai: 'sparkles',
   shortcuts: 'keyboard',
   advanced: 'settings',
   about: 'info'
@@ -738,6 +740,20 @@ export class SettingsModal extends LitElement {
   @state() private capturingId: string | null = null
   @state() private conflictMsg = ''
 
+  // AI assistant
+  @state() private aiEnabled = false
+  @state() private aiProviderId = 'openai'
+  @state() private aiBaseUrl = ''
+  @state() private aiModel = ''
+  @state() private aiKeySet = false
+  @state() private aiKeyUnreadable = false
+  @state() private aiKeyInput = ''
+  @state() private aiHistoryTurns = 8
+  @state() private aiModels: string[] = []
+  @state() private aiPresets: ProviderPresetView[] = []
+  @state() private aiFetchingModels = false
+  @state() private aiFetchError = ''
+
   private updaterUnsubs: Array<() => void> = []
 
   private settingsStore = SettingsStore.getInstance()
@@ -746,6 +762,7 @@ export class SettingsModal extends LitElement {
   connectedCallback(): void {
     super.connectedCallback()
     this.loadCurrentSettings()
+    void this.loadAiPresets()
     this.settingsSubscriptions = [
       this.settingsStore.subscribeSaveStatus(() => this.requestUpdate()),
       this.settingsStore.subscribe('appearance', () => {
@@ -836,6 +853,13 @@ export class SettingsModal extends LitElement {
       'horizontal' | 'vertical'
     this.motion = s.get('appearance.motion', 'system') as MotionPreference
     this.autoCheckForUpdates = s.get('updates.autoCheckForUpdates', true)
+    this.aiEnabled = s.get('ai.enabled', false)
+    this.aiProviderId = s.get('ai.providerId', 'openai')
+    this.aiBaseUrl = s.get('ai.baseUrl', '')
+    this.aiModel = s.get('ai.model', '')
+    this.aiKeySet = s.get('ai.apiKeySet', false)
+    this.aiHistoryTurns = s.get('ai.historyTurns', 8)
+    this.aiModels = s.get('ai.cachedModels', [])
   }
 
   private updateSetting(key: string, value: unknown): void {
@@ -1282,6 +1306,7 @@ export class SettingsModal extends LitElement {
               ${this.tab === 'appearance' ? this.renderAppearance() : ''}
               ${this.tab === 'editor' ? this.renderEditor() : ''}
               ${this.tab === 'files' ? this.renderFiles() : ''}
+              ${this.tab === 'ai' ? this.renderAi() : ''}
               ${this.tab === 'shortcuts' ? this.renderShortcuts() : ''}
               ${this.tab === 'advanced' ? this.renderAdvanced() : ''}
               ${this.tab === 'about' ? this.renderAbout() : ''}
@@ -1600,6 +1625,292 @@ export class SettingsModal extends LitElement {
             <div class="setting-desc">Restore all bindings to their defaults</div>
           </div>
           <button class="control-btn" @click=${this.handleResetShortcuts}>Reset All</button>
+        </div>
+      </div>
+    `
+  }
+
+  /**
+   * Which provider is selected, and what its defaults are.
+   *
+   * The list arrives from main because presets carry an endpoint and a default
+   * model, and hardcoding those in the renderer would let the two drift.
+   */
+  private activeAiPreset(): ProviderPresetView | undefined {
+    return this.aiPresets.find((p) => p.id === this.aiProviderId)
+  }
+
+  private async loadAiPresets(): Promise<void> {
+    const presets = await api()
+      ?.ai?.presets?.()
+      .catch(() => [])
+    this.aiPresets = presets ?? []
+    const state = await api()
+      ?.ai?.keyState?.()
+      .catch(() => 'empty' as const)
+    this.aiKeySet = state === 'stored'
+    this.aiKeyUnreadable = state === 'unavailable'
+  }
+
+  private selectAiProvider(id: string): void {
+    const preset = this.aiPresets.find((p) => p.id === id)
+    this.updateSetting('ai.providerId', id)
+    // Adopting the preset's endpoint and model is the whole point of picking
+    // one, but only when the current values are still the ones we last wrote -
+    // clobbering a hand-edited endpoint would lose the user's proxy.
+    if (preset) {
+      this.updateSetting('ai.baseUrl', preset.defaultBaseUrl)
+      this.updateSetting('ai.model', preset.defaultModel)
+    }
+    this.aiFetchError = ''
+    this.aiModels = []
+    this.updateSetting('ai.cachedModels', [])
+  }
+
+  private async saveAiKey(): Promise<void> {
+    const key = this.aiKeyInput.trim()
+    if (!key) return
+    const result = await api()?.ai?.setKey?.(key)
+    this.aiKeyInput = ''
+    this.aiKeySet = result?.state === 'stored'
+    this.aiKeyUnreadable = result?.state === 'unavailable'
+    if (result && !result.stored) this.aiFetchError = result.reason ?? 'Could not save the key.'
+    else if (result) this.updateSetting('ai.apiKeySet', true)
+  }
+
+  private async clearAiKey(): Promise<void> {
+    const result = await api()?.ai?.clearKey?.()
+    this.aiKeySet = result?.state === 'stored'
+    this.aiKeyUnreadable = false
+    if (result) this.updateSetting('ai.apiKeySet', false)
+  }
+
+  /**
+   * Ask the provider what models this key can reach.
+   *
+   * The key argument is only a fallback for a first-time setup: once one is
+   * stored, the typed field is blank by design and main uses the stored one. The
+   * list is cached in settings so the picker is populated on reopening Settings
+   * without another round trip.
+   */
+  private async fetchAiModels(): Promise<void> {
+    this.aiFetchError = ''
+    this.aiFetchingModels = true
+    try {
+      const models = await api()?.ai?.fetchModels?.(
+        this.aiProviderId,
+        this.aiBaseUrl,
+        this.aiKeyInput.trim()
+      )
+      if (!models || models.length === 0) {
+        this.aiFetchError = 'No models returned for this endpoint.'
+        return
+      }
+      this.aiModels = models
+      this.updateSetting('ai.cachedModels', models)
+      // Keep the current model if it is still offered; otherwise fall to the
+      // first, so the picker is never left pointing at something unavailable.
+      if (!models.includes(this.aiModel)) {
+        const first = models[0]
+        this.updateSetting('ai.model', first)
+      }
+    } catch (e) {
+      this.aiFetchError = e instanceof Error ? e.message : String(e)
+    } finally {
+      this.aiFetchingModels = false
+    }
+  }
+
+  private renderAi(): unknown {
+    const preset = this.activeAiPreset()
+    const needsKey = preset?.keyRequired ?? true
+    return html`
+      <div class="section-title">Assistant</div>
+      <div class="section">
+        <div class="setting-row">
+          <div>
+            <div class="setting-label">Enable AI assistant</div>
+            <div class="setting-desc">
+              Show the assistant panel and let it make changes to your files. Everything it changes
+              can be undone.
+            </div>
+          </div>
+          <button
+            class="toggle-switch"
+            role="switch"
+            aria-checked="${this.aiEnabled}"
+            aria-label="Enable AI assistant"
+            @click=${() => this.updateSetting('ai.enabled', !this.aiEnabled)}
+          ></button>
+        </div>
+      </div>
+
+      <div class="section-title">Model</div>
+      <div class="section">
+        <div class="setting-row">
+          <div>
+            <div class="setting-label">Provider</div>
+            <div class="setting-desc">
+              Where your requests are sent, and which API shape is used
+            </div>
+          </div>
+          <wa-select
+            size="small"
+            class="select-input"
+            label="Provider"
+            aria-label="Provider"
+            .value=${this.aiProviderId}
+            @change=${(e: Event) =>
+              this.selectAiProvider(String((e.currentTarget as WaSelect).value ?? ''))}
+          >
+            ${this.aiPresets.map((p) => html`<wa-option value=${p.id}>${p.label}</wa-option>`)}
+          </wa-select>
+        </div>
+
+        <div class="setting-row">
+          <div>
+            <div class="setting-label">Endpoint</div>
+            <div class="setting-desc">
+              ${
+                needsKey && !this.aiBaseUrl.startsWith('https://') && this.aiBaseUrl
+                  ? 'An API key will not be sent over plain http to a remote host.'
+                  : 'Edit this for a proxy or a self-hosted server.'
+              }
+            </div>
+          </div>
+          <input
+            type="url"
+            class="text-input"
+            aria-label="Endpoint"
+            placeholder="https://api.openai.com/v1"
+            .value=${this.aiBaseUrl}
+            @change=${(e: Event) =>
+              this.updateSetting('ai.baseUrl', (e.currentTarget as HTMLInputElement).value.trim())}
+          />
+        </div>
+
+        <div class="setting-row">
+          <div>
+            <div class="setting-label">Model</div>
+            <div class="setting-desc">
+              ${
+                this.aiModels.length
+                  ? `${this.aiModels.length} available`
+                  : 'Fetch to load the models your key can reach'
+              }
+            </div>
+          </div>
+          <wa-select
+            size="small"
+            class="select-input"
+            label="Model"
+            aria-label="Model"
+            .value=${this.aiModel}
+            @change=${(e: Event) =>
+              this.updateSetting('ai.model', String((e.currentTarget as WaSelect).value ?? ''))}
+          >
+            ${(this.aiModels.length ? this.aiModels : this.aiModel ? [this.aiModel] : []).map(
+              (m) => html`<wa-option value=${m}>${m}</wa-option>`
+            )}
+          </wa-select>
+          <button
+            class="control-btn"
+            aria-label="Fetch models"
+            ?disabled=${this.aiFetchingModels}
+            @click=${() => void this.fetchAiModels()}
+          >
+            ${this.aiFetchingModels ? 'Loading...' : 'Fetch'}
+          </button>
+        </div>
+        ${
+          this.aiFetchError
+            ? html`<div class="setting-desc" style="color: var(--danger)">
+                ${this.aiFetchError}
+              </div>`
+            : ''
+        }
+      </div>
+
+      <div class="section-title">Credentials</div>
+      <div class="section">
+        <div class="setting-row">
+          <div>
+            <div class="setting-label">API Key</div>
+            <div class="setting-desc">
+              ${
+                this.aiKeyUnreadable
+                  ? html`<span style="color: var(--warning)"
+                      >A key is stored but this install cannot decrypt it. Type a new one to replace
+                      it.</span
+                    >`
+                  : this.aiKeySet
+                    ? 'A key is stored on this machine, encrypted with your OS keychain.'
+                    : needsKey
+                      ? 'Your secret API key'
+                      : 'Not needed for this provider'
+              }
+              ${preset?.keyHint ? html` &middot; ${preset.keyHint}` : ''}
+            </div>
+          </div>
+          <input
+            type="password"
+            class="text-input"
+            aria-label="API Key"
+            placeholder=${needsKey ? 'Paste your API key' : 'Not needed'}
+            .value=${this.aiKeyInput}
+            @input=${(e: Event) => {
+              this.aiKeyInput = (e.currentTarget as HTMLInputElement).value
+            }}
+          />
+          <button
+            class="control-btn"
+            @click=${() => void this.saveAiKey()}
+            ?disabled=${!this.aiKeyInput.trim()}
+          >
+            Save
+          </button>
+          ${
+            this.aiKeySet
+              ? html`<button class="control-btn" @click=${() => void this.clearAiKey()}>
+                  Clear
+                </button>`
+              : ''
+          }
+        </div>
+
+        <div class="setting-row">
+          <div>
+            <div class="setting-label">Chat history</div>
+            <div class="setting-desc">
+              Previous turns sent with each message. Lower saves tokens; 0 makes every message start
+              fresh. Your open document is always attached only to the newest message.
+            </div>
+          </div>
+          <input
+            type="number"
+            class="text-input"
+            aria-label="Chat history"
+            min="0"
+            max="50"
+            step="1"
+            style="max-width: 90px"
+            .value=${String(this.aiHistoryTurns)}
+            @change=${(e: Event) =>
+              this.updateSetting(
+                'ai.historyTurns',
+                Math.max(0, Math.min(50, Number((e.currentTarget as HTMLInputElement).value) || 0))
+              )}
+          />
+        </div>
+      </div>
+
+      <div class="section-title">Privacy</div>
+      <div class="section">
+        <div class="setting-desc">
+          Text you send is delivered to the endpoint above, along with the open document and any
+          selection. The API key is stored in your operating system's keychain, never in
+          config.json, and is not readable by the interface. For notes you would rather keep on this
+          machine, point the endpoint at a local provider such as Ollama.
         </div>
       </div>
     `

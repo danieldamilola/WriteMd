@@ -68,18 +68,18 @@ export function getSettings(): WriteMdSettings {
 }
 
 /**
- * Drop settings whose feature no longer exists.
+ * Repair settings that a previous build wrote and this one can no longer honour.
  *
- * A config written before the AI assistant was removed still carries its `ai`
- * block, and `deepMerge` would copy it straight through: no schema key reads it,
- * but it would be written back on every save and grow stale forever. The
- * `backgroundTarget` case matters more - a saved `ai` would leave
+ * The AI assistant is back, so its `ai` block stays. The `backgroundTarget`
+ * repair stays too, and is now the important half: a config written by the
+ * removed build may still carry `backgroundTarget: 'ai'`, which leaves
  * `Background.ts` comparing the setting against `'workspace'` and permanently
- * hiding the artwork, with nothing on screen to explain why.
+ * hiding the artwork with nothing on screen to explain why. That config is
+ * still out there in users' userData directories, so removing the feature did
+ * not make the possibility go away.
  */
 function dropRemovedFeatures(settings: WriteMdSettings): WriteMdSettings {
   const next = { ...settings, appearance: { ...settings.appearance } }
-  delete (next as { ai?: unknown }).ai
   if (next.appearance.backgroundTarget !== 'workspace') {
     next.appearance.backgroundTarget = 'workspace'
   }

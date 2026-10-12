@@ -103,54 +103,61 @@ export interface AiProviderConfig {
 }
 
 /**
- * How much the agent may do without asking.
- *
- * The names describe what happens, not how much is allowed, because the
- * boundary that matters is whether a human sees the action before it lands.
- * `read-only` is the default for a reason: a session nobody has switched out of
- * it cannot touch the disk.
+ * How a change reached the file. Everything lands automatically; the journal is
+ * what makes that recoverable. Kept as an explicit type because the transcript
+ * renders it, and "the assistant rewrote this" reads very differently from
+ * "the assistant created this".
  */
-export type PermissionMode = 'read-only' | 'ask' | 'auto'
+export type ChangeKind = 'created' | 'modified'
 
-export interface AiSettings {
-  providers: AiProviderConfig[]
-  activeProviderId: string | null
-  model: string | null
-  permissionMode: PermissionMode
-  /** Where a new session starts when the user has not picked a project. */
-  defaultRoot: string | null
-  /** Surface where a session keeps its working directory. */
-  maxTurnSteps: number
-}
-
-/** One step of the agent loop, for the transcript. */
-export interface AiToolInvocation {
+/**
+ * One undoable change.
+ *
+ * `before` is null when the file did not exist, which is what makes undo of a
+ * creation a delete rather than a write of empty content. `after` is kept
+ * alongside so undo can refuse when the file has been changed since by someone
+ * or something else - restoring `before` over a newer edit would destroy work
+ * the user did after the fact, which is a worse failure than declining to undo.
+ */
+export interface JournalEntry {
   id: string
-  name: string
-  arguments: Record<string, unknown>
-  /** Populated once the tool has run. */
-  result?: string
-  isError?: boolean
-  /** Path this touched, relative to the session root. For display. */
-  affectedPath?: string
+  sessionId: string
+  /** Canonical absolute path, so a symlinked write reverts the real file. */
+  path: string
+  kind: ChangeKind
+  before: string | null
+  after: string
+  createdAt: number
+  revertedAt: number | null
 }
 
 /**
- * A conversation. `root` is the "cd": it is fixed for the life of the session
- * and is what every tool call is scoped to.
+ * A conversation. Saved, named, and reopenable - which is the whole of its
+ * persistence requirement. There is no working directory: the assistant is
+ * pointed at files, not dropped into a project.
  */
 export interface AiSession {
   id: string
   title: string
-  /** The working directory. Immutable once the session has a message. */
-  root: string
   providerId: string
   model: string | null
-  permissionMode: PermissionMode
   messages: ChatMessage[]
+  /**
+   * Where the conversation started, for grouping sessions by note. Not a
+   * boundary - the assistant can be sent to any file - just a label, and null
+   * once a session has drifted across notes.
+   */
+  contextFile: string | null
   createdAt: number
   updatedAt: number
 }
 
-/** Persisted session, minus the parts that should not outlive the process. */
+/** Persisted session. Messages carry no image data, so this is storable. */
 export type AiSessionSummary = Omit<AiSession, 'messages'>
+
+/** Settings that describe how the assistant reaches a model. */
+export interface AiSettings {
+  providers: AiProviderConfig[]
+  activeProviderId: string | null
+  model: string | null
+}

@@ -1,5 +1,3 @@
-import type { StreamEvent } from '../../shared/ai/types'
-
 /**
  * Server-sent-event reader.
  *
@@ -166,31 +164,6 @@ async function describeHttpFailure(response: Response): Promise<string> {
     // Body already consumed or unreadable; the status alone is still useful.
   }
   return detail ? `${status}: ${detail}` : status
-}
-
-/**
- * Adapter contract.
- *
- * Adapters emit `text` and `tool-call` events, then exactly one `done`. A tool
- * call must arrive whole: providers stream tool arguments as partial JSON, and
- * the adapter buffers until the call is complete rather than emitting fragments,
- * because the runner cannot use a half-parsed argument object.
- */
-export interface ProviderAdapter {
-  readonly kind: string
-  stream(request: ProviderRequest): AsyncGenerator<StreamEvent>
-}
-
-export interface ProviderRequest {
-  baseUrl: string
-  apiKey: string | undefined
-  model: string
-  /** Already-normalized messages in this app's shape. */
-  messages: import('../../shared/ai/types').ChatMessage[]
-  tools: import('../../shared/ai/types').ToolSpec[]
-  system: string
-  maxTokens: number
-  signal: AbortSignal
 }
 
 /** Join a base URL and a path without doubling or dropping the separator. */

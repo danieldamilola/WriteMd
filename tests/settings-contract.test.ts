@@ -92,9 +92,16 @@ describe('settings schema', () => {
         // Only consider keys that look like settings: a known section prefix.
         const section = candidate.split('.')[0]
         if (
-          !['editor', 'appearance', 'files', 'export', 'advanced', 'shortcuts', 'preview'].includes(
-            section
-          )
+          ![
+            'editor',
+            'appearance',
+            'files',
+            'export',
+            'ai',
+            'advanced',
+            'shortcuts',
+            'preview'
+          ].includes(section)
         ) {
           continue
         }

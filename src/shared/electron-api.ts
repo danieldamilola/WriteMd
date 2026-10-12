@@ -44,6 +44,97 @@ export interface ExportResult {
   reason?: string
 }
 
+/**
+ * A provider the user can pick, as the settings UI sees it.
+ *
+ * Mirrors `ProviderDescriptor` in the main process. Declared here rather than
+ * imported from `main/ai/providers` because the renderer must not pull in
+ * main-only code, and because this is the only part of a descriptor that is
+ * contractual across the bridge.
+ */
+export interface ProviderPresetView {
+  id: string
+  label: string
+  kind: 'openai' | 'anthropic' | 'gemini'
+  defaultBaseUrl: string
+  defaultModel: string
+  keyRequired: boolean
+  keyHint: string
+}
+
+/**
+ * Result of storing the API key.
+ *
+ * `stored: false` with a reason is not an error path the caller should retry -
+ * it is the machine having no usable keychain, and the UI has to say so rather
+ * than showing a stored key that is not protected.
+ */
+export interface SetKeyResult {
+  stored: boolean
+  reason?: string
+  state: 'empty' | 'stored' | 'unavailable'
+}
+
+/** What the renderer sends to start a turn. Mirrors main's `AiSendInput`. */
+export interface AiSendInput {
+  sessionId: string
+  userText: string
+  document: { path: string; content: string } | null
+  selection: string | null
+  references: { path: string; content: string }[]
+  attachments: {
+    name: string
+    kind: 'image' | 'text'
+    data?: string
+    mimeType?: string
+    text?: string
+  }[]
+  openPaths: string[]
+}
+
+/** One undoable change, as the change list needs it. */
+export interface ChangeView {
+  id: string
+  path: string
+  kind: 'created' | 'modified'
+  createdAt: number
+  revertedAt: number | null
+}
+
+export interface SkippedView {
+  path: string
+  reason: string
+  detail: string
+}
+
+/** A saved conversation, as the history list needs it. */
+export interface PersistedSessionView {
+  id: string
+  title: string
+  createdAt: number
+  updatedAt: number
+  providerId: string
+  model: string | null
+  contextFile: string | null
+  messages: { role: 'user' | 'assistant'; content: string }[]
+}
+
+/**
+ * Pushed from main as a turn runs.
+ *
+ * `requestId` is chosen by the renderer so it can drop events belonging to a
+ * turn it already stopped - a cancelled stream is often still in flight when
+ * the next one starts, and appending it into the new transcript produces text
+ * neither turn produced.
+ */
+export type AiEvent =
+  | { type: 'text'; requestId: string; delta: string }
+  | { type: 'proposal'; requestId: string; files: string[]; blocks: number; skipped: string[] }
+  | { type: 'applied'; requestId: string; changed: ChangeView[]; skipped: SkippedView[] }
+  | { type: 'answer'; requestId: string; text: string }
+  | { type: 'error'; requestId: string; message: string }
+  | { type: 'done'; requestId: string }
+
 /** Update info pushed by electron-updater. Only version is contractual. */
 export interface UpdateInfo {
   version?: string
@@ -134,6 +225,40 @@ export interface ElectronAPI {
     pdf: (markdown: string, docPath: string | null) => Promise<ExportResult>
     html: (markdown: string, docPath: string | null) => Promise<ExportResult>
     docx: (markdown: string, docPath: string | null) => Promise<ExportResult>
+  }
+  /**
+   * The AI assistant. Note there is no "get the key" call anywhere in this
+   * interface, and that is deliberate: the renderer sends a key in to store it
+   * and receives back only whether one exists. The secret never crosses the
+   * bridge in the readable direction.
+   */
+  ai: {
+    presets: () => Promise<ProviderPresetView[]>
+    /**
+     * Model ids this key can reach. Rejects on a bad key rather than resolving
+     * an empty list, so the UI can distinguish "your key is wrong" from "this
+     * provider has no models".
+     */
+    fetchModels: (providerId: string, baseUrl: string, apiKey: string) => Promise<string[]>
+    setKey: (key: string) => Promise<SetKeyResult>
+    clearKey: () => Promise<SetKeyResult>
+    keyState: () => Promise<'empty' | 'stored' | 'unavailable'>
+    /**
+     * Start a turn. Resolves once it is under way; output arrives on
+     * `onEvent`. The renderer owns `requestId`.
+     */
+    send: (requestId: string, input: AiSendInput) => Promise<unknown>
+    cancel: (requestId: string) => Promise<boolean>
+    onEvent: (callback: (event: AiEvent) => void) => () => void
+    listChanges: (sessionId?: string) => Promise<ChangeView[]>
+    undoChange: (journalId: string) => Promise<{
+      status: string
+      path?: string
+      entryId?: string
+    }>
+    listSessions: () => Promise<PersistedSessionView[]>
+    saveSession: (session: PersistedSessionView) => Promise<boolean>
+    deleteSession: (id: string) => Promise<boolean>
   }
   updater: {
     /**

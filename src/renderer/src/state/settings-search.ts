@@ -1,5 +1,5 @@
 export type SettingsTab =
-  'general' | 'appearance' | 'editor' | 'files' | 'shortcuts' | 'advanced' | 'about'
+  'general' | 'appearance' | 'editor' | 'files' | 'ai' | 'shortcuts' | 'advanced' | 'about'
 
 /** Human labels used both by the nav buttons and by search filtering. */
 export const TAB_LABELS: Record<SettingsTab, string> = {
@@ -7,6 +7,7 @@ export const TAB_LABELS: Record<SettingsTab, string> = {
   appearance: 'Appearance',
   editor: 'Editor',
   files: 'Files & vault',
+  ai: 'AI assistant',
   shortcuts: 'Keyboard shortcuts',
   advanced: 'Advanced',
   about: 'About WriteMd'
@@ -15,7 +16,7 @@ export const TAB_LABELS: Record<SettingsTab, string> = {
 export const SETTINGS_NAV_GROUPS: { label: string; tabs: SettingsTab[] }[] = [
   { label: 'Writing', tabs: ['general', 'editor', 'files'] },
   { label: 'Workspace', tabs: ['appearance', 'shortcuts'] },
-  { label: 'Application', tabs: ['advanced', 'about'] }
+  { label: 'Application', tabs: ['ai', 'advanced', 'about'] }
 ]
 
 /**
@@ -29,6 +30,7 @@ export const SETTINGS_SEARCH_INDEX: Record<SettingsTab, string> = {
     'appearance theme dark graphite nord midnight light paper dracula accent color panel orientation horizontal vertical tabs side rail top bar layout window full screen shell',
   editor: 'editor font family size word wrap line numbers source mode highlight active line',
   files: 'files vault location path storage folder recent tabs open disk',
+  ai: 'ai assistant model provider openai anthropic gemini ollama lmstudio api key endpoint fetch models history privacy local cloud',
   shortcuts: 'shortcuts keyboard keys bindings commands rebind reset',
   advanced:
     'advanced features mermaid diagrams export pdf page size theme margin paper a4 letter legal danger reset preferences factory defaults',
@@ -95,6 +97,36 @@ export const SETTINGS_ROW_INDEX: SettingsRowEntry[] = [
     tab: 'files',
     label: 'Auto-save',
     terms: 'automatically write modifications to disk timer'
+  },
+  {
+    tab: 'ai',
+    label: 'Enable AI assistant',
+    terms: 'turn on off master switch panel toggle'
+  },
+  {
+    tab: 'ai',
+    label: 'Provider',
+    terms: 'openai anthropic gemini ollama lmstudio local service'
+  },
+  {
+    tab: 'ai',
+    label: 'API Key',
+    terms: 'secret credential keychain encrypted paste'
+  },
+  {
+    tab: 'ai',
+    label: 'Endpoint',
+    terms: 'base url address host https custom proxy'
+  },
+  {
+    tab: 'ai',
+    label: 'Model',
+    terms: 'fetch refresh models list gpt claude llama pick choose'
+  },
+  {
+    tab: 'ai',
+    label: 'Chat history',
+    terms: 'turns context previous messages replay tokens'
   },
   {
     tab: 'shortcuts',

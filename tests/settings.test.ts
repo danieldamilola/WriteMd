@@ -23,32 +23,52 @@ describe('settings persistence', () => {
     vi.resetModules()
   })
 
-  it('drops settings for the removed AI feature and repairs the background target', async () => {
+  it('repairs the background target left by a build that used the AI panel', async () => {
     mockElectron()
-    // A config written by a build that still had the AI panel.
+    // A config written by a build that had the AI panel. That panel is back, so
+    // the `ai` block is no longer dead weight - but `backgroundTarget: 'ai'` is
+    // still invalid and the artwork is still hidden behind it.
     writeFileSync(
       CONFIG,
       JSON.stringify({
         appearance: { backgroundTarget: 'ai', theme: 'nord' },
-        ai: { provider: 'OpenAI', apiKey: 'sk-should-be-gone' }
+        ai: { enabled: false, providerId: 'openai', apiKey: 'sk-legacy-value' }
       }),
       'utf-8'
     )
     const { getSettings, setSettings } = await import('../src/main/settings')
 
     const s = getSettings()
-    expect(s).not.toHaveProperty('ai')
-    // Otherwise Background.ts compares against 'workspace' forever and the
-    // artwork never appears again, with nothing on screen to explain it.
     expect(s.appearance.backgroundTarget).toBe('workspace')
     expect(s.appearance.theme).toBe('nord')
+    // The section survives, and the known keys are read from it.
+    expect(s.ai.providerId).toBe('openai')
 
-    // And it must not come back on the next save.
+    // And the repair must survive a save, which is where a stale value would
+    // otherwise be written back out and undo itself.
     await setSettings({ editor: { fontSize: 17 } })
     const persisted = JSON.parse(readFileSync(CONFIG, 'utf-8'))
-    expect(persisted).not.toHaveProperty('ai')
     expect(persisted.appearance.backgroundTarget).toBe('workspace')
-    expect(readFileSync(CONFIG, 'utf-8')).not.toContain('sk-should-be-gone')
+  })
+
+  it('never persists an api key into config.json', async () => {
+    mockElectron()
+    // The key lives in a safeStorage-encrypted file, not in plain JSON. A key
+    // reaching config.json would be copied, backed up and pasted into bug
+    // reports with the rest of the file, and nothing would ever remove it.
+    writeFileSync(CONFIG, JSON.stringify({ ai: { enabled: true } }), 'utf-8')
+    const { getSettings, setSettings } = await import('../src/main/settings')
+
+    const s = getSettings()
+    expect(s.ai).not.toHaveProperty('apiKey')
+
+    // Even a patch that tries to smuggle one in is dropped by the schema, which
+    // only accepts declared keys.
+    await setSettings({ ai: { apiKey: 'sk-should-not-be-written' } } as never)
+    const raw = readFileSync(CONFIG, 'utf-8')
+    expect(raw).not.toContain('sk-should-not-be-written')
+    // Quoted, so this cannot match `apiKeySet`, which is a legitimate boolean.
+    expect(raw).not.toContain('"apiKey"')
   })
 
   it('moves a corrupt config aside instead of silently resetting', async () => {

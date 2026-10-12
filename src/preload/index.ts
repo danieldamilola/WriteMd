@@ -1,5 +1,11 @@
 import { contextBridge, ipcRenderer, webUtils, type IpcRendererEvent } from 'electron'
-import type { UpdateInfo, UpdateProgress } from '../shared/electron-api'
+import type {
+  AiEvent,
+  AiSendInput,
+  PersistedSessionView,
+  UpdateInfo,
+  UpdateProgress
+} from '../shared/electron-api'
 
 function onChannel(channel: string, callback: (...args: unknown[]) => void): () => void {
   const handler = (_: IpcRendererEvent, ...args: unknown[]): void => callback(...args)
@@ -87,6 +93,32 @@ const writemdAPI = {
       ipcRenderer.invoke('export:html', markdown, docPath),
     docx: (markdown: string, docPath: string | null) =>
       ipcRenderer.invoke('export:docx', markdown, docPath)
+  },
+  /**
+   * The AI assistant.
+   *
+   * There is deliberately no way to read the API key back. The renderer sends
+   * one in to store it and gets a boolean back; main keeps the secret. A
+   * `getKey` here would hand the key to every script that can reach the
+   * renderer, which is exactly the boundary `contextIsolation` exists to hold.
+   */
+  ai: {
+    presets: () => ipcRenderer.invoke('ai:presets'),
+    fetchModels: (providerId: string, baseUrl: string, apiKey: string) =>
+      ipcRenderer.invoke('ai:fetch-models', providerId, baseUrl, apiKey),
+    setKey: (key: string) => ipcRenderer.invoke('ai:set-key', key),
+    clearKey: () => ipcRenderer.invoke('ai:clear-key'),
+    keyState: () => ipcRenderer.invoke('ai:key-state'),
+    send: (requestId: string, input: AiSendInput) =>
+      ipcRenderer.invoke('ai:send', requestId, input),
+    cancel: (requestId: string) => ipcRenderer.invoke('ai:cancel', requestId),
+    onEvent: (callback: (event: AiEvent) => void) =>
+      onChannel('ai:event', (...args: unknown[]) => callback(args[0] as AiEvent)),
+    listChanges: (sessionId?: string) => ipcRenderer.invoke('ai:list-changes', sessionId),
+    undoChange: (journalId: string) => ipcRenderer.invoke('ai:undo-change', journalId),
+    listSessions: () => ipcRenderer.invoke('ai:list-sessions'),
+    saveSession: (session: PersistedSessionView) => ipcRenderer.invoke('ai:save-session', session),
+    deleteSession: (id: string) => ipcRenderer.invoke('ai:delete-session', id)
   },
   updater: {
     check: () => ipcRenderer.invoke('updater:check'),

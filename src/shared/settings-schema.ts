@@ -72,6 +72,25 @@ export interface WriteMdSettings {
     pdfPageSize: string
     pdfTheme: string
   }
+  ai: {
+    /** Master switch. Off by default: an enabled-by-default feature that cannot work until a key is entered is just chrome. */
+    enabled: boolean
+    /** Which preset. See `PRESETS` in src/main/ai/providers. */
+    providerId: string
+    /** Editable, so a self-hosted or proxied endpoint works without a new adapter. */
+    baseUrl: string
+    model: string
+    /**
+     * Whether an API key is stored on this machine. The key itself lives in a
+     * separate safeStorage-encrypted file and never in config.json, which is
+     * plain JSON on disk and is fine to read, copy, and commit.
+     */
+    apiKeySet: boolean
+    /** Previous chat turns replayed with each message. 0 makes each turn stateless. */
+    historyTurns: number
+    /** Model ids the last Fetch returned, so the picker survives a restart. */
+    cachedModels: string[]
+  }
   advanced: {
     enableMermaid: boolean
   }
@@ -146,6 +165,15 @@ export const DEFAULT_SETTINGS: WriteMdSettings = {
     pdfPageSize: 'A4',
     pdfTheme: 'light'
   },
+  ai: {
+    enabled: false,
+    providerId: 'openai',
+    baseUrl: 'https://api.openai.com/v1',
+    model: 'gpt-4o-mini',
+    apiKeySet: false,
+    historyTurns: 8,
+    cachedModels: []
+  },
   advanced: {
     enableMermaid: true
   },
@@ -185,7 +213,8 @@ const ARRAY_ELEMENT_TYPES: Record<string, 'string' | 'number' | 'boolean'> = {
   'files.recentFiles': 'string',
   'files.openTabs': 'string',
   'files.pinnedTabs': 'string',
-  'shortcuts.bindings': 'string'
+  'shortcuts.bindings': 'string',
+  'ai.cachedModels': 'string'
 }
 
 /**
@@ -202,7 +231,8 @@ const STRING_UNIONS: Record<string, readonly string[]> = {
   'appearance.backgroundEffect': ['none', 'haze', 'dither', 'ascii', 'halftone', 'scanlines'],
   'appearance.backgroundTarget': ['workspace'],
   'appearance.backgroundShowOn': ['all', 'empty'],
-  'appearance.windowMaterial': ['none', 'mica', 'acrylic']
+  'appearance.windowMaterial': ['none', 'mica', 'acrylic'],
+  'ai.providerId': ['openai', 'anthropic', 'gemini', 'ollama', 'lmstudio']
 }
 
 const NUMBER_BOUNDS: Record<string, readonly [number, number]> = {
@@ -215,7 +245,8 @@ const NUMBER_BOUNDS: Record<string, readonly [number, number]> = {
   'appearance.backgroundEmptyOpacity': [0, 100],
   'appearance.backgroundContentOpacity': [0, 100],
   'appearance.surfaceOpacity': [0, 100],
-  'appearance.backgroundBlur': [0, 40]
+  'appearance.backgroundBlur': [0, 40],
+  'ai.historyTurns': [0, 50]
 }
 
 /**
