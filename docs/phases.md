@@ -81,8 +81,9 @@ This section tracks the workspace UI changes prepared for v1.4.0. Historical rel
 
 ### AI, export, release
 
-- [x] AI assistant panel (BYOK: OpenAI, Gemini, Anthropic, Ollama) with in-place document edits
-- [x] PDF + standalone HTML export
+- [x] AI assistant panel (BYOK: OpenAI, Anthropic, Gemini, Ollama, LM Studio) with
+      in-place document edits, cross-file changes, and per-change undo
+- [x] PDF + standalone HTML export, with a preview surface
 - [x] File associations (`.md`, `.markdown`, `.mdown`, `.mkd`), Windows installer (`electron-builder` NSIS), auto-updater
 - [x] Unit suite (vitest) + Playwright e2e specs
 - [x] README, MIT LICENSE, PRIVACY.md

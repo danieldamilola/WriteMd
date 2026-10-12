@@ -1,6 +1,7 @@
 import { test, expect, type ElectronApplication } from '@playwright/test'
 import { makeFixture, launch, firstWindow, openSettings } from './fixtures'
 import type { SettingsStore } from '../../src/renderer/src/state/settings'
+import { TAB_LABELS, SETTINGS_NAV_GROUPS } from '../../src/renderer/src/state/settings-search'
 
 const fixture = makeFixture('settings-design')
 
@@ -98,16 +99,15 @@ test.describe('Settings and flat workspace layout', () => {
     const search = modal.locator('.sidebar-search writemd-search-bar input')
     await expect(search).toBeFocused()
     await expect(window.locator('writemd-top-bar writemd-search-bar')).toHaveCount(0)
-    await expect(modal.locator('.nav-group')).toHaveText(['Writing', 'Workspace', 'Application'])
-    await expect(modal.locator('.nav-btn')).toHaveText([
-      'New notes',
-      'Editor',
-      'Files & vault',
-      'Appearance',
-      'Keyboard shortcuts',
-      'Advanced',
-      'About WriteMd'
-    ])
+    // Ordered as the nav renders them, and read from the same tables the nav is
+    // built from - so adding a section does not fail this test for a reason
+    // that has nothing to do with layout or theming.
+    await expect(modal.locator('.nav-group')).toHaveText(
+      SETTINGS_NAV_GROUPS.map((group) => group.label)
+    )
+    await expect(modal.locator('.nav-btn')).toHaveText(
+      SETTINGS_NAV_GROUPS.flatMap((group) => group.tabs.map((tab) => TAB_LABELS[tab]))
+    )
     try {
       for (const theme of ['graphite', 'light']) {
         for (const orientation of ['vertical', 'horizontal']) {

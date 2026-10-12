@@ -107,6 +107,16 @@ export interface SkippedView {
   detail: string
 }
 
+/**
+ * Result of undoing one change.
+ *
+ * `changed-since` is the one that matters to the user: the file no longer holds
+ * what the assistant wrote, so the prior content is no longer a description of
+ * anything and restoring it would destroy a later edit. It is a refusal, not a
+ * failure, and the UI says so rather than showing an error.
+ */
+export type UndoStatus = 'restored' | 'gone' | 'already-reverted' | 'changed-since' | 'unknown'
+
 /** A saved conversation, as the history list needs it. */
 export interface PersistedSessionView {
   id: string
@@ -133,7 +143,12 @@ export type AiEvent =
   | { type: 'applied'; requestId: string; changed: ChangeView[]; skipped: SkippedView[] }
   | { type: 'answer'; requestId: string; text: string }
   | { type: 'error'; requestId: string; message: string }
-  | { type: 'done'; requestId: string }
+  /**
+   * The turn is over. `text` is authoritative and replaces whatever streamed -
+   * the streamed deltas are provisional, and when the model edited files they
+   * contained the protocol rather than prose.
+   */
+  | { type: 'done'; requestId: string; text?: string }
 
 /** Update info pushed by electron-updater. Only version is contractual. */
 export interface UpdateInfo {
@@ -248,17 +263,22 @@ export interface ElectronAPI {
      * `onEvent`. The renderer owns `requestId`.
      */
     send: (requestId: string, input: AiSendInput) => Promise<unknown>
-    cancel: (requestId: string) => Promise<boolean>
+    /**
+     * Fire-and-forget. These resolve once the request is accepted, not once the
+     * work is done, and the renderer only cares that they did not throw - so
+     * they are typed void rather than carrying a result nobody reads.
+     */
+    cancel: (requestId: string) => Promise<void>
     onEvent: (callback: (event: AiEvent) => void) => () => void
     listChanges: (sessionId?: string) => Promise<ChangeView[]>
     undoChange: (journalId: string) => Promise<{
-      status: string
+      status: UndoStatus
       path?: string
       entryId?: string
     }>
     listSessions: () => Promise<PersistedSessionView[]>
-    saveSession: (session: PersistedSessionView) => Promise<boolean>
-    deleteSession: (id: string) => Promise<boolean>
+    saveSession: (session: PersistedSessionView) => Promise<void>
+    deleteSession: (id: string) => Promise<void>
   }
   updater: {
     /**

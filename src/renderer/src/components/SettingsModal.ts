@@ -61,7 +61,7 @@ const NAV_ICONS: Record<SettingsTab, string> = {
   editor: 'pencil',
   files: 'folder-open',
   appearance: 'palette',
-  ai: 'sparkles',
+  ai: 'sparkle',
   shortcuts: 'keyboard',
   advanced: 'settings',
   about: 'info'

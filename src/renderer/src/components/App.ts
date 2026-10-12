@@ -881,6 +881,9 @@ export class WriteMdApp extends LitElement {
       case 'split-preview':
         this.fileState.setSplitSurface('preview')
         break
+      case 'toggle-ai':
+        this.fileState.toggleAiDock()
+        break
       case 'open-settings':
         this.showSettings = true
         break

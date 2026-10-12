@@ -390,8 +390,10 @@ also has no default binding.
 ## 9. Settings Schema (persisted in `config.json`)
 
 Source of truth is `src/shared/settings-schema.ts`. Nothing here holds a secret:
-the API key storage the app used to keep has gone with the AI assistant, so the
-file is plain preferences.
+the API key is stored through `safeStorage` in its own file at
+`userData/ai-key`, never in `config.json`, and `config.json` carries only the
+`ai.apiKeySet` boolean. That keeps this file plain preferences, so it stays
+readable, copyable between machines, and safe to paste into a bug report.
 
 ```json
 {

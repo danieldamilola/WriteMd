@@ -7,6 +7,7 @@ import { SettingsStore } from '../state/settings'
 import { icon } from './icons'
 import './FindPanel'
 import './BacklinksPanel'
+import './ai/AiDock'
 import type { FindPanel } from './FindPanel'
 import {
   EditorView,
@@ -109,6 +110,26 @@ export class Editor extends LitElement {
         gap: 0;
         position: relative;
         height: 100%;
+      }
+
+      /*
+       * The dock is a flex child rather than an overlay so the editor narrows
+       * beside it instead of hiding underneath. The workspace already has
+       * flex 1, so a fixed-basis sibling lands at the right edge with no change
+       * to the existing layout - which is why it is here and not positioned.
+       */
+      .ai-dock {
+        flex: 0 0 360px;
+        min-width: 0;
+        height: 100%;
+        border-left: 1px solid var(--border-subtle, var(--border));
+        background: var(--bg-card);
+      }
+
+      @container editor (width < 1100px) {
+        .ai-dock {
+          flex-basis: 300px;
+        }
       }
 
       .panes {
@@ -484,6 +505,9 @@ export class Editor extends LitElement {
    */
   @state() private splitLeaving = false
   @state() private splitSurface: SplitSurface = 'files'
+  /** The assistant dock, a right-hand column beside the workspace. */
+  @state() private aiEnabled = false
+  @state() private aiDockOpen = false
   @state() private secondaryDoc: SecondaryDocState | null = null
   @state() private textMenu: { x: number; y: number; secondary: boolean } | null = null
   @state() private findPane: 'primary' | 'secondary' = 'primary'
@@ -511,6 +535,15 @@ export class Editor extends LitElement {
     this.settingsStore = SettingsStore.getInstance()
     this.panelOrientation = this.settingsStore.get('appearance.panelOrientation', 'vertical') as
       'horizontal' | 'vertical'
+    this.aiEnabled = this.settingsStore.get('ai.enabled', false) ?? false
+    // Subscribed rather than read once: turning AI on in Settings should make
+    // the dock reachable immediately, not after a restart.
+    this.settingsUnsubs.push(
+      this.settingsStore.subscribe('ai', (v) => {
+        this.aiEnabled = Boolean((v as { enabled?: boolean } | undefined)?.enabled)
+        if (!this.aiEnabled) this.fileState.toggleAiDock(false)
+      })
+    )
     this.settingsUnsubs.push(
       this.settingsStore.subscribe('appearance.panelOrientation', (v) => {
         this.panelOrientation = (v as 'horizontal' | 'vertical') ?? 'horizontal'
@@ -533,8 +566,8 @@ export class Editor extends LitElement {
     this.viewMode = current.viewMode === 'wysiwyg' ? 'live' : current.viewMode
     this.splitActive = current.splitActive
     this.splitSurface = current.splitSurface
+    this.aiDockOpen = current.aiDockOpen
     this.secondaryDoc = current.secondaryDoc
-
     this.unsubscribe = this.fileState.subscribe((s) => {
       const normalizedMode = s.viewMode === 'wysiwyg' ? 'live' : s.viewMode
       const modeChanged = this.viewMode !== normalizedMode
@@ -550,6 +583,7 @@ export class Editor extends LitElement {
       this.content = s.content
       this.viewMode = normalizedMode
       this.splitActive = s.splitActive
+      this.aiDockOpen = s.aiDockOpen
       if (wasSplitActive && !s.splitActive) this.splitLeaving = true
       else if (s.splitActive) this.splitLeaving = false
       if (!this.splitLeaving) {
@@ -1523,6 +1557,14 @@ export class Editor extends LitElement {
               : ''
           }
         </writemd-workspace>
+        ${
+          this.aiDockOpen && this.aiEnabled
+            ? html`<writemd-ai-dock
+                class="ai-dock"
+                @ai-close=${() => this.fileState.toggleAiDock(false)}
+              ></writemd-ai-dock>`
+            : ''
+        }
         ${
           this.textMenu && (this.textMenu.secondary ? this.secondaryEditorView : this.editorView)
             ? html`<writemd-text-menu

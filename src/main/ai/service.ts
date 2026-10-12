@@ -125,6 +125,52 @@ export function setEventEmitter(fn: Emitter | null): void {
 // ---------------------------------------------------------------- turns
 
 /**
+ * Translate a turn's domain event into the flat shape the renderer expects.
+ *
+ * They are not the same shape, and spreading one into the other is how a feature
+ * ends up silently doing nothing: `TurnEvent` carries a nested `outcome` and a
+ * nested `apply`, the bridge contract wants `changed`, `skipped`, `files` and
+ * `blocks` at the top level. The renderer saw events whose fields were all
+ * `undefined`, rendered an empty transcript, and changed the file anyway -
+ * every layer green, nothing visible.
+ *
+ * The translation lives here because this is the only place that knows both
+ * sides. Anything the renderer cannot act on is dropped rather than passed
+ * through as undefined.
+ */
+function toBridgeEvent(event: TurnEvent): Record<string, unknown> | null {
+  switch (event.type) {
+    case 'text':
+      return { type: 'text', delta: event.delta }
+    case 'proposal':
+      return {
+        type: 'proposal',
+        files: event.apply.proposals.map((p) => p.path),
+        blocks: event.apply.proposals.reduce((n, p) => n + p.blocks.length, 0),
+        skipped: event.apply.skippedPaths
+      }
+    case 'applied':
+      return {
+        type: 'applied',
+        changed: event.outcome.applied.map((c) => ({
+          id: c.journalId,
+          path: c.path,
+          kind: c.kind,
+          createdAt: Date.now(),
+          revertedAt: null
+        })),
+        skipped: event.outcome.skipped
+      }
+    case 'answer':
+      return { type: 'answer', text: event.text }
+    case 'error':
+      return { type: 'error', message: event.message }
+    case 'done':
+      return event.text ? { type: 'done', text: event.text } : { type: 'done' }
+  }
+}
+
+/**
  * Start a turn and stream it out.
  *
  * Returns as soon as the turn is under way; everything after arrives as an
@@ -153,7 +199,8 @@ export async function startTurn(requestId: string, input: AiSendInput): Promise<
   const history = (existing?.messages ?? []).map((m) => ({ role: m.role, content: m.content }))
 
   const send = (event: TurnEvent): void => {
-    emit?.({ requestId, ...event } as unknown as Record<string, unknown>)
+    const payload = toBridgeEvent(event)
+    if (payload) emit?.({ requestId, ...payload })
   }
 
   let settled = false

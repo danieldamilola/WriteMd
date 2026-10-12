@@ -2,7 +2,10 @@
 
 **Effective Date:** September 20, 2026
 
-WriteMd is built with a privacy-first, local-only architecture. This Privacy Policy explains how your data is handled when you use the WriteMd application.
+WriteMd is built with a privacy-first, local-first architecture. This Privacy
+Policy explains how your data is handled when you use the WriteMd application.
+Everything is local unless you deliberately turn on the AI assistant, and then
+only what you send it leaves your machine.
 
 ## 1. Local Data Storage
 
@@ -13,11 +16,34 @@ We do not have access to your documents, and we do not synchronize, collect, or 
 
 WriteMd does **not** include any telemetry, analytics tracking, or advertising trackers. What you write is completely private.
 
-## 3. No External Data Processing
+## 3. The Optional AI Assistant
 
-WriteMd sends your documents nowhere. There is no AI assistant, no cloud
-processing, and no third-party API integration of any kind. Your notes are read
-and written only on your own machine.
+WriteMd has an AI assistant you can turn on. It is **off by default** and does
+nothing until you turn it on and enter your own API key. We do not provide the
+model and do not proxy your requests.
+
+**What leaves your machine.** When you send a message, WriteMd sends to the
+endpoint you configured: your message, the document you have open, your current
+selection if there is one, and any files you explicitly referenced with `@` or
+attached. Your other open tabs are sent as file names only, never their contents.
+Chat history you configured to replay is included.
+
+**What does not leave your machine.** Your API key is stored encrypted with your
+operating system's keychain (Windows Credential Manager, macOS Keychain, or
+Linux Secret Service) in its own file, never in `config.json` and never readable
+by the app's interface. Files the assistant changes are written to your disk
+like any other save, and every change it makes can be undone from the assistant
+panel.
+
+**Who sees it.** Whoever operates the endpoint you chose. If you want your notes
+to stay on your machine, point the endpoint at a local provider such as Ollama or
+LM Studio. WriteMd refuses to send an API key over unencrypted `http://` to a
+remote host, but a keyless local endpoint over your LAN is allowed so local models
+work.
+
+**File access.** The assistant can read, create, edit and delete any file your
+user account can, when you ask it to. It works on files outside the vault too.
+Every file it changes is listed in the panel with its own undo button.
 
 ## 4. Updates
 

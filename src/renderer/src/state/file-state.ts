@@ -152,6 +152,8 @@ export interface FileStateData {
   quickTogglePair: [ViewMode, ViewMode]
   splitActive: boolean
   splitSurface: SplitSurface
+  /** Right-hand assistant dock. Openable only while `ai.enabled` is set. */
+  aiDockOpen: boolean
   secondaryDoc: SecondaryDocState | null
   conflict: ConflictInfo | null
   tabs: TabDoc[]
@@ -172,6 +174,7 @@ export class FileState {
     quickTogglePair: ['live', 'reading'],
     splitActive: false,
     splitSurface: 'files',
+    aiDockOpen: false,
     secondaryDoc: null,
     conflict: null,
     tabs: [],
@@ -1134,6 +1137,20 @@ export class FileState {
 
   setSplitSurface(surface: SplitSurface): void {
     this.state = { ...this.state, splitActive: true, splitSurface: surface }
+    this.notify()
+  }
+
+  /**
+   * Show or hide the assistant dock.
+   *
+   * Lives here rather than in the Editor because the command that toggles it is
+   * dispatched from the app shell, and the split pane's visibility works the
+   * same way - a view concern the command layer has to be able to reach.
+   */
+  toggleAiDock(open?: boolean): void {
+    const next = open ?? !this.state.aiDockOpen
+    if (next === this.state.aiDockOpen) return
+    this.state = { ...this.state, aiDockOpen: next }
     this.notify()
   }
 

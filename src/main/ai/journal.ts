@@ -232,6 +232,22 @@ export class ChangeJournal {
         rmSync(entry.path, { force: true })
       } else {
         mkdirSync(dirname(entry.path), { recursive: true })
+        // Deliberately NOT temp-and-rename, which is what every other write in
+        // this app does.
+        //
+        // An atomic replace on Windows deletes the target and renames a fresh
+        // file into place. The new file gets the permissions of the process
+        // that made it, not the ones the user gave the original - so undoing a
+        // change to a note inside a synced or access-controlled folder quietly
+        // strips its ACL. The note then behaves differently from every other
+        // file around it, and nothing on screen says so.
+        //
+        // The cost is a window where a crash mid-write truncates the file. That
+        // window only exists on the restore path, where the content being
+        // written is by definition a copy of something that was already there
+        // and the journal still holds it. A restored-then-crashed note is
+        // recoverable from the journal; a note that lost its folder permissions
+        // is not something the user can see or undo.
         writeFileSync(entry.path, entry.before, 'utf-8')
       }
     } catch {

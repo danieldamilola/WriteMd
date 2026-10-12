@@ -56,6 +56,12 @@ export const COMMANDS: CommandDef[] = [
     category: 'View',
     defaultBinding: 'Ctrl+Shift+P'
   },
+  {
+    id: 'toggle-ai',
+    title: 'Toggle AI Assistant',
+    category: 'View',
+    defaultBinding: 'Ctrl+Alt+A'
+  },
   { id: 'open-settings', title: 'Open Settings', category: 'App', defaultBinding: 'Ctrl+,' },
   {
     id: 'command-palette',

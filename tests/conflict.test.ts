@@ -31,6 +31,7 @@ const BASE: FileStateData = {
   quickTogglePair: ['live', 'reading'],
   splitActive: false,
   splitSurface: 'files',
+  aiDockOpen: false,
   secondaryDoc: null,
   conflict: {
     path: 'C:/docs/note.md',

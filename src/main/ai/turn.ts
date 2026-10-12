@@ -199,7 +199,13 @@ export async function* runTurn(request: RunTurnRequest): AsyncGenerator<TurnEven
     return
   }
   yield { type: 'applied', outcome }
-  yield { type: 'done', text }
+  // The text carried forward is the model's prose, not its protocol. The
+  // streamed deltas were provisional; this is the authoritative version, and
+  // the same one that goes into the saved session. Handing back the raw
+  // response would put a wall of <<<<<<< SEARCH in the transcript and in
+  // every saved conversation, which is not something a person wrote or wants
+  // to read back.
+  yield { type: 'done', text: parsed.explanation || 'Applied the requested change.' }
 }
 
 /** Non-streaming convenience wrapper, for tests and for the inline actions. */
