@@ -4,13 +4,21 @@ import { unsafeHTML } from 'lit/directives/unsafe-html.js'
 import { api } from '../../api'
 import { FileState } from '../../state/file-state'
 import { createDocumentMarkdownIt } from '../../utils/markdown'
-import { displayTitle, normalizePathExact, shortPath } from '../../utils/links'
+import { displayTitle, shortPath } from '../../utils/links'
+import { sameFilePath } from '../../utils/paths'
+import { navigateLink } from '../../utils/navigate'
 import { scrollbarStyles } from '../scrollbars'
-import { chromeIcon } from '../../design/icons'
-import { TurnController, type TurnMessage, type TurnState } from './turn-controller'
+import { aiActivityStyles, aiThinkingLabel, chromeIcon } from '../../design/icons'
+import { controlStyles } from '../../design/controls'
+import type { TurnMessage, TurnState } from './turn-controller'
+import { conversationController, connectConversation, disconnectConversation } from './conversation'
+import { makeSessionId } from '../../../../shared/ai/sessions'
+import { takeAiHandoff, type AiHandoff } from './handoff'
+import { collectReferences } from './references'
 import type { AiSendInput, ChangeView, SessionView, SkippedView, UndoOutcomeView } from './types'
-import type { ComposerSendDetail } from './Composer'
+import type { AiComposer, ComposerSendDetail } from './Composer'
 import './Composer'
+import './HistoryPicker'
 
 /**
  * How often the streaming message is re-parsed while text is arriving.
@@ -24,13 +32,12 @@ import './Composer'
 const STREAM_REPARSE_MS = 160
 
 /** Characters of a document selection kept as context for the next turn. */
-const MAX_SELECTION_CHARS = 20_000
 
-/** Files named with `@` in one prompt, read and sent as reference material. */
-const MAX_REFERENCES = 6
-
-/** Characters of reference text. Past this the model is past what it can use. */
-const MAX_REFERENCE_CHARS = 120_000
+/*
+ * The `@` reference limits moved to `references.ts` with the resolver they
+ * belong to, so the floating bar and this panel cannot drift apart on how many
+ * notes one prompt may pull in.
+ */
 
 interface UndoNote {
   text: string
@@ -95,6 +102,10 @@ export class AiDock extends LitElement {
   @state() private selection = ''
   @state() private docPath: string | null = null
   @state() private undoNotes: Record<string, UndoNote> = {}
+  @state() private copiedMessage = ''
+  @state() private preparing = false
+  @state() private selectionPath: string | null = null
+  @state() private pendingUndo = new Set<string>()
 
   @query('.thread') private thread!: HTMLElement | null
 
@@ -103,7 +114,7 @@ export class AiDock extends LitElement {
    * request id this generated, which is the only way to exercise the
    * stale-stream guard without a socket.
    */
-  readonly turns = new TurnController()
+  readonly turns = conversationController()
 
   private md = createDocumentMarkdownIt()
   private fileState = FileState.getInstance()
@@ -113,18 +124,40 @@ export class AiDock extends LitElement {
   private stale = new Set<string>()
   private streamTimer: ReturnType<typeof setTimeout> | null = null
   private scrollTimer: ReturnType<typeof setTimeout> | null = null
+  private followStream = true
+  private contextVersion = 0
+  private messageContexts = new Map<string, string | null>()
 
   connectedCallback(): void {
     super.connectedCallback()
+    connectConversation(this.turns)
     this.unsubs.push(this.turns.subscribe((state) => this.applyState(state)))
+    this.applyState(this.turns.getState())
     this.unsubs.push(
       this.fileState.subscribe(() => {
-        const path = this.fileState.getState().path
-        if (path !== this.docPath) this.docPath = path
+        const state = this.fileState.getState()
+        const path = state.path
+        if (path !== this.docPath) {
+          this.docPath = path
+          this.selection = ''
+          this.selectionPath = null
+        } else if (
+          this.selectionPath &&
+          !sameFilePath(this.selectionPath, path) &&
+          !sameFilePath(this.selectionPath, state.secondaryDoc?.path)
+        ) {
+          this.selection = ''
+          this.selectionPath = null
+        }
       })
     )
     this.sessionId = this.turns.sessionId
     this.docPath = this.fileState.getState().path
+    // A conversation handed over from the floating bar, taken once so that
+    // closing and reopening the panel does not resurrect it.
+    const handoff = takeAiHandoff()
+    if (handoff && (!handoff.sessionId || handoff.sessionId === this.turns.sessionId))
+      void this.updateComplete.then(() => this.adoptHandoff(handoff))
     // The editor is a CodeMirror view, which is why the selection is read from
     // the document rather than being pushed here: there is no event to take it
     // from, and it is only meaningful at the moment of sending.
@@ -133,6 +166,7 @@ export class AiDock extends LitElement {
   }
 
   disconnectedCallback(): void {
+    this.contextVersion++
     for (const unsub of this.unsubs) unsub()
     this.unsubs = []
     document.removeEventListener('selectionchange', this.onSelectionChange)
@@ -140,23 +174,37 @@ export class AiDock extends LitElement {
     this.streamTimer = null
     if (this.scrollTimer !== null) clearTimeout(this.scrollTimer)
     this.scrollTimer = null
-    this.turns.dispose()
+    disconnectConversation(this.turns)
     super.disconnectedCallback()
   }
 
   private onSelectionChange = (): void => {
     const selection = document.getSelection()
-    if (!selection || selection.isCollapsed || selection.rangeCount === 0) return
-    const node = selection.anchorNode
-    // A selection inside this panel is the user reading a reply, not a target
-    // to send, and its text is the panel's own text.
-    if (node && (node === this || this.contains(node))) return
+    if (!selection || selection.rangeCount === 0) return
+    let node: Node | null = selection.anchorNode
+    let inEditor = false
+    let inSecondary = false
+    while (node) {
+      if (node === this) return
+      if (node instanceof Element && node.tagName === 'WRITEMD-EDITOR') inEditor = true
+      if (node instanceof Element && node.id === 'secondary-cm-wrapper') inSecondary = true
+      node = node.parentNode ?? (node instanceof ShadowRoot ? node.host : null)
+    }
+    if (!inEditor) return
+    if (selection.isCollapsed) {
+      this.selection = ''
+      return
+    }
     const text = selection.toString().trim()
     if (!text) return
-    this.selection = text.slice(0, MAX_SELECTION_CHARS)
+    this.selection = text
+    this.selectionPath = inSecondary
+      ? (this.fileState.getState().secondaryDoc?.path ?? null)
+      : this.docPath
   }
 
   private applyState(state: TurnState): void {
+    const settled = this.busy && !state.busy
     this.messages = state.messages
     this.busy = state.busy
     this.error = state.error
@@ -170,6 +218,7 @@ export class AiDock extends LitElement {
     }
     if (state.busy) this.scheduleStreamReparse()
     else this.flushStreamReparse()
+    if (settled) void this.refreshSessions()
   }
 
   private scheduleStreamReparse(): void {
@@ -211,97 +260,164 @@ export class AiDock extends LitElement {
     void this.startTurn(detail)
   }
 
-  private async startTurn(detail: ComposerSendDetail): Promise<void> {
+  /**
+   * Adopt a conversation staged by the floating bar.
+   *
+   * "Open full chat" moved the user from a one-shot question into a conversation
+   * about the same thing, so the panel opens holding what was already said.
+   * Opening it empty made the handoff look like the bar had thrown the exchange
+   * away, and the natural next thing - asking a follow-up - lost the context.
+   */
+  adoptHandoff(handoff: AiHandoff): void {
+    this.contextVersion++
+    this.preparing = false
+    // The selection the bar was scoped to, restored from the handoff rather than
+    // read from the DOM: the bar has focus by now and the document selection
+    // has already been taken away from the user.
+    this.selection = handoff.selection ?? ''
+    this.selectionPath = handoff.selection ? handoff.path : null
+    this.renderRoot.querySelector<AiComposer>('writemd-ai-composer')?.resetDraft()
+    this.followStream = true
+    this.html.clear()
+    this.messageContexts.clear()
+    this.stale.clear()
+    this.undoNotes = {}
+    this.pendingUndo = new Set()
+    if (handoff.sessionId !== this.turns.sessionId)
+      this.turns.load({
+        id: handoff.sessionId ?? makeSessionId(),
+        title:
+          handoff.messages.find((message) => message.role === 'user')?.content.slice(0, 60) ??
+          'Chat',
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        messages: handoff.messages
+      })
+    this.sessionId = this.turns.sessionId
+    if (handoff.path) this.docPath = handoff.path
+    this.applyState(this.turns.getState())
+    void this.refreshSessions()
+  }
+
+  /** Context-menu actions are isolated from the rest of the note and prior chats. */
+  async runSelectionAction(input: {
+    text: string
+    path: string | null
+    intent: 'explain' | 'summarize'
+  }): Promise<void> {
+    if (!input.text.trim()) return
+    this.onNewChat()
+    this.setSelectionContext(input.text, input.path ?? undefined)
+    await this.startTurn(
+      {
+        text:
+          input.intent === 'explain'
+            ? 'Explain only the highlighted text.'
+            : 'Summarize only the highlighted text.',
+        attachments: []
+      },
+      true
+    )
+  }
+
+  private async startTurn(detail: ComposerSendDetail, selectionOnly = false): Promise<void> {
+    if (this.busy || this.preparing || !detail.text.trim()) return
+    const version = ++this.contextVersion
+    this.preparing = true
     const state = this.fileState.getState()
-    const openDocument = state.path ? { path: state.path, content: state.content } : null
+    const secondary = state.secondaryDoc
+    const openDocument =
+      this.selectionPath && secondary?.path && sameFilePath(this.selectionPath, secondary.path)
+        ? { path: secondary.path, content: secondary.content }
+        : state.path
+          ? { path: state.path, content: state.content }
+          : null
     const input: AiSendInput = {
       sessionId: this.sessionId,
+      selectionOnly,
       userText: detail.text,
-      document: openDocument,
+      document: selectionOnly ? null : openDocument,
       selection: this.selection || null,
-      references: await this.collectReferences(detail.text),
-      attachments: detail.attachments,
-      openPaths: state.tabs.map((tab) => tab.path).filter((path): path is string => !!path)
+      references: selectionOnly ? [] : await collectReferences(detail.text),
+      attachments: selectionOnly ? [] : detail.attachments,
+      openPaths: selectionOnly
+        ? []
+        : [
+            ...new Set(
+              [...state.tabs.map((tab) => tab.path), secondary?.path].filter(
+                (path): path is string => !!path
+              )
+            )
+          ]
     }
+    if (version !== this.contextVersion || !this.isConnected) return
+    this.preparing = false
+    this.followStream = true
     // The selection was context for that turn. Keeping it would have the next
     // message silently carry text the user has already moved on from.
     this.selection = ''
-    await this.turns.start(input)
-  }
-
-  /**
-   * Read the files the prompt names with `@`, so "compare these two" means
-   * something to the model instead of arriving as two bare paths.
-   *
-   * Bounded, because a prompt naming twenty files would otherwise send twenty
-   * documents and hit a context limit with nothing to show for it, which looks
-   * like the assistant being broken.
-   */
-  private async collectReferences(
-    userText: string
-  ): Promise<Array<{ path: string; content: string }>> {
-    const named = new Set<string>()
-    for (const match of userText.matchAll(/(?:^|\s)@([^\s@]+)/g)) {
-      named.add(match[1])
-      if (named.size >= MAX_REFERENCES) break
-    }
-    if (!named.size) return []
-    let base = ''
-    try {
-      base = (await api()?.vault?.getPath?.()) ?? ''
-    } catch (err) {
-      console.error('Could not read the vault path:', err)
-    }
-    const root = base.replace(/[\\/]+$/, '')
-    const out: Array<{ path: string; content: string }> = []
-    let chars = 0
-    for (const relative of named) {
-      try {
-        const result = await api()?.file?.read?.(normalizePathExact(`${root}/${relative}`))
-        if (!result?.content) continue
-        out.push({ path: relative, content: result.content.slice(0, MAX_REFERENCE_CHARS) })
-        chars += result.content.length
-        if (chars >= MAX_REFERENCE_CHARS) break
-      } catch (err) {
-        console.error(`Could not read the referenced file ${relative}:`, err)
-      }
-    }
-    return out
+    this.selectionPath = null
+    const sending = this.turns.start(input)
+    if (this.turns.requestId)
+      this.messageContexts.set(`${this.turns.requestId}:assistant`, openDocument?.path ?? null)
+    await sending
   }
 
   private onStop = (): void => {
+    this.contextVersion++
+    this.preparing = false
     this.turns.cancel()
   }
 
   private onNewChat = (): void => {
+    this.contextVersion++
+    this.preparing = false
+    this.selection = ''
+    this.selectionPath = null
+    this.renderRoot.querySelector<AiComposer>('writemd-ai-composer')?.resetDraft()
+    this.followStream = true
     this.turns.reset()
     this.html.clear()
+    this.messageContexts.clear()
     this.stale.clear()
     this.undoNotes = {}
+    this.pendingUndo = new Set()
     this.sessionId = this.turns.sessionId
     void this.refreshSessions()
   }
 
-  private onPickSession = (e: Event): void => {
-    const id = (e.target as HTMLSelectElement).value
+  private onPickSession = (e: CustomEvent<{ id: string }>): void => {
+    const id = e.detail.id
+    if (id === this.sessionId) return
     if (!id) {
       this.onNewChat()
       return
     }
     const known = this.sessions.find((session) => session.id === id)
-    this.turns.load(known ?? { id, title: 'Chat', createdAt: 0, updatedAt: 0 })
+    this.contextVersion++
+    this.preparing = false
+    this.selection = ''
+    this.selectionPath = null
+    this.renderRoot.querySelector<AiComposer>('writemd-ai-composer')?.resetDraft()
+    this.followStream = true
     this.html.clear()
+    this.messageContexts.clear()
     this.stale.clear()
     this.undoNotes = {}
+    this.pendingUndo = new Set()
+    this.turns.load(known ?? { id, title: 'Chat', createdAt: 0, updatedAt: 0 })
+    for (const message of this.messages)
+      this.messageContexts.set(message.id, known?.contextFile ?? null)
     this.sessionId = id
     void this.restoreChanges(id)
   }
 
-  /** Undo history for a reopened conversation. Its messages are not loaded. */
+  /** Restore the saved conversation's per-file undo history. */
   private async restoreChanges(sessionId: string): Promise<void> {
     try {
       const changes = await api()?.ai?.listChanges?.(sessionId)
-      if (changes) this.turns.adoptChanges(changes)
+      if (changes && this.isConnected && sessionId === this.sessionId)
+        this.turns.adoptChanges(changes, sessionId)
     } catch (err) {
       console.error('Could not load the change history:', err)
     }
@@ -310,7 +426,7 @@ export class AiDock extends LitElement {
   private async refreshSessions(): Promise<void> {
     try {
       const sessions = await api()?.ai?.listSessions?.()
-      if (sessions) this.sessions = sessions
+      if (sessions && this.isConnected) this.sessions = sessions
     } catch (err) {
       // No history is a normal state for a fresh vault, not something worth
       // showing in place of the transcript.
@@ -318,18 +434,92 @@ export class AiDock extends LitElement {
     }
   }
 
+  /**
+   * Forget a saved conversation.
+   *
+   * Deleting the one on screen also starts a new chat: leaving a transcript on
+   * screen whose history no longer exists means the next message is saved under a
+   * session id that is gone, and the conversation reappears when the list is read.
+   */
+  private onDeleteSession = (e: CustomEvent<{ id: string }>): void => {
+    const id = e.detail.id
+    if (this.pendingUndo.has(id)) return
+    this.pendingUndo = new Set([...this.pendingUndo, id])
+    void (async () => {
+      try {
+        await api()?.ai?.deleteSession?.(id)
+      } catch (err) {
+        console.error('Could not delete the AI conversation:', err)
+      } finally {
+        this.pendingUndo.delete(id)
+      }
+      if (id === this.sessionId) this.onNewChat()
+      await this.refreshSessions()
+    })()
+  }
+
   private async undo(change: ChangeView): Promise<void> {
+    if (this.pendingUndo.has(change.id)) return
+    const sessionId = this.sessionId
+    this.pendingUndo = new Set([...this.pendingUndo, change.id])
     let outcome: UndoOutcomeView | undefined
     try {
       outcome = await api()?.ai?.undoChange?.(change.id)
     } catch (err) {
       console.error(`Could not revert ${change.path}:`, err)
     }
+    if (!this.isConnected || sessionId !== this.sessionId) return
+    this.pendingUndo = new Set([...this.pendingUndo].filter((id) => id !== change.id))
     this.undoNotes = { ...this.undoNotes, [change.id]: undoNote(outcome) }
   }
 
   private onClose = (): void => {
     this.dispatchEvent(new CustomEvent('ai-close', { bubbles: true, composed: true }))
+  }
+
+  private onOpenFloating = (): void => {
+    this.dispatchEvent(
+      new CustomEvent('ai-open-floating', {
+        detail: { path: this.selectionPath ?? this.docPath },
+        bubbles: true,
+        composed: true
+      })
+    )
+  }
+
+  private suggest(text: string): void {
+    this.renderRoot.querySelector<AiComposer>('writemd-ai-composer')?.setPrompt(text)
+  }
+
+  setSelectionContext(text: string, documentPath?: string): void {
+    this.selection = text
+    this.selectionPath = documentPath ?? this.docPath
+    void this.updateComplete.then(() => {
+      this.renderRoot.querySelector<AiComposer>('writemd-ai-composer')?.focus()
+    })
+  }
+
+  private async copyMessage(message: TurnMessage): Promise<void> {
+    try {
+      await navigator.clipboard.writeText(message.text)
+      this.copiedMessage = message.id
+    } catch {
+      this.error = 'Could not copy the reply. Select the text and copy it manually.'
+    }
+  }
+
+  private onTranscriptClick = (event: MouseEvent): void => {
+    const target = event.target instanceof Element ? event.target.closest('a[href]') : null
+    if (!target) return
+    event.preventDefault()
+    const messageId = target.closest<HTMLElement>('[data-message-id]')?.dataset.messageId ?? ''
+    void navigateLink(target.getAttribute('href') ?? '', {
+      sourcePath: this.messageContexts.has(messageId)
+        ? (this.messageContexts.get(messageId) ?? null)
+        : this.docPath,
+      openFile: (path) => this.fileState.openFile(path),
+      getApi: api
+    })
   }
 
   /** The conversation being written, plus the saved ones to switch to. */
@@ -343,19 +533,19 @@ export class AiDock extends LitElement {
   }
 
   render(): unknown {
+    const contextPath = this.selection && this.selectionPath ? this.selectionPath : this.docPath
     return html`
       <div class="head">
-        <span class="brand">${chromeIcon('sparkle', 16)}<span>AI</span></span>
-        <select class="sessions" aria-label="Conversation" @change=${this.onPickSession}>
-          ${this.sessionOptions.map(
-            (session) =>
-              html`<option value=${session.id} ?selected=${session.id === this.sessionId}>
-                ${session.title}
-              </option>`
-          )}
-        </select>
+        <span class="brand">Assistant</span>
+        <span class="head-spacer"></span>
+        <writemd-ai-history-picker
+          .sessions=${this.sessionOptions}
+          .currentId=${this.sessionId}
+          @session-pick=${this.onPickSession}
+          @session-delete=${this.onDeleteSession}
+        ></writemd-ai-history-picker>
         <button class="icon" aria-label="New chat" title="New chat" @click=${this.onNewChat}>
-          ${chromeIcon('plus', 16)}
+          ${chromeIcon('plus')}
         </button>
         <button
           class="icon"
@@ -363,37 +553,99 @@ export class AiDock extends LitElement {
           title="Close assistant"
           @click=${this.onClose}
         >
-          ${chromeIcon('x', 16)}
+          ${chromeIcon('x')}
         </button>
       </div>
       <div class="context">
         ${
-          this.docPath
-            ? html`<span class="doc" title=${this.docPath}>${displayTitle(this.docPath)}</span>`
+          contextPath
+            ? html`<span class="doc" title=${`Current note: ${contextPath}`}
+                >${chromeIcon('file', 14)}<span>${displayTitle(contextPath)}</span></span
+              >`
             : html`<span class="doc none">No document open</span>`
         }
+        <button class="icon floating-link" @click=${this.onOpenFloating}>
+          Open in floating bar
+        </button>
         ${
           this.selection
             ? html`<span class="chip" title=${`${this.selection.length} characters selected`}>
-                selection · ${this.selection.length}
+                Selection · ${this.selection.length}
+                <button
+                  class="clear-selection"
+                  aria-label="Remove selection from context"
+                  @click=${() => {
+                    this.selection = ''
+                    this.selectionPath = null
+                  }}
+                >
+                  ${chromeIcon('x', 12)}
+                </button>
               </span>`
             : null
         }
       </div>
-      <div class="thread">
+      <div
+        class="thread"
+        role="log"
+        aria-label="Conversation"
+        aria-live="polite"
+        aria-busy=${this.busy ? 'true' : 'false'}
+        @click=${this.onTranscriptClick}
+        @scroll=${() => {
+          const el = this.thread
+          if (el) this.followStream = el.scrollHeight - el.scrollTop - el.clientHeight < 48
+        }}
+      >
         ${
           this.messages.length === 0
             ? html`<div class="empty">
-                Ask about the open note, or select something and ask for a change.
+                <h2>${this.docPath ? 'Ask about your note' : 'Start a conversation'}</h2>
+                <p>
+                  ${this.docPath ? 'Summarize, rewrite, or work through an idea.' : 'Write a prompt or reference a note with @.'}
+                </p>
+                <div class="suggestions">
+                  <button
+                    @click=${() => this.suggest(this.docPath ? 'Summarize the key points in this note.' : 'Help me outline a new note about ')}
+                  >
+                    ${chromeIcon('file', 16)}${this.docPath ? 'Summarize this note' : 'Start an outline'}
+                  </button>
+                  <button
+                    @click=${() => this.suggest(this.docPath ? 'Review this note and suggest ways to improve its clarity. Do not edit it yet.' : 'Help me brainstorm ideas for ')}
+                  >
+                    ${chromeIcon('pencil', 16)}${this.docPath ? 'Improve my writing' : 'Explore an idea'}
+                  </button>
+                </div>
               </div>`
             : this.messages.map((message) => this.renderMessage(message))
         }
         ${this.renderChanges()}
       </div>
-      ${this.error ? html`<div class="error" role="alert">${this.error}</div>` : null}
+      ${
+        this.error
+          ? html`<div class="error" role="alert">
+              <span>${this.error}</span>${
+                this.messages.some((message) => message.role === 'user')
+                  ? html`<button
+                      class="retry"
+                      @click=${() => {
+                        const last = [...this.messages]
+                          .reverse()
+                          .find((message) => message.role === 'user')
+                        if (last) this.suggest(last.text)
+                      }}
+                    >
+                      Edit and retry
+                    </button>`
+                  : null
+              }
+            </div>`
+          : null
+      }
       <writemd-ai-composer
-        .busy=${this.busy}
+        .busy=${this.busy || this.preparing}
         .hasSelection=${!!this.selection}
+        .started=${this.messages.length > 0}
         @composer-send=${this.send}
         @composer-stop=${this.onStop}
       ></writemd-ai-composer>
@@ -402,15 +654,29 @@ export class AiDock extends LitElement {
 
   private renderMessage(message: TurnMessage): unknown {
     if (message.role === 'user') {
-      return html`<div class="msg user"><div class="bubble">${message.text}</div></div>`
+      return html`<div class="msg user">
+        <span class="role">You</span>
+        <div class="bubble">${message.text}</div>
+      </div>`
     }
     const live = this.busy && message.id === this.messages[this.messages.length - 1]?.id
     if (live && !message.text.trim()) {
-      return html`<div class="msg assistant"><div class="bubble idle">Thinking…</div></div>`
+      return html`<div class="msg assistant">
+        <div
+          class="thinking-indicator"
+          role="status"
+          title=${this.turns.getState().status || 'Thinking'}
+        >
+          ${aiThinkingLabel()}
+          <span class="status-hint">${this.turns.getState().status || 'Thinking'}</span>
+        </div>
+      </div>`
     }
+    if (!message.text.trim()) return null
     return html`
-      <div class="msg assistant">
+      <div class="msg assistant" data-message-id=${message.id}>
         <div class="bubble md">${unsafeHTML(this.assistantHtml(message))}</div>
+        ${!live ? html`<button class="copy" aria-label="Copy reply" @click=${() => void this.copyMessage(message)}>${this.copiedMessage === message.id ? 'Copied' : 'Copy'}</button>` : null}
       </div>
     `
   }
@@ -441,11 +707,11 @@ export class AiDock extends LitElement {
               <span class="path" title=${change.path}>${shortPath(change.path)}</span>
               <button
                 class="undo"
-                ?disabled=${!!note?.reverted}
+                ?disabled=${this.pendingUndo.has(change.id) || !!note?.reverted || change.revertedAt !== null}
                 aria-label=${`Undo the change to ${change.path}`}
                 @click=${() => void this.undo(change)}
               >
-                Undo
+                ${this.pendingUndo.has(change.id) ? 'Undoing…' : change.revertedAt !== null ? 'Reverted' : 'Undo'}
               </button>
             </div>
             ${note ? html`<div class="note">${note.text}</div>` : null}
@@ -485,161 +751,257 @@ export class AiDock extends LitElement {
   private scrollToBottom(): void {
     const el = this.thread
     if (!el) return
-    if (el.scrollHeight - el.scrollTop - el.clientHeight > 24) return
+    if (!this.followStream) return
     el.scrollTop = el.scrollHeight
   }
 
   static styles = [
+    aiActivityStyles,
     scrollbarStyles,
+    controlStyles,
     css`
       :host {
         display: flex;
         flex-direction: column;
         height: 100%;
         min-height: 0;
-        background: var(--bg);
+        background: var(--editor-surface);
         color: var(--text);
         font-family: var(--font-ui);
         box-sizing: border-box;
       }
 
+      *,
+      *::before,
+      *::after {
+        box-sizing: border-box;
+      }
       .head {
         display: flex;
         align-items: center;
-        gap: 6px;
+        gap: 4px;
         flex-shrink: 0;
-        padding: 6px 8px;
-        border-bottom: 1px solid var(--border-subtle);
+        height: 40px;
+        padding: 4px 12px;
       }
-
       .brand {
         display: inline-flex;
         align-items: center;
-        gap: 6px;
-        font-size: 12px;
-        font-weight: 600;
+        gap: 8px;
+        font-size: 13px;
+        font-weight: 500;
+        color: var(--text-secondary);
+      }
+      .thinking-indicator {
+        position: relative;
+        display: flex;
+        align-items: center;
+        min-height: 20px;
         color: var(--text);
       }
-
-      .sessions {
+      .thinking-indicator svg {
+        display: block;
+      }
+      .status-hint {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        padding: 0;
+        margin: -1px;
+        overflow: hidden;
+        clip-path: inset(50%);
+        white-space: nowrap;
+        border: 0;
+      }
+      .head-spacer {
         flex: 1;
-        min-width: 0;
-        font: inherit;
-        font-size: 12px;
-        color: var(--text-muted);
-        background: transparent;
-        border: 1px solid transparent;
-        border-radius: 5px;
-        padding: 3px 4px;
       }
-
-      .sessions:hover {
-        border-color: var(--border-subtle);
-        color: var(--text);
-      }
-
       .icon {
         display: inline-flex;
         align-items: center;
         justify-content: center;
-        width: 24px;
-        height: 24px;
+        width: 28px;
+        height: 28px;
+        padding: 4px;
         border: none;
-        border-radius: 5px;
+        border-radius: var(--radius-sm);
         background: none;
-        color: var(--text-muted);
-        cursor: pointer;
+        color: var(--text-secondary);
         flex-shrink: 0;
       }
-
       .icon:hover {
         background: var(--bg-hover);
         color: var(--text);
       }
-
+      .floating-link {
+        width: auto;
+        height: 24px;
+        padding: 4px;
+        margin-left: auto;
+        font: inherit;
+        font-size: 11px;
+      }
       .context {
         display: flex;
         align-items: center;
-        gap: 8px;
+        flex-wrap: wrap;
+        gap: 4px 8px;
         flex-shrink: 0;
-        padding: 5px 10px;
-        min-height: 26px;
-        font-size: 11px;
+        padding: 0 16px 8px;
+        min-height: 28px;
+        font-size: 12px;
         color: var(--text-muted);
-        border-bottom: 1px solid var(--border-subtle);
       }
-
       .doc {
+        display: inline-flex;
+        gap: 4px;
+        align-items: center;
+        min-width: 0;
+        max-width: 100%;
+      }
+      .doc svg {
+        flex-shrink: 0;
+      }
+      .doc span {
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
       }
-
-      .doc.none {
-        font-style: italic;
-      }
-
       .chip {
-        flex-shrink: 0;
-        padding: 1px 7px;
-        font-size: 10px;
-        border-radius: 999px;
-        background: var(--bg-card);
-        border: 1px solid var(--border-subtle);
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        padding: 2px 4px 2px 8px;
+        border-radius: var(--radius-sm);
+        background: var(--bg-hover);
+        color: var(--text-secondary);
       }
-
+      .clear-selection {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        border: 0;
+        background: none;
+        padding: 2px;
+      }
       .thread {
         flex: 1;
         min-height: 0;
         overflow-y: auto;
+        overflow-x: hidden;
         display: flex;
         flex-direction: column;
-        gap: 10px;
-        padding: 10px;
+        gap: 24px;
+        padding: 16px;
       }
-
       .empty {
-        margin-top: 24px;
-        text-align: center;
-        font-size: 12px;
-        line-height: 1.6;
-        color: var(--text-muted);
-      }
-
-      .msg {
-        display: flex;
-      }
-
-      .msg.user {
-        justify-content: flex-end;
-      }
-
-      .bubble {
-        max-width: 92%;
-        padding: 7px 10px;
-        border-radius: 8px;
+        margin: auto 0;
+        padding: 24px 0;
         font-size: 13px;
         line-height: 1.6;
+        color: var(--text-secondary);
+      }
+      .empty h2 {
+        margin: 0 0 8px;
+        font-size: 16px;
+        line-height: 1.4;
+        font-weight: 600;
+        color: var(--text);
+      }
+      .empty p {
+        margin: 0 0 16px;
+      }
+      .suggestions {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+      }
+      .suggestions button {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        min-height: 36px;
+        padding: 8px;
+        text-align: left;
+        font: 13px var(--font-ui);
+        background: transparent;
+        border: 0;
+        border-radius: var(--radius-sm);
+      }
+      .suggestions button:hover {
+        background: var(--bg-hover);
+        color: var(--text);
+      }
+      .msg {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        min-width: 0;
+        flex-shrink: 0;
+      }
+      .msg.user {
+        align-items: flex-end;
+      }
+      .role {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        font-size: 12px;
+        font-weight: 500;
+        color: var(--text-muted);
+      }
+      .bubble {
+        max-width: 100%;
+        font-size: 13px;
+        line-height: 1.7;
         overflow-wrap: anywhere;
       }
-
       .user .bubble {
-        background: var(--bg-active);
+        max-width: 92%;
+        padding: 8px 12px;
+        border-radius: var(--radius-sm);
+        background: var(--bg-hover);
         color: var(--text);
         white-space: pre-wrap;
       }
-
       .assistant .bubble {
         width: 100%;
-        max-width: 100%;
-        background: var(--bg-card);
-        border: 1px solid var(--border-subtle);
+        color: var(--text);
+      }
+      .copy,
+      .retry {
+        align-self: flex-start;
+        font: 11px var(--font-ui);
+        padding: 4px 8px;
+        border: 0;
+        border-radius: var(--radius-sm);
+        background: transparent;
         color: var(--text-secondary);
       }
-
-      .assistant .idle {
-        color: var(--text-muted);
-        font-style: italic;
+      .copy:hover,
+      .retry:hover {
+        background: var(--bg-hover);
+        color: var(--text);
+      }
+      .md {
+        min-width: 0;
+      }
+      .md table {
+        display: block;
+        width: 100%;
+        overflow: auto;
+        border-collapse: collapse;
+        margin-bottom: 8px;
+      }
+      .md th,
+      .md td {
+        padding: 4px 8px;
+        border: 1px solid var(--border);
+        text-align: left;
+      }
+      .md img {
+        max-width: 100%;
+        height: auto;
       }
 
       /*
@@ -666,7 +1028,7 @@ export class AiDock extends LitElement {
       .md h2,
       .md h3,
       .md h4 {
-        margin: 10px 0 6px;
+        margin: 12px 0 8px;
         font-size: 13px;
         color: var(--text);
       }
@@ -694,7 +1056,7 @@ export class AiDock extends LitElement {
 
       .md blockquote {
         margin: 0 0 8px;
-        padding-left: 10px;
+        padding-left: 12px;
         border-left: 2px solid var(--border);
         color: var(--text-muted);
       }
@@ -715,16 +1077,14 @@ export class AiDock extends LitElement {
         gap: 4px;
         padding: 8px;
         border: 1px solid var(--border-subtle);
-        border-radius: 8px;
+        border-radius: var(--radius-md);
         background: var(--bg-card);
       }
 
       .changes-head {
-        font-size: 11px;
-        font-weight: 600;
-        letter-spacing: 0.02em;
-        text-transform: uppercase;
-        color: var(--text-muted);
+        font-size: 12px;
+        font-weight: 500;
+        color: var(--text-secondary);
       }
 
       .change {
@@ -743,7 +1103,7 @@ export class AiDock extends LitElement {
         flex-shrink: 0;
         padding: 1px 6px;
         font-size: 10px;
-        border-radius: 999px;
+        border-radius: var(--radius-sm);
         background: var(--bg-hover);
         color: var(--text-secondary);
       }
@@ -778,7 +1138,7 @@ export class AiDock extends LitElement {
         font-size: 11px;
         padding: 2px 9px;
         border: 1px solid var(--border-subtle);
-        border-radius: 5px;
+        border-radius: var(--radius-sm);
         background: var(--bg-hover);
         color: var(--text-secondary);
         cursor: pointer;
@@ -801,8 +1161,12 @@ export class AiDock extends LitElement {
       }
 
       .error {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        overflow-wrap: anywhere;
         flex-shrink: 0;
-        padding: 7px 10px;
+        padding: 12px;
         font-size: 12px;
         background: var(--danger-bg);
         border-top: 1px solid var(--border-subtle);

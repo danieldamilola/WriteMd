@@ -22,6 +22,7 @@ export function applySettingsToDOM(store: SettingsStore): void {
       typeof window.matchMedia === 'function' &&
       window.matchMedia('(prefers-color-scheme: light)').matches)
   root.dataset.colorScheme = light ? 'light' : 'dark'
+  root.style.colorScheme = light ? 'light' : 'dark'
   root.style.setProperty('--theme-hue', String(store.get('appearance.themeHue', 240)))
   root.style.setProperty('--theme-saturation', `${store.get('appearance.themeSaturation', 0)}%`)
   root.style.setProperty(

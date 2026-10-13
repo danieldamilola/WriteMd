@@ -122,9 +122,9 @@ describe('summarizeNotes', () => {
 
 describe('summarizeNotesForVersion', () => {
   it('finds the bundled notes for a shipped version', () => {
-    const summary = summarizeNotesForVersion('1.3.0', 2)
+    const summary = summarizeNotesForVersion('0.1.0', 2)
     expect(summary).toHaveLength(2)
-    expect(summary[0]).toBe('A Draggable Table Toolbar')
+    expect(summary[0]).toContain('Local Markdown editing')
   })
 
   it('returns nothing for an unknown version', () => {

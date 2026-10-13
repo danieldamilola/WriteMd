@@ -14,7 +14,7 @@ import type { WriteMdUpdateButton } from '../src/renderer/src/components/UpdateB
 
 type Status = 'idle' | 'checking' | 'available' | 'downloading' | 'downloaded' | 'error'
 
-const VERSION = '1.3.0'
+const VERSION = '0.1.0'
 
 type Listener = (info: { version?: string; percent?: number }) => void
 
@@ -200,7 +200,7 @@ describe('writemd-update-button', () => {
     const items = [...(card(el)?.querySelectorAll('li') ?? [])]
     expect(items.length).toBeGreaterThan(0)
     expect(items.length).toBeLessThanOrEqual(3)
-    // Bold lead-ins only: no prose, no markdown left in the text.
+    // Release summaries render plain text rather than Markdown markers.
     for (const li of items) {
       expect(li.textContent ?? '').not.toContain('**')
     }

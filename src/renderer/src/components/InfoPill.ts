@@ -60,11 +60,15 @@ export class InfoPill extends LitElement {
      * it reaches this bar, which does the separating without drawing a line
      * across the pane.
      *
-     * The bar is a material layer rather than a flat one: it paints the same
-     * editor surface the pane does and blurs whatever sits behind it, so it
-     * follows the translucent appearance and window material the user picked
-     * rather than inventing its own opacity. At full surface opacity the blur
-     * is 0px and this is indistinguishable from the pane.
+     * The colour comes from the pane, not from a value chosen here.
+     *
+     * It used to paint the editor-surface token, which is correct at full
+     * opacity and wrong at any other: below 100% it is a translucent film over
+     * whatever is behind the pane, so the footer showed a different shade from
+     * the document sitting directly above it. The pane's own surface is the
+     * source of truth for both, so the bar inherits it and there is nothing left
+     * to keep in step. The blur stays, because that is a material property of
+     * the surface rather than a colour of its own.
      */
     :host {
       position: relative;
@@ -77,7 +81,7 @@ export class InfoPill extends LitElement {
       justify-content: space-between;
       align-items: center;
       gap: 12px;
-      background: var(--editor-surface);
+      background: transparent;
       backdrop-filter: blur(var(--surface-blur, 0px));
       z-index: 50;
       user-select: none;

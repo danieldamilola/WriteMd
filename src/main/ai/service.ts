@@ -1,12 +1,19 @@
 import { app } from 'electron'
+import { chatgptAuth, CHATGPT_API_BASE } from './chatgpt-auth'
 import { readFileSync, writeFileSync, renameSync, mkdirSync, rmSync } from 'fs'
 import { randomUUID } from 'crypto'
 import { join, dirname } from 'path'
 import { ChangeJournal } from './journal'
 import { runTurn, type TurnEvent } from './turn'
 import { getApiKey } from './key-store'
+import { PRESETS } from './providers'
 import { getSettings } from '../settings'
 import { getVaultPath } from '../vault'
+import { requestedSkill } from './skills'
+import { applyProposals } from './apply'
+import { isMarkdownPath, resolveRealPath, statOrNull } from './paths'
+import { registerExternalPath } from '../path-guard'
+import type { FileChangeSnapshot, PreviewChangeView } from '../../shared/electron-api'
 import {
   upsertSession,
   removeSession,
@@ -27,6 +34,8 @@ import {
  */
 
 export interface AiSendInput {
+  selectionOnly?: boolean
+  previewOnly?: boolean
   sessionId: string
   userText: string
   document: { path: string; content: string } | null
@@ -51,11 +60,63 @@ export interface ChangeView {
 }
 
 interface ActiveTurn {
+  requestId: string
   sessionId: string
   controller: AbortController
 }
 
 const turns = new Map<string, ActiveTurn>()
+const previews = new Map<string, { sessionId: string; change: PreviewChangeView }>()
+const MAX_PENDING_PREVIEWS = 32
+
+function clearPreviews(sessionId: string): void {
+  for (const [id, preview] of previews) {
+    if (preview.sessionId === sessionId) previews.delete(id)
+  }
+}
+
+/** Accept only an unchanged proposal retained in main, then record it for undo. */
+export async function acceptPreview(previewId: string): Promise<ChangeView | null> {
+  const preview = previews.get(previewId)
+  if (!preview) throw new Error('This suggestion has expired. Ask again for a current suggestion.')
+  previews.delete(previewId)
+  const { change, sessionId } = preview
+  const base = getVaultPath()
+  const path = resolveRealPath(change.path, base)
+  if (path !== change.path || !isMarkdownPath(path)) {
+    throw new Error('The suggested file path changed. Ask again for a current suggestion.')
+  }
+  const outcome = await applyProposals(
+    [
+      {
+        path,
+        requestedPath: path,
+        before: change.original,
+        after: change.content,
+        blocks: [],
+        failures: [],
+        isCreation: change.kind === 'created'
+      }
+    ],
+    { sessionId, base, journal: getJournal() }
+  )
+  if (outcome.skipped.length) throw new Error(outcome.skipped[0].detail)
+  const applied = outcome.applied[0]
+  if (!applied) return null
+  registerExternalPath(path)
+  emitFileChange?.(path, {
+    before: change.original,
+    content: change.content,
+    mtime: statOrNull(path)?.mtimeMs ?? Date.now()
+  })
+  return {
+    id: applied.journalId,
+    path,
+    kind: applied.kind,
+    createdAt: Date.now(),
+    revertedAt: null
+  }
+}
 
 // ---------------------------------------------------------------- storage
 
@@ -104,12 +165,16 @@ function saveSessions(sessions: PersistedSession[]): void {
     mkdirSync(dirname(path), { recursive: true })
     writeFileSync(temp, JSON.stringify(sessions), { encoding: 'utf-8', mode: 0o600 })
     renameSync(temp, path)
-  } catch {
+  } catch (error) {
     try {
       rmSync(temp, { force: true })
     } catch {
       /* nothing useful to do */
     }
+    throw new Error(
+      'Could not save the AI conversation. Check the available disk space and folder permissions.',
+      { cause: error }
+    )
   }
 }
 
@@ -117,6 +182,13 @@ function saveSessions(sessions: PersistedSession[]): void {
 
 type Emitter = (event: Record<string, unknown>) => void
 let emit: Emitter | null = null
+let emitFileChange: ((path: string, snapshot?: FileChangeSnapshot) => void) | null = null
+
+export function setFileChangeEmitter(
+  fn: ((path: string, snapshot?: FileChangeSnapshot) => void) | null
+): void {
+  emitFileChange = fn
+}
 
 export function setEventEmitter(fn: Emitter | null): void {
   emit = fn
@@ -140,6 +212,8 @@ export function setEventEmitter(fn: Emitter | null): void {
  */
 function toBridgeEvent(event: TurnEvent): Record<string, unknown> | null {
   switch (event.type) {
+    case 'status':
+      return { type: 'status', message: event.message }
     case 'text':
       return { type: 'text', delta: event.delta }
     case 'proposal':
@@ -161,12 +235,14 @@ function toBridgeEvent(event: TurnEvent): Record<string, unknown> | null {
         })),
         skipped: event.outcome.skipped
       }
+    case 'preview':
+      return { type: 'preview', changes: event.changes, skipped: event.skipped }
     case 'answer':
       return { type: 'answer', text: event.text }
     case 'error':
       return { type: 'error', message: event.message }
     case 'done':
-      return event.text ? { type: 'done', text: event.text } : { type: 'done' }
+      return { type: 'done', text: event.text }
   }
 }
 
@@ -178,6 +254,7 @@ function toBridgeEvent(event: TurnEvent): Record<string, unknown> | null {
  * from a turn the user already stopped.
  */
 export async function startTurn(requestId: string, input: AiSendInput): Promise<void> {
+  clearPreviews(input.sessionId)
   // One live turn per session. A second request for the same conversation stops
   // the first: two streams appending into one transcript produces a transcript
   // neither of them produced.
@@ -188,17 +265,54 @@ export async function startTurn(requestId: string, input: AiSendInput): Promise<
     }
   }
 
-  const settings = getSettings().ai
+  const settings = { ...getSettings().ai }
   if (!settings.enabled) throw new Error('The AI assistant is turned off in Settings.')
   if (!settings.model) throw new Error('No model selected. Open Settings and press Fetch.')
+  const apiKey =
+    settings.providerId === 'chatgpt' ? await chatgptAuth().accessToken() : getApiKey() || undefined
+  if (settings.providerId === 'chatgpt') settings.baseUrl = CHATGPT_API_BASE
+  if (PRESETS.find((preset) => preset.id === settings.providerId)?.keyRequired && !apiKey) {
+    throw new Error('Add your API key in Settings before starting a chat.')
+  }
+  const skill = input.selectionOnly ? undefined : requestedSkill(getVaultPath(), input.userText)
 
   const controller = new AbortController()
-  turns.set(requestId, { sessionId: input.sessionId, controller })
+  turns.set(requestId, { requestId, sessionId: input.sessionId, controller })
 
   const existing = loadSessions().find((s) => s.id === input.sessionId)
   const history = (existing?.messages ?? []).map((m) => ({ role: m.role, content: m.content }))
 
   const send = (event: TurnEvent): void => {
+    if (event.type === 'preview') {
+      event = {
+        ...event,
+        changes: event.changes.map((change) => {
+          const previewId = randomUUID()
+          previews.set(previewId, { sessionId: input.sessionId, change: { ...change } })
+          while (previews.size > MAX_PENDING_PREVIEWS) {
+            previews.delete(previews.keys().next().value!)
+          }
+          return { ...change, previewId }
+        })
+      }
+    } else if (event.type === 'applied') {
+      for (const change of event.outcome.applied) {
+        registerExternalPath(change.path)
+        const entry = getJournal()
+          .list(input.sessionId)
+          .find((entry) => entry.id === change.journalId)
+        emitFileChange?.(
+          change.path,
+          entry
+            ? {
+                before: entry.before,
+                content: entry.after,
+                mtime: statOrNull(change.path)?.mtimeMs ?? Date.now()
+              }
+            : undefined
+        )
+      }
+    }
     const payload = toBridgeEvent(event)
     if (payload) emit?.({ requestId, ...payload })
   }
@@ -210,45 +324,75 @@ export async function startTurn(requestId: string, input: AiSendInput): Promise<
       providerId: settings.providerId,
       baseUrl: settings.baseUrl,
       model: settings.model,
-      apiKey: getApiKey() || undefined,
+      apiKey,
       userText: input.userText,
-      history,
+      skill,
+      previewOnly: input.previewOnly === true,
+      history: input.selectionOnly ? [] : history,
       historyTurns: settings.historyTurns,
+      maxTokens: settings.maxOutputTokens > 0 ? settings.maxOutputTokens : undefined,
       context: {
-        document: input.document ? { ...input.document, isOpen: true } : null,
+        selectionOnly: input.selectionOnly === true,
+        document:
+          !input.selectionOnly && input.document
+            ? {
+                ...input.document,
+                content:
+                  input.previewOnly && input.selection ? input.selection : input.document.content,
+                isOpen: true
+              }
+            : null,
         selection: input.selection,
-        references: input.references,
-        attachments: input.attachments,
-        openPaths: input.openPaths,
+        references: input.selectionOnly ? [] : input.references,
+        attachments: input.selectionOnly ? [] : input.attachments,
+        openPaths: input.selectionOnly ? [] : input.openPaths,
         base: getVaultPath()
       },
       journal: getJournal(),
       signal: controller.signal
     })) {
-      send(event)
+      if (controller.signal.aborted || turns.get(requestId)?.controller !== controller) break
       // Commit as soon as the model finishes, so a crash after this point does
       // not cost the exchange.
       if (event.type === 'done') {
+        try {
+          commitTurn(input.sessionId, input.userText, event.text, {
+            providerId: settings.providerId,
+            model: settings.model,
+            contextFile: input.document?.path ?? null
+          })
+        } catch (error) {
+          // The response and file changes still happened. Preserve the readable
+          // reply before reporting that saving its conversation failed.
+          send({ type: 'answer', text: event.text })
+          throw error
+        }
         settled = true
-        commitTurn(input.sessionId, input.userText, event.text)
       }
+      send(event)
     }
   } catch (err) {
-    emit?.({
-      requestId,
-      type: 'error',
-      message: err instanceof Error ? err.message : String(err)
-    })
+    if (!controller.signal.aborted)
+      emit?.({
+        requestId,
+        type: 'error',
+        message: err instanceof Error ? err.message : String(err)
+      })
   } finally {
-    turns.delete(requestId)
+    if (turns.get(requestId)?.controller === controller) turns.delete(requestId)
     // Exactly one terminal event per turn. The renderer clears its streaming
     // state on `done`, and a second one for a turn it already closed re-enables
     // the composer mid-next-turn.
-    if (!settled) emit?.({ requestId, type: 'done' })
+    if (!settled && !controller.signal.aborted) emit?.({ requestId, type: 'done' })
   }
 }
 
-function commitTurn(sessionId: string, userText: string, assistantText: string): void {
+function commitTurn(
+  sessionId: string,
+  userText: string,
+  assistantText: string,
+  metadata: Pick<PersistedSession, 'providerId' | 'model' | 'contextFile'>
+): void {
   const sessions = loadSessions()
   const existing = sessions.find((s) => s.id === sessionId)
   const messages: PersistedMessage[] = [
@@ -262,9 +406,7 @@ function commitTurn(sessionId: string, userText: string, assistantText: string):
     title: existing?.title || deriveTitle([{ role: 'user', content: userText }]),
     createdAt: existing?.createdAt ?? now,
     updatedAt: now,
-    providerId: existing?.providerId ?? getSettings().ai.providerId,
-    model: existing?.model ?? getSettings().ai.model,
-    contextFile: existing?.contextFile ?? null,
+    ...metadata,
     messages
   }
   saveSessions(upsertSession(sessions, updated))
@@ -272,14 +414,30 @@ function commitTurn(sessionId: string, userText: string, assistantText: string):
 
 /** Abort a turn. Idempotent, and a no-op for an unknown id. */
 export function cancelTurn(requestId: string): void {
+  const turn = turns.get(requestId)
+  if (turn) clearPreviews(turn.sessionId)
   turns.get(requestId)?.controller.abort()
   turns.delete(requestId)
 }
 
-/** Cancel everything. Called when the panel closes and on quit. */
+/**
+ * Cancel everything. Called when the panel closes and on quit.
+ *
+ * Each aborted turn gets its one terminal event here, because the run loop
+ * deliberately skips emitting `done` for an aborted turn. That is right for a
+ * user pressing Stop, where the renderer has already cleared its own busy state,
+ * but it strands any visible turn when the cancel comes from main alone - a
+ * sign-out or an account switch. Without this the composer stays disabled until
+ * the app is restarted.
+ */
 export function cancelAll(): void {
-  for (const turn of turns.values()) turn.controller.abort()
+  const cancelled = [...turns.values()]
+  for (const turn of cancelled) turn.controller.abort()
   turns.clear()
+  previews.clear()
+  for (const turn of cancelled) {
+    emit?.({ requestId: turn.requestId, type: 'done' })
+  }
 }
 
 // ---------------------------------------------------------------- queries
@@ -305,5 +463,9 @@ export function writeSession(session: PersistedSession): void {
 }
 
 export function deleteSavedSession(id: string): void {
+  clearPreviews(id)
+  for (const [requestId, turn] of turns) {
+    if (turn.sessionId === id) cancelTurn(requestId)
+  }
   saveSessions(removeSession(loadSessions(), id))
 }

@@ -13,7 +13,10 @@ import {
   asString,
   assertEndpoint,
   assertListingEndpoint,
+  INTERRUPTED_STREAM_MESSAGE,
+  normalizeModelIds,
   parsePayload,
+  redactSecrets,
   requestJson,
   streamSse,
   usageWith
@@ -127,11 +130,11 @@ function toAnthropicTools(tools: ToolSpec[]): unknown[] {
 }
 
 function mapStopReason(reason: string): StopReason {
-  if (reason === 'max_tokens') return 'max_tokens'
+  if (reason === 'max_tokens' || reason === 'model_context_window_exceeded') return 'max_tokens'
   if (reason === 'tool_use') return 'tool_calls'
   if (reason === 'stop_sequence') return 'stop_sequence'
-  if (reason === 'end_turn') return 'end_turn'
-  return 'end_turn'
+  if (reason === 'end_turn' || reason === 'refusal') return 'end_turn'
+  return 'error'
 }
 
 function headers(apiKey: string | undefined, accept: string): Record<string, string> {
@@ -149,12 +152,26 @@ export const anthropicAdapter: ProviderAdapter = {
 
   async listModels(config: ProviderConfig, signal: AbortSignal): Promise<string[]> {
     const baseUrl = assertListingEndpoint(config.baseUrl, config.apiKey)
-    const payload = await requestJson(joinUrl(baseUrl, '/models'), {
-      method: 'GET',
-      headers: headers(config.apiKey, 'application/json'),
-      signal
-    })
-    return readDataModelIds(payload)
+    const ids: string[] = []
+    const cursors = new Set<string>()
+    let cursor = ''
+    do {
+      const url = new URL(joinUrl(baseUrl, '/models'))
+      if (cursor) url.searchParams.set('after_id', cursor)
+      const payload = await requestJson(url.toString(), {
+        method: 'GET',
+        headers: headers(config.apiKey, 'application/json'),
+        signal
+      })
+      ids.push(...readDataModelIds(payload))
+      const page = asRecord(payload)
+      if (page?.has_more !== true) break
+      cursor = asString(page.last_id) ?? ''
+      if (!cursor || cursors.has(cursor))
+        throw new Error('The provider returned an invalid model page. Try refreshing the models.')
+      cursors.add(cursor)
+    } while (cursor)
+    return normalizeModelIds(ids)
   },
 
   async *stream(request: StreamRequest): AsyncGenerator<StreamEvent> {
@@ -164,7 +181,7 @@ export const anthropicAdapter: ProviderAdapter = {
       // Anthropic has no `system` message role; it is a top-level string.
       system: request.system,
       // max_tokens is required by this API, unlike the others.
-      max_tokens: request.maxTokens,
+      max_tokens: request.maxTokens ?? 4096,
       temperature: request.temperature,
       messages: toAnthropicMessages(request.messages),
       stream: true,
@@ -174,6 +191,7 @@ export const anthropicAdapter: ProviderAdapter = {
     const calls = new ToolCallBuffer()
     let stopReason: StopReason | null = null
     let usage: Usage | undefined
+    let completed = false
 
     for await (const payload of streamSse({
       url: joinUrl(baseUrl, '/messages'),
@@ -225,7 +243,15 @@ export const anthropicAdapter: ProviderAdapter = {
         }
         case 'message_delta': {
           const reason = asString(asRecord(frame.delta)?.stop_reason)
-          if (reason) stopReason = mapStopReason(reason)
+          if (reason) {
+            stopReason = mapStopReason(reason)
+            if (stopReason === 'error') {
+              yield {
+                type: 'error',
+                message: `Anthropic stopped this response (${reason}). Try sending the message again.`
+              }
+            }
+          }
           const reported = asRecord(frame.usage)
           if (reported) {
             usage =
@@ -240,8 +266,15 @@ export const anthropicAdapter: ProviderAdapter = {
           stopReason = 'error'
           yield {
             type: 'error',
-            message: message ?? 'Anthropic reported an error part way through the stream.'
+            message: redactSecrets(
+              message ?? 'Anthropic reported an error part way through the stream.',
+              headers(request.apiKey, 'text/event-stream')
+            )
           }
+          return
+        }
+        case 'message_stop': {
+          completed = true
           break
         }
         default:
@@ -250,6 +283,7 @@ export const anthropicAdapter: ProviderAdapter = {
       }
     }
 
+    if (!completed) throw new Error(INTERRUPTED_STREAM_MESSAGE)
     for (const call of calls.flushAll()) {
       yield { type: 'tool-call', call }
       stopReason = 'tool_calls'

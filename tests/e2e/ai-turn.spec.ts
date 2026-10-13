@@ -2,7 +2,7 @@ import { test, expect } from '@playwright/test'
 import { createServer, type Server } from 'http'
 import { readFileSync, writeFileSync, existsSync } from 'fs'
 import { join } from 'path'
-import { makeFixture, launch, firstWindow } from './fixtures'
+import { makeFixture, launch, firstWindow, resizeWindow } from './fixtures'
 
 /**
  * The whole chain, against a provider that is actually a server.
@@ -73,7 +73,7 @@ test('a requested change lands in the file and can be undone', async () => {
         appearance: { designVersion: 1, theme: 'graphite', panelOrientation: 'vertical' },
         ai: {
           enabled: true,
-          providerId: 'openai',
+          providerId: 'lmstudio',
           baseUrl: provider.url,
           model: 'mock-model',
           apiKeySet: false,
@@ -89,12 +89,12 @@ test('a requested change lands in the file and can be undone', async () => {
 
   const app = await launch(fixture)
   const page = await firstWindow(app)
-  await page.setViewportSize({ width: 1400, height: 900 })
+  await resizeWindow(app, 1400, 900)
   await page.waitForTimeout(1600)
 
   expect(readFileSync(target, 'utf-8')).toContain('E2E fixture.')
 
-  await page.keyboard.press('Control+Alt+A')
+  await page.keyboard.press('Control+Alt+Shift+A')
   await page.waitForTimeout(700)
   const dock = page.locator('writemd-ai-dock')
   await expect(dock).toHaveCount(1)
@@ -151,7 +151,7 @@ test('a change that does not match leaves the file alone', async () => {
         appearance: { designVersion: 1, theme: 'graphite', panelOrientation: 'vertical' },
         ai: {
           enabled: true,
-          providerId: 'openai',
+          providerId: 'lmstudio',
           baseUrl: provider.url,
           model: 'mock-model',
           apiKeySet: false,
@@ -167,10 +167,10 @@ test('a change that does not match leaves the file alone', async () => {
 
   const app = await launch(fixture)
   const page = await firstWindow(app)
-  await page.setViewportSize({ width: 1400, height: 900 })
+  await resizeWindow(app, 1400, 900)
   await page.waitForTimeout(1600)
 
-  await page.keyboard.press('Control+Alt+A')
+  await page.keyboard.press('Control+Alt+Shift+A')
   await page.waitForTimeout(700)
   const dock = page.locator('writemd-ai-dock')
   const composer = dock.locator('textarea')
@@ -219,8 +219,8 @@ test('the Fetch button lists what the key can reach', async () => {
   await page.keyboard.press('Control+,')
   await page.waitForTimeout(700)
   await page
-    .getByRole('button', { name: /ai assistant/i })
-    .first()
+    .locator('writemd-settings-modal')
+    .getByRole('button', { name: 'AI assistant', exact: true })
     .click()
   await page.waitForTimeout(500)
 

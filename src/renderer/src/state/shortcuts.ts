@@ -57,10 +57,31 @@ export const COMMANDS: CommandDef[] = [
     defaultBinding: 'Ctrl+Shift+P'
   },
   {
+    id: 'toggle-sidebar',
+    title: 'Toggle Sidebar',
+    category: 'View',
+    defaultBinding: 'Ctrl+B'
+  },
+  {
     id: 'toggle-ai',
-    title: 'Toggle AI Assistant',
+    title: 'Ask AI',
     category: 'View',
     defaultBinding: 'Ctrl+Alt+A'
+  },
+  {
+    // The bar took over the old binding, so the panel gets its own. Without it
+    // the panel would be reachable only by clicking through the bar.
+    id: 'ai-chat',
+    title: 'Open AI Chat Panel',
+    category: 'View',
+    defaultBinding: 'Ctrl+Alt+Shift+A',
+    aliases: ['Ctrl+J']
+  },
+  {
+    id: 'ai-selection',
+    title: 'AI Actions on Selection',
+    category: 'View',
+    defaultBinding: 'Alt+J'
   },
   { id: 'open-settings', title: 'Open Settings', category: 'App', defaultBinding: 'Ctrl+,' },
   {

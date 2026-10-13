@@ -3,6 +3,14 @@ import { validatePatch, DEFAULT_SETTINGS, settingKeys } from '../src/shared/sett
 import { isAllowedExternalProtocol } from '../src/shared/external-url'
 
 describe('validatePatch', () => {
+  it.each([-1, 131073, '65536', Number.POSITIVE_INFINITY])(
+    'rejects invalid AI output limit %s',
+    (value) => {
+      const { clean, problems } = validatePatch({ ai: { maxOutputTokens: value } })
+      expect(clean.ai?.maxOutputTokens).toBeUndefined()
+      expect(problems).toHaveLength(1)
+    }
+  )
   it('accepts a well-formed nested patch', () => {
     const { clean, problems } = validatePatch({ editor: { fontSize: 18, wordWrap: false } })
     expect(problems).toEqual([])

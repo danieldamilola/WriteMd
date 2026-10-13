@@ -27,6 +27,7 @@ export interface ToolCallPatch {
   name?: string | null
   /** Argument fragments accumulate; id and name overwrite. */
   args?: string | null
+  extraContent?: Record<string, unknown> | null
 }
 
 export function finalizeToolCall(partial: { id: string; name: string; args: string }): ToolCall {
@@ -54,7 +55,10 @@ export function finalizeToolCall(partial: { id: string; name: string; args: stri
 /** Fragments keyed by whatever the provider calls the call: index, block id. */
 export class ToolCallBuffer {
   private readonly order: string[] = []
-  private readonly parts = new Map<string, { id: string; name: string; args: string }>()
+  private readonly parts = new Map<
+    string,
+    { id: string; name: string; args: string; extraContent?: Record<string, unknown> }
+  >()
 
   add(key: string, patch: ToolCallPatch): void {
     const existing = this.parts.get(key)
@@ -62,9 +66,15 @@ export class ToolCallBuffer {
       if (patch.id) existing.id = patch.id
       if (patch.name) existing.name = patch.name
       if (patch.args) existing.args += patch.args
+      if (patch.extraContent) existing.extraContent = patch.extraContent
       return
     }
-    const entry = { id: patch.id ?? '', name: patch.name ?? '', args: patch.args ?? '' }
+    const entry = {
+      id: patch.id ?? '',
+      name: patch.name ?? '',
+      args: patch.args ?? '',
+      ...(patch.extraContent ? { extraContent: patch.extraContent } : {})
+    }
     this.parts.set(key, entry)
     this.order.push(key)
   }
@@ -79,7 +89,10 @@ export class ToolCallBuffer {
     if (!entry) return null
     this.parts.delete(key)
     this.order.splice(this.order.indexOf(key), 1)
-    return finalizeToolCall(entry)
+    return {
+      ...finalizeToolCall(entry),
+      ...(entry.extraContent ? { extraContent: entry.extraContent } : {})
+    }
   }
 
   /** Finalize everything still buffered, in arrival order. */

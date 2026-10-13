@@ -5,6 +5,7 @@ import {
   normalizeBinding,
   bindingsEqual,
   bindingFromEvent,
+  formatBinding,
   findConflict,
   fuzzyMatch,
   effectiveBinding,
@@ -12,6 +13,13 @@ import {
 } from '../src/renderer/src/state/shortcuts'
 
 describe('shortcut registry', () => {
+  it('toggles the sidebar with Ctrl+B and supports rebinding it', () => {
+    expect(effectiveBinding('toggle-sidebar', {})).toEqual(parseBinding('Ctrl+B'))
+    expect(effectiveBinding('toggle-sidebar', { 'toggle-sidebar': 'Ctrl+Alt+B' })).toEqual(
+      parseBinding('Ctrl+Alt+B')
+    )
+    expect(findConflict('toggle-sidebar', parseBinding('Ctrl+N')!, {})).toBe('new-file')
+  })
   it('ships no two commands on the same default binding', () => {
     // Nothing surfaces a collision to the user until they press the key and one
     // of the two commands silently wins, so the registry itself has to hold.
@@ -30,6 +38,19 @@ describe('shortcut registry', () => {
       }
     }
     expect(clashes).toEqual([])
+  })
+
+  it('gives the AI bar and the AI panel separate bindings', () => {
+    // The bar took over the panel's old shortcut, so the panel needed a home of
+    // its own. Ctrl+J is the short one people will remember; the other survives
+    // in case a browser or another app has claimed it.
+    expect(effectiveBinding('toggle-ai', {})).toEqual(parseBinding('Ctrl+Alt+A'))
+    expect(effectiveBinding('ai-chat', {})).toEqual(parseBinding('Ctrl+Alt+Shift+A'))
+    expect(effectiveBindings('ai-chat', {}).map((b) => formatBinding(b))).toEqual([
+      'Ctrl+Shift+Alt+A',
+      'Ctrl+J'
+    ])
+    expect(effectiveBindings('toggle-ai', {})).toHaveLength(1)
   })
 
   it('gives all four split surfaces their own shortcut', () => {

@@ -1,4 +1,4 @@
-import { basename, dirname, isAbsolute, join, resolve } from 'path'
+import { basename, dirname, extname, isAbsolute, join, resolve } from 'path'
 import { realpathSync, statSync, type Stats } from 'fs'
 
 /**
@@ -24,6 +24,10 @@ import { realpathSync, statSync, type Stats } from 'fs'
  */
 
 export type PathViolation = 'empty' | 'not-absolute' | 'nul-byte' | 'device-name' | 'unresolvable'
+
+export function isMarkdownPath(path: string): boolean {
+  return ['.md', '.markdown', '.mdown', '.mkd'].includes(extname(path).toLowerCase())
+}
 
 export class UnsafePathError extends Error {
   readonly violation: PathViolation

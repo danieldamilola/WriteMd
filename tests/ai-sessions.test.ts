@@ -289,6 +289,25 @@ describe('removeSession', () => {
 })
 
 describe('sanitizeSessions', () => {
+  it('drops malformed legacy text blocks without displaying objects as chat text', () => {
+    const cleaned = sanitizeSessions([
+      {
+        ...session(),
+        messages: [
+          {
+            role: 'assistant',
+            content: [
+              { type: 'text', text: { malformed: true } },
+              { type: 'text', text: 42 },
+              null,
+              { type: 'text', text: 'Real answer' }
+            ]
+          }
+        ]
+      }
+    ])
+    expect(cleaned[0].messages).toEqual([assistant('Real answer')])
+  })
   it('returns nothing for anything that is not an array', () => {
     expect(sanitizeSessions(undefined)).toEqual([])
     expect(sanitizeSessions(null)).toEqual([])

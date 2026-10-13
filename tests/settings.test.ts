@@ -23,6 +23,55 @@ describe('settings persistence', () => {
     vi.resetModules()
   })
 
+  it.each(['openrouter', 'deepseek', 'groq', 'mistral', 'xai'])(
+    'loads and persists the %s provider',
+    async (providerId) => {
+      mockElectron()
+      writeFileSync(CONFIG, JSON.stringify({ ai: { providerId } }))
+      const { getSettings, setSettings } = await import('../src/main/settings')
+      expect(getSettings().ai.providerId).toBe(providerId)
+      await setSettings({ ai: { providerId } })
+      expect(JSON.parse(readFileSync(CONFIG, 'utf8')).ai.providerId).toBe(providerId)
+    }
+  )
+
+  it('enables AI for a fresh profile and provides a resizable default panel', async () => {
+    mockElectron()
+    const { getSettings } = await import('../src/main/settings')
+    expect(getSettings().ai.enabled).toBe(true)
+    expect(getSettings().ai.autoAcceptEdits).toBe(false)
+    expect(getSettings().ai.maxOutputTokens).toBe(0)
+    expect(getSettings().appearance.aiDockWidth).toBe(360)
+  })
+
+  it('persists automatic AI acceptance and rejects invalid values', async () => {
+    mockElectron()
+    const { getSettings, setSettings } = await import('../src/main/settings')
+    await setSettings({ ai: { autoAcceptEdits: true } })
+    expect(JSON.parse(readFileSync(CONFIG, 'utf8')).ai.autoAcceptEdits).toBe(true)
+    vi.resetModules()
+    const reloaded = await import('../src/main/settings')
+    expect(reloaded.getSettings().ai.autoAcceptEdits).toBe(true)
+    writeFileSync(CONFIG, JSON.stringify({ ai: { autoAcceptEdits: 'yes' } }))
+    vi.resetModules()
+    const invalid = await import('../src/main/settings')
+    expect(invalid.getSettings().ai.autoAcceptEdits).toBe(false)
+    expect(getSettings().ai.autoAcceptEdits).toBe(true)
+  })
+
+  it('persists a custom output limit and falls back to Automatic for invalid configuration', async () => {
+    mockElectron()
+    const { setSettings } = await import('../src/main/settings')
+    await setSettings({ ai: { maxOutputTokens: 65536 } })
+    vi.resetModules()
+    const restored = await import('../src/main/settings')
+    expect(restored.getSettings().ai.maxOutputTokens).toBe(65536)
+    writeFileSync(CONFIG, JSON.stringify({ ai: { maxOutputTokens: -1 } }))
+    vi.resetModules()
+    const invalid = await import('../src/main/settings')
+    expect(invalid.getSettings().ai.maxOutputTokens).toBe(0)
+  })
+
   it('repairs the background target left by a build that used the AI panel', async () => {
     mockElectron()
     // A config written by a build that had the AI panel. That panel is back, so
@@ -43,6 +92,7 @@ describe('settings persistence', () => {
     expect(s.appearance.theme).toBe('nord')
     // The section survives, and the known keys are read from it.
     expect(s.ai.providerId).toBe('openai')
+    expect(s.ai.enabled).toBe(false)
 
     // And the repair must survive a save, which is where a stale value would
     // otherwise be written back out and undo itself.

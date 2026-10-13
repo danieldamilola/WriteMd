@@ -210,17 +210,15 @@ function sanitizeMessage(value: unknown): PersistedMessage | null {
   return { role: raw.role, content }
 }
 
-function isBlockArray(value: unknown): value is readonly MessageContent[] {
-  return Array.isArray(value)
-}
-
 /** The text of a message, whether it is a string or a list of content blocks. */
 function textOf(content: unknown): string {
   if (typeof content === 'string') return content
-  if (!isBlockArray(content)) return ''
+  if (!Array.isArray(content)) return ''
   const parts: string[] = []
   for (const block of content) {
-    if (block && block.type === 'text') parts.push(block.text)
+    if (typeof block !== 'object' || block === null) continue
+    const candidate = block as Record<string, unknown>
+    if (candidate.type === 'text' && typeof candidate.text === 'string') parts.push(candidate.text)
   }
   return parts.join(' ')
 }

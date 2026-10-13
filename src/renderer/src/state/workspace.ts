@@ -25,6 +25,18 @@ export function paneGeometry(
   }
 }
 
+/** Keep document space while applying the saved assistant width. */
+export function aiDockGeometry(available: number, preferred: number): PaneGeometry {
+  const max = Math.min(640, Math.max(0, available - 160))
+  const min = Math.min(280, max)
+  return {
+    width: Math.min(max, Math.max(min, preferred)),
+    min,
+    max,
+    compact: max < 280
+  }
+}
+
 /** Persist user intent; window constraints only affect derived geometry. */
 export class WorkspaceState {
   private static instance: WorkspaceState
@@ -38,10 +50,16 @@ export class WorkspaceState {
   get railWidth(): number {
     return this.settings.get('appearance.railWidth', 208)
   }
+  get aiDockWidth(): number {
+    return this.settings.get('appearance.aiDockWidth', 360)
+  }
   resizePane(width: number): void {
     this.settings.set('appearance.paneWidth', Math.round(width))
   }
   resizeRail(width: number): void {
     this.settings.set('appearance.railWidth', Math.round(width))
+  }
+  resizeAiDock(width: number): void {
+    this.settings.set('appearance.aiDockWidth', Math.max(280, Math.min(640, Math.round(width))))
   }
 }

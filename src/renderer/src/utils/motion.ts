@@ -137,7 +137,10 @@ export function animate(
   if (!el) return Promise.resolve()
   activeAnimations.get(el)?.cancel()
   const { duration = DURATION.base, easing = EASING.out, delay = 0, fill = false } = options
-  if (reducedMotionNow()) {
+  // jsdom has no Web Animations, and a component that closes itself through this
+  // engine would then throw where it used to work. One frame, and the caller's
+  // state change still happens.
+  if (reducedMotionNow() || typeof el.animate !== 'function') {
     return new Promise((resolve) => requestAnimationFrame(() => resolve()))
   }
   const animation = el.animate(keyframes, {

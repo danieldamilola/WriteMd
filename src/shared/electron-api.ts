@@ -1,5 +1,6 @@
 /// <reference types="electron" />
 import type { WriteMdSettings, WriteMdSettingsPatch } from './settings-schema'
+import type { ChatgptAuthView, ChatgptModelView } from './ai/chatgpt'
 
 export interface BackgroundAsset {
   id: string
@@ -15,6 +16,11 @@ export interface MaterialSupport {
 export interface FileReadResult {
   content: string
   mtime: number
+}
+
+export interface FileChangeSnapshot extends FileReadResult {
+  /** Text replaced by a committed AI edit, for preserving newer typing. */
+  before: string | null
 }
 
 export interface FileWriteResult {
@@ -55,7 +61,7 @@ export interface ExportResult {
 export interface ProviderPresetView {
   id: string
   label: string
-  kind: 'openai' | 'anthropic' | 'gemini'
+  kind: 'openai' | 'anthropic' | 'gemini' | 'responses'
   defaultBaseUrl: string
   defaultModel: string
   keyRequired: boolean
@@ -77,6 +83,9 @@ export interface SetKeyResult {
 
 /** What the renderer sends to start a turn. Mirrors main's `AiSendInput`. */
 export interface AiSendInput {
+  selectionOnly?: boolean
+  /** Return proposed text for review without writing document files. */
+  previewOnly?: boolean
   sessionId: string
   userText: string
   document: { path: string; content: string } | null
@@ -99,6 +108,15 @@ export interface ChangeView {
   kind: 'created' | 'modified'
   createdAt: number
   revertedAt: number | null
+}
+
+export interface PreviewChangeView {
+  /** Identifies the proposal retained in main for acceptance. */
+  previewId?: string
+  path: string
+  original: string
+  content: string
+  kind: 'created' | 'modified'
 }
 
 export interface SkippedView {
@@ -138,9 +156,11 @@ export interface PersistedSessionView {
  * neither turn produced.
  */
 export type AiEvent =
+  | { type: 'status'; requestId: string; message: string }
   | { type: 'text'; requestId: string; delta: string }
   | { type: 'proposal'; requestId: string; files: string[]; blocks: number; skipped: string[] }
   | { type: 'applied'; requestId: string; changed: ChangeView[]; skipped: SkippedView[] }
+  | { type: 'preview'; requestId: string; changes: PreviewChangeView[]; skipped: SkippedView[] }
   | { type: 'answer'; requestId: string; text: string }
   | { type: 'error'; requestId: string; message: string }
   /**
@@ -215,7 +235,7 @@ export interface ElectronAPI {
     unwatch: (path: string) => Promise<void>
     rename: (oldPath: string, newPath: string) => Promise<boolean>
     delete: (path: string) => Promise<boolean>
-    onChanged: (callback: (path: string) => void) => () => void
+    onChanged: (callback: (path: string, snapshot?: FileChangeSnapshot) => void) => () => void
   }
   vault: {
     getPath: () => Promise<string>
@@ -248,6 +268,18 @@ export interface ElectronAPI {
    * bridge in the readable direction.
    */
   ai: {
+    chatgpt?: {
+      state: () => Promise<ChatgptAuthView>
+      login: (addAccount?: boolean) => Promise<ChatgptAuthView>
+      cancel: () => Promise<ChatgptAuthView>
+      logout: () => Promise<ChatgptAuthView>
+      select: (id: string) => Promise<ChatgptAuthView>
+      acknowledgePlan: () => Promise<ChatgptAuthView>
+      models: () => Promise<ChatgptModelView[]>
+      onChanged: (callback: (state: ChatgptAuthView) => void) => () => void
+    }
+    listSkills: () => Promise<import('./ai/skills').AiSkillsView>
+    openSkillsFolder: () => Promise<string>
     presets: () => Promise<ProviderPresetView[]>
     /**
      * Model ids this key can reach. Rejects on a bad key rather than resolving
@@ -263,6 +295,7 @@ export interface ElectronAPI {
      * `onEvent`. The renderer owns `requestId`.
      */
     send: (requestId: string, input: AiSendInput) => Promise<unknown>
+    acceptPreview: (previewId: string) => Promise<ChangeView | null>
     /**
      * Fire-and-forget. These resolve once the request is accepted, not once the
      * work is done, and the renderer only cares that they did not throw - so

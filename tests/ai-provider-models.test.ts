@@ -45,6 +45,160 @@ function route(routes: [matcher: string, respond: () => Response][]): void {
 const signal = new AbortController().signal
 
 describe('openai model listing', () => {
+  it.each(['openrouter', 'deepseek', 'groq', 'mistral', 'xai'])(
+    'lists models from the %s endpoint with bearer authentication',
+    async (providerId) => {
+      stubFetch()
+      const preset = PRESETS.find((entry) => entry.id === providerId)!
+      fetchMock.mockResolvedValue(jsonResponse({ data: [{ id: preset.defaultModel }] }))
+      await expect(
+        openaiAdapter.listModels(
+          {
+            providerId,
+            baseUrl: preset.defaultBaseUrl,
+            apiKey: 'provider-key'
+          },
+          signal
+        )
+      ).resolves.toEqual([preset.defaultModel])
+      expect(fetchMock.mock.calls[0][0]).toBe(`${preset.defaultBaseUrl}/models`)
+      expect(fetchMock.mock.calls[0][1]?.headers).toMatchObject({
+        authorization: 'Bearer provider-key'
+      })
+    }
+  )
+
+  it.each([
+    [
+      'openrouter',
+      [
+        { id: 'vendor/chat', architecture: { output_modalities: ['text'] } },
+        { id: 'vendor/image', architecture: { output_modalities: ['image'] } },
+        { id: 'vendor/multimodal', architecture: { output_modalities: ['text', 'image'] } }
+      ],
+      ['vendor/chat', 'vendor/multimodal']
+    ],
+    [
+      'mistral',
+      [
+        { id: 'mistral-small-latest', capabilities: { completion_chat: true } },
+        { id: 'mistral-embed', capabilities: { completion_chat: false } },
+        { id: 'mistral-ocr-latest', capabilities: { completion_chat: false } }
+      ],
+      ['mistral-small-latest']
+    ],
+    [
+      'groq',
+      [
+        { id: 'openai/gpt-oss-20b' },
+        { id: 'whisper-large-v3' },
+        { id: 'canopylabs/orpheus-v1-english' },
+        { id: 'meta-llama/llama-prompt-guard-2-22m' },
+        { id: 'openai/gpt-oss-safeguard-20b' }
+      ],
+      ['openai/gpt-oss-20b']
+    ],
+    ['xai', [{ id: 'grok-4.7' }, { id: 'grok-imagine-image' }], ['grok-4.7']]
+  ] as const)(
+    'excludes non-chat models in the %s catalogue',
+    async (providerId, data, expected) => {
+      stubFetch()
+      fetchMock.mockResolvedValue(jsonResponse({ data }))
+      const preset = PRESETS.find((entry) => entry.id === providerId)!
+      await expect(
+        openaiAdapter.listModels(
+          {
+            providerId,
+            baseUrl: preset.defaultBaseUrl,
+            apiKey: 'provider-key'
+          },
+          signal
+        )
+      ).resolves.toEqual(expected)
+    }
+  )
+
+  it('offers chat-capable OpenAI models and leaves custom catalogue names available', async () => {
+    stubFetch()
+    const ids = [
+      'gpt-4o-mini',
+      'gpt-6-astra',
+      'o4-mini',
+      'ft:gpt-4o-mini:org:custom',
+      'text-embedding-3-large',
+      'omni-moderation-latest',
+      'gpt-image-1',
+      'tts-1',
+      'whisper-1',
+      'gpt-4o-transcribe',
+      'gpt-realtime',
+      'dall-e-3',
+      'sora-2',
+      'gpt-5-codex',
+      'o3-pro',
+      'o3-deep-research',
+      'gpt-3.5-turbo-instruct'
+    ]
+    fetchMock.mockImplementation(async () => jsonResponse({ data: ids.map((id) => ({ id })) }))
+    await expect(
+      openaiAdapter.listModels(
+        { providerId: 'openai', baseUrl: 'https://api.openai.com/v1' },
+        signal
+      )
+    ).resolves.toEqual(['ft:gpt-4o-mini:org:custom', 'gpt-4o-mini', 'gpt-6-astra', 'o4-mini'])
+    await expect(
+      openaiAdapter.listModels(
+        { providerId: 'lmstudio', baseUrl: 'http://localhost:1234/v1' },
+        signal
+      )
+    ).resolves.toHaveLength(ids.length)
+  })
+
+  it('rejects a failed response body instead of showing an empty catalogue', async () => {
+    stubFetch()
+    fetchMock.mockResolvedValue(
+      new Response(
+        new ReadableStream<Uint8Array>({
+          start(controller) {
+            controller.error(new Error('connection closed'))
+          }
+        })
+      )
+    )
+    await expect(
+      openaiAdapter.listModels({ baseUrl: 'https://api.example.test/v1' }, signal)
+    ).rejects.toThrow(/response could not be read/)
+  })
+
+  it('preserves cancellation while reading the model catalogue body', async () => {
+    stubFetch()
+    const controller = new AbortController()
+    let responseStream: ReadableStreamDefaultController<Uint8Array> | undefined
+    fetchMock.mockResolvedValue(
+      new Response(
+        new ReadableStream<Uint8Array>({
+          start(stream) {
+            responseStream = stream
+          }
+        })
+      )
+    )
+    const listing = openaiAdapter.listModels(
+      { baseUrl: 'https://api.example.test/v1' },
+      controller.signal
+    )
+    controller.abort()
+    responseStream?.error(new Error('connection closed'))
+    await expect(listing).rejects.toMatchObject({ name: 'AbortError' })
+  })
+  it('keeps an empty cloud catalogue empty without requesting Ollama endpoints', async () => {
+    stubFetch()
+    fetchMock.mockResolvedValue(jsonResponse({ data: [] }))
+    await expect(
+      openaiAdapter.listModels({ baseUrl: 'https://api.example.test/v1' }, signal)
+    ).resolves.toEqual([])
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
   it('parses, sorts and dedupes data[].id', async () => {
     stubFetch()
     fetchMock.mockResolvedValue(
@@ -175,6 +329,29 @@ describe('openai model listing', () => {
 })
 
 describe('ollama model listing', () => {
+  it('uses the native fallback for an Ollama preset on a custom port', async () => {
+    stubFetch()
+    route([
+      ['/api/tags', () => jsonResponse({ models: [{ name: 'llama3.2' }] })],
+      ['/models', () => jsonResponse({ error: 'not found' }, 404)]
+    ])
+    await expect(
+      openaiAdapter.listModels(
+        { providerId: 'ollama', baseUrl: 'http://localhost:9000/v1' },
+        signal
+      )
+    ).resolves.toEqual(['llama3.2'])
+  })
+  it('falls back to the native list when an older server returns 404', async () => {
+    stubFetch()
+    route([
+      ['/api/tags', () => jsonResponse({ models: [{ name: 'llama3.2' }] })],
+      ['/models', () => jsonResponse({ error: 'not found' }, 404)]
+    ])
+    await expect(
+      openaiAdapter.listModels({ baseUrl: 'http://localhost:11434/v1' }, signal)
+    ).resolves.toEqual(['llama3.2'])
+  })
   it('prefers the OpenAI-compatible list when it has models', async () => {
     stubFetch()
     fetchMock.mockResolvedValue(jsonResponse({ data: [{ id: 'llama3.2' }, { id: 'qwen2.5' }] }))
@@ -242,6 +419,31 @@ describe('ollama model listing', () => {
 })
 
 describe('anthropic model listing', () => {
+  it('follows every page using the last id, then deduplicates', async () => {
+    stubFetch()
+    fetchMock
+      .mockResolvedValueOnce(
+        jsonResponse({ data: [{ id: 'claude-b' }], has_more: true, last_id: 'claude-b' })
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({ data: [{ id: 'claude-a' }, { id: 'claude-b' }], has_more: false })
+      )
+    await expect(
+      anthropicAdapter.listModels({ baseUrl: 'https://api.example.test/v1', apiKey: 'k' }, signal)
+    ).resolves.toEqual(['claude-a', 'claude-b'])
+    expect(fetchMock.mock.calls[1][0]).toBe('https://api.example.test/v1/models?after_id=claude-b')
+  })
+
+  it('rejects a repeated pagination cursor instead of looping forever', async () => {
+    stubFetch()
+    fetchMock.mockImplementation(async () =>
+      jsonResponse({ data: [{ id: 'claude-b' }], has_more: true, last_id: 'claude-b' })
+    )
+    await expect(
+      anthropicAdapter.listModels({ baseUrl: 'https://api.example.test/v1' }, signal)
+    ).rejects.toThrow(/invalid model page/)
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+  })
   it('parses, sorts and dedupes data[].id', async () => {
     stubFetch()
     fetchMock.mockResolvedValue(
@@ -294,6 +496,37 @@ describe('anthropic model listing', () => {
 })
 
 describe('gemini model listing', () => {
+  it('loads later pages and excludes models that cannot generate chat content', async () => {
+    stubFetch()
+    fetchMock
+      .mockResolvedValueOnce(
+        jsonResponse({
+          models: [
+            { name: 'models/embedding', supportedGenerationMethods: ['embedContent'] },
+            { name: 'models/gemini-b', supportedGenerationMethods: ['generateContent'] }
+          ],
+          nextPageToken: 'next+/='
+        })
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({
+          models: [{ name: 'models/gemini-a', supportedGenerationMethods: ['generateContent'] }]
+        })
+      )
+    await expect(
+      geminiAdapter.listModels({ baseUrl: 'https://api.example.test/v1beta' }, signal)
+    ).resolves.toEqual(['gemini-a', 'gemini-b'])
+    expect(new URL(fetchMock.mock.calls[1][0]).searchParams.get('pageToken')).toBe('next+/=')
+  })
+
+  it('rejects a repeated page token instead of looping forever', async () => {
+    stubFetch()
+    fetchMock.mockImplementation(async () => jsonResponse({ models: [], nextPageToken: 'again' }))
+    await expect(
+      geminiAdapter.listModels({ baseUrl: 'https://api.example.test/v1beta' }, signal)
+    ).rejects.toThrow(/invalid model page/)
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+  })
   it('strips the models/ prefix and sorts', async () => {
     stubFetch()
     fetchMock.mockResolvedValue(
@@ -370,13 +603,19 @@ describe('gemini model listing', () => {
 })
 
 describe('preset registry', () => {
-  it('offers the five supported providers', () => {
+  it('offers the supported cloud and local providers', () => {
     expect(PRESETS.map((preset) => preset.id)).toEqual([
       'openai',
       'anthropic',
       'gemini',
+      'openrouter',
+      'deepseek',
+      'groq',
+      'mistral',
+      'xai',
       'ollama',
-      'lmstudio'
+      'lmstudio',
+      'chatgpt'
     ])
   })
 
@@ -386,15 +625,24 @@ describe('preset registry', () => {
       openai: 'gpt-4o-mini',
       anthropic: 'claude-sonnet-4-5',
       gemini: 'gemini-2.5-flash',
+      openrouter: 'openrouter/auto',
+      deepseek: 'deepseek-flash',
+      groq: 'openai/gpt-oss-20b',
+      mistral: 'mistral-small-latest',
+      xai: 'grok-4.7',
       ollama: 'llama3.2',
-      lmstudio: 'local-model'
+      lmstudio: 'local-model',
+      // The account catalogue is read from the signed-in account at runtime, so
+      // there is no model to ship as a default.
+      chatgpt: ''
     })
   })
 
-  it('marks only the local servers as keyless', () => {
+  it('needs no API key for the local servers or the account provider', () => {
     expect(PRESETS.filter((preset) => !preset.keyRequired).map((p) => p.id)).toEqual([
       'ollama',
-      'lmstudio'
+      'lmstudio',
+      'chatgpt'
     ])
   })
 
@@ -405,6 +653,10 @@ describe('preset registry', () => {
     // Ollama and LM Studio are presets over the OpenAI adapter, not adapters.
     expect(adapterFor('ollama')).toBe(ADAPTERS.openai)
     expect(adapterFor('lmstudio')).toBe(ADAPTERS.openai)
+    expect(adapterFor('chatgpt')).toBe(ADAPTERS.responses)
+    for (const id of ['openrouter', 'deepseek', 'groq', 'mistral', 'xai']) {
+      expect(adapterFor(id)).toBe(ADAPTERS.openai)
+    }
   })
 
   it('returns null for an id nothing claims', () => {
@@ -420,7 +672,11 @@ describe('preset registry', () => {
 })
 
 describe('matchPresetByBaseUrl', () => {
-  it('matches each preset on its default URL', () => {
+  it('matches each url-selectable preset on its default URL', () => {
+    for (const preset of PRESETS.filter((p) => p.selectableByUrl !== false)) {
+      expect(matchPresetByBaseUrl(preset.defaultBaseUrl)?.id).toBe(preset.id)
+      expect(matchPresetByBaseUrl(`${preset.defaultBaseUrl}/chat/completions`)?.id).toBe(preset.id)
+    }
     expect(matchPresetByBaseUrl('https://api.openai.com/v1')?.id).toBe('openai')
     expect(matchPresetByBaseUrl('https://api.anthropic.com/v1')?.id).toBe('anthropic')
     expect(matchPresetByBaseUrl('https://generativelanguage.googleapis.com/v1beta')?.id).toBe(
@@ -453,6 +709,21 @@ describe('matchPresetByBaseUrl', () => {
       matchPresetByBaseUrl('https://generativelanguage.googleapis.com/v1beta-elsewhere')
     ).toBeNull()
     expect(matchPresetByBaseUrl('http://localhost:12345/v1')).toBeNull()
+  })
+
+  it('keeps an account provider out of URL matching so a key config keeps its key', () => {
+    // ChatGPT account access uses the same host as the OpenAI preset. An
+    // imported or hand-typed api.openai.com URL means a bearer key, so it has
+    // to keep resolving to the key-based provider.
+    expect(PRESETS.find((p) => p.id === 'chatgpt')?.selectableByUrl).toBe(false)
+    for (const url of [
+      'https://api.openai.com/v1',
+      'https://api.openai.com/v1/',
+      'https://api.openai.com/v1/responses',
+      'HTTPS://API.OPENAI.COM/v1'
+    ]) {
+      expect(matchPresetByBaseUrl(url)?.id).toBe('openai')
+    }
   })
 
   it('returns null for a proxy, a gateway or nonsense', () => {

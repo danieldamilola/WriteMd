@@ -1,5 +1,7 @@
 # PRD: WriteMd - Frictionless Markdown Editor
 
+Current release baseline: **v0.1.0**, restarted on 2026-10-13. Existing features and user data remain intact. The active release notes are in [CHANGELOG.md](../CHANGELOG.md); earlier implementation milestones remain in [the archived roadmap](legacy-phases.md).
+
 ## 1. Product Vision
 
 **WriteMd** is a local-first markdown editor that opens **any `.md` file directly** - no vault, no import, no copy-paste. Double-click a file, edit in a beautiful WYSIWYG interface, save. Done.
@@ -192,6 +194,8 @@ Settings now open as an application page. Search sits at the top of its sidebar,
 
 Settings cards use theme surfaces, consistent 16px padding, readable descriptions, and 34px controls. Rows wrap to fit the available content width; font and theme grids adapt without horizontal overflow. Dropdowns use the shared Web Awesome select styling, including background settings. Monochrome accents follow the theme's text color with a contrasting surface-colored toggle thumb; colored accents choose a light or dark foreground according to luminance. The bundled editor font choices are Inter, Manrope, DM Sans, Space Grotesk, JetBrains Mono, and Geist Mono. Removed serif/handwritten selections migrate to Manrope, retaining other editor preferences.
 
+The Settings page paints the rail and content once, using the window's material and surface-opacity tokens. The workspace stays mounted but does not paint behind Settings, preserving unsaved editor state and preventing document text from showing through. Local backgrounds use the shared background component inside Settings. Native window appearance and form controls follow the selected theme. These material behaviors reuse the existing layout and need formalizing in Figma.
+
 ---
 
 ## 5. UI/UX Specification (from Figma)
@@ -279,12 +283,13 @@ The following functional capabilities are fully specified in the PRD logic and s
 
 ### 6.4 Save Strategy
 
-| Trigger           | Behavior                                                             |
-| ----------------- | -------------------------------------------------------------------- |
-| Auto-save         | Debounced 500ms after last keystroke. Write to temp → atomic rename. |
-| Manual (`Ctrl+S`) | Immediate write to **original file path** (vault or external).       |
-| Window close      | Prompt if dirty. Auto-save first.                                    |
-| External change   | Detect via `fs.watch` → prompt reload (diff preview).                |
+| Trigger           | Behavior                                                                                                                                 |
+| ----------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| Auto-save         | Debounced 500ms after last keystroke. Write to temp → atomic rename.                                                                     |
+| Manual (`Ctrl+S`) | Immediate write to **original file path** (vault or external).                                                                           |
+| Window close      | Prompt if dirty. Auto-save first.                                                                                                        |
+| Accepted AI edit  | Update the editor immediately and begin an atomic save without a debounce, even with typing autosave off. Confirm after saving.          |
+| External change   | Watch the parent directory across atomic replacements. Refresh clean documents immediately; preserve dirty buffers with conflict review. |
 
 ### 6.5 Image Handling
 
@@ -302,6 +307,44 @@ The following functional capabilities are fully specified in the PRD logic and s
 ---
 
 ## 7. Markdown Spec Compliance
+
+### Optional AI chat
+
+The side panel's "Open in floating bar" action and the floating bar's "Open full chat" action continue one conversation, including a live response. Committed AI edits and undo notify FileState directly, so open documents refresh without waiting for an operating-system watcher event or typing debounce. Background tabs refresh without changing the active document.
+
+Requests to write or draft an article prepare content for the open note, including a blank note. The floating bar offers the draft as an edit to accept; the side panel applies completed edits. If a model returns chat prose for a clear drafting request, the app asks once for an edit proposal and reports failure if no usable edit is returned.
+
+AI requests include complete document, selection, reference, and text attachment contents. The app does not shorten them to a shared character budget; the provider's context and output limits still apply. Local edits use the smallest unique passage, and previews show only changed text. Whole-document rewrites can return the new document without echoing the original. They require a supplied snapshot and refuse to overwrite text that changed during generation. Edit commands remain hidden while streaming, and incomplete edit blocks never modify files. Incoming updates preserve unchanged editor text and selections.
+
+Unusable native tool markup triggers one recovery attempt without tools, including requests that already had tools disabled. DeepSeek recovery also disables thinking mode for that attempt. The app does not execute or display the markup, and another failure leaves files unchanged with a retry message. Ordinary requests keep the provider's normal thinking behavior.
+
+Accepting a floating-bar suggestion keeps the bar and conversation visible, confirms the change, and refreshes its document text and selection for follow-up edits.
+
+AI Settings includes "Automatically accept AI edits", off by default. Enabling it applies completed floating-bar suggestions through the same path as Accept, with the same stale-document and disk-conflict checks. The side panel continues to apply completed edits automatically.
+
+The Output limit setting defaults to Automatic. OpenAI-compatible and Gemini requests use provider defaults instead of a fixed app cap; Anthropic uses a required 4,096-token fallback. Explicit limits range through 131,072 tokens and apply to both AI surfaces. Truncated responses do not modify files and direct users to the output setting or smaller sections.
+
+The floating bar and side panel use the same conversation controller and session ID. Completed floating replies are saved in history, follow-ups receive previous turns, and opening the panel by its shortcut shows the active conversation. New chat and selecting a saved session update both surfaces. Preview mode controls document writes and still saves the conversation.
+
+AI edits can target any requested Markdown file, including files outside the vault. External files save to their original locations. The floating bar previews edits before acceptance. Suggestions for other files are retained in main; acceptance checks for newer disk content, writes atomically, and records undo history.
+
+The assistant is enabled for new profiles, with a switch in Settings. Existing explicit off preferences remain off. Settings configure OpenAI, Anthropic, Gemini, OpenRouter, DeepSeek, Groq, Mistral, xAI, Ollama, or LM Studio and an optional custom endpoint. Stored API keys stay in the main process. The composer fetches the provider's available chat models and saves the selected model for subsequent turns. OpenAI-compatible providers preserve reasoning and signed tool-call fields during a tool loop without displaying them as replies or storing them in conversation history.
+
+The chat follows the flat workspace with the editor surface, a compact toolbar, shared typography and icons, and a 4px spacing scale. Conversation history uses the shared context menu, and suggestions use plain rows. A neutral multiline prompt field sits above attachment, model, and send/stop controls. The transcript shows message roles and Markdown replies; note and selection context remain visible. Saved conversations restore their messages and file undo history. Switching conversations or closing the panel cancels live work. Document edits use atomic writes with per-file undo and visible skipped changes.
+
+The toolbar AI button and vertical rail shortcut offer a centered quick prompt. While idle, the quick action shows only the prompt bar; an answer or proposed edit appears above it. Proposed edits stay in preview until accepted, and acceptance checks the note snapshot and selected range captured when the prompt opened.
+
+The AI redesign reuses WriteMd's controls and theme tokens, following the flat panels and compact spacing in the Figma reference. The chat layout needs formalizing in Figma.
+
+The sidebar footer places icon-only Settings at the left and AI at the far right, or AI above Settings in the collapsed strip. Horizontal mode puts AI near the right toolbar controls. Both use the supplied WriteMd AI artwork. The matching thinking animation runs during a request and respects app and system reduced motion preferences. Ctrl+B shows or hides the sidebar; Ctrl+Alt+A toggles the assistant. The assistant divider supports dragging and keyboard resizing, saves the preferred width, and clamps to the available window space. Prompt guidance appears in the compact, rounded input, and the API-key setup button opens the AI settings section.
+
+Explain with AI and Summarize with AI use the captured selection from the primary or split pane's text context menu. Those requests exclude the rest of the note, other files, attachments, and chat history; they cannot edit files or call tools. Hidden built-in instructions guide explanations, summaries, rewriting, source attribution, and plain writing without en or em dashes. They are maintained in code rather than exposed as a prompt editor or skill marketplace.
+
+General chats can use a web search tool that reads DuckDuckGo's static search results and returns up to six source links and snippets. Only the short query goes to the search service; result pages are not fetched. Searches have timeout, size, round, and call limits. Search status and failures are visible, and researched answers should cite source links. Models that do not support tools can continue ordinary chat without web search.
+
+WriteMd creates a visible `Skills` folder inside the vault. Personal skills can be named Markdown files such as `Skills/proofread.md` or folders such as `Skills/proofread/SKILL.md`. A root `Skills/SKILL.md` uses `/skill`. Skills in the previous hidden folder remain available, with visible-folder names taking precedence. AI Settings opens the folder and shows available commands. A leading `/` in chat offers skills, and an explicit `/name` request loads that skill freshly into the hidden instructions for the current exchange. Ordinary chat and selection actions do not load skills. Skill files are bounded to 16 KB, linked folders/files are rejected, and no scripts execute. See [Personal AI skills](ai-skills.md) for setup.
+
+While waiting for a response, chat shows the supplied Thinking label artwork as one row with animated eyes, float motion, and dots. Theme tokens supply its color and reduced motion stops its animation. Streaming and completed replies show Markdown without an Assistant label or icon.
 
 ### 7.1 Core (GFM + Extensions)
 
@@ -649,13 +692,9 @@ forward: the theme system ships 7 themes, not 5, and settings persist to
 - [ ] Installer build + test
 - [ ] Documentation (README, keyboard shortcuts)
 - [ ] Beta testing
-- [ ] v1.0 release
+- [ ] Publish the v0.1.0 release baseline
 
-> Note: the auto-updater feed cannot resolve today.
-> `electron-builder.yml` publishes with `provider: github` and no `owner` or
-> `repo`, and `package.json` has no `repository` field, so electron-updater has
-> nowhere to look for a release. Separately, `SettingsModal.ts` renders a thrown
-> update-check error as "up-to-date", so this is not visible from the UI.
+The GitHub updater feed uses the repository in package.json and the owner and repo in electron-builder.yml. Before publishing the restarted baseline, verify the latest release and its platform updater metadata. Earlier 1.x installations need a manual install because 0.1.0 has a lower semantic version. See [release preparation](releasing.md).
 
 ---
 
@@ -688,7 +727,7 @@ forward: the theme system ships 7 themes, not 5, and settings persist to
 
 ## 15. Open Questions
 
-1. **Plugin system?** - Not for MVP. Consider after v1.0 if demand exists.
+1. **Plugin system?** - Not for the initial release. Reconsider if demand exists.
 2. **Sync?** - Out of scope. Users can use Syncthing, iCloud, Dropbox on the vault folder.
 3. **Mobile?** - Capacitor wrapper later. Desktop first.
 4. **License?** - MIT or AGPL? Recommend MIT for adoption.
@@ -736,4 +775,4 @@ forward: the theme system ships 7 themes, not 5, and settings persist to
 **Document Version:** 1.1
 **Last Updated:** 2026-09-30
 **Author:** danieldamilola
-**Status:** Shipped (v1.1.0)
+**Status:** Included in the v0.1.0 release baseline.

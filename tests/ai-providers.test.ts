@@ -3,7 +3,9 @@ import type { StreamEvent, ToolCall } from '../src/shared/ai/types'
 import { anthropicAdapter } from '../src/main/ai/providers/anthropic'
 import { geminiAdapter } from '../src/main/ai/providers/gemini'
 import { openaiAdapter } from '../src/main/ai/providers/openai'
+import { PRESETS } from '../src/main/ai/providers/index'
 import type { ProviderAdapter, StreamRequest } from '../src/main/ai/providers/types'
+import { NATIVE_TOOL_MARKUP_ERROR } from '../src/main/ai/providers/native-tool-markup'
 
 /**
  * Streaming behaviour, per adapter.
@@ -123,6 +125,200 @@ function doneOf(events: StreamEvent[]): Extract<StreamEvent, { type: 'done' }> {
   return done as Extract<StreamEvent, { type: 'done' }>
 }
 
+describe('compatible cloud providers', () => {
+  it.each(['test-model', 'gpt-5-mini', 'deepseek-flash'])(
+    'omits the output cap for %s in Automatic mode',
+    async (model) => {
+      stubFetch()
+      fetchMock.mockResolvedValue(sseResponse('data: [DONE]\n\n'))
+      await collect(openaiAdapter, { model, maxTokens: undefined })
+      const body = JSON.parse(String(fetchMock.mock.calls[0][1]?.body)) as Record<string, unknown>
+      expect(body).not.toHaveProperty('max_tokens')
+      expect(body).not.toHaveProperty('max_completion_tokens')
+    }
+  )
+  it.each(['openrouter', 'deepseek', 'groq', 'mistral', 'xai'])(
+    'streams text and complete tool calls from %s',
+    async (providerId) => {
+      stubFetch()
+      const preset = PRESETS.find((entry) => entry.id === providerId)!
+      const frames =
+        [
+          { choices: [{ delta: { content: 'Searching.' } }] },
+          {
+            choices: [
+              {
+                delta: {
+                  tool_calls: [
+                    {
+                      index: 0,
+                      id: 'search-1',
+                      function: { name: 'web_search', arguments: '{"query":' }
+                    }
+                  ]
+                }
+              }
+            ]
+          },
+          {
+            choices: [
+              {
+                delta: { tool_calls: [{ index: 0, function: { arguments: '"Rust"}' } }] },
+                finish_reason: 'tool_calls'
+              }
+            ]
+          },
+          { usage: { prompt_tokens: 15, completion_tokens: 8 } }
+        ]
+          .map((frame) => `data: ${JSON.stringify(frame)}\n\n`)
+          .join('') + 'data: [DONE]\n\n'
+      fetchMock.mockResolvedValue(sseResponse(frames, 7))
+      const events = await collect(openaiAdapter, {
+        baseUrl: preset.defaultBaseUrl,
+        model: preset.defaultModel
+      })
+      expect(textOf(events)).toBe('Searching.')
+      expect(callsOf(events)).toEqual([
+        { id: 'search-1', name: 'web_search', arguments: { query: 'Rust' } }
+      ])
+      expect(doneOf(events)).toMatchObject({
+        stopReason: 'tool_calls',
+        usage: { inputTokens: 15, outputTokens: 8 }
+      })
+      expect(fetchMock.mock.calls[0][0]).toBe(`${preset.defaultBaseUrl}/chat/completions`)
+      const body = JSON.parse(String(fetchMock.mock.calls[0][1]?.body)) as Record<string, unknown>
+      expect(body.model).toBe(preset.defaultModel)
+      expect(body.stream_options).toEqual(
+        providerId === 'mistral' ? undefined : { include_usage: true }
+      )
+    }
+  )
+
+  it('replays signed calls and hidden reasoning exactly when returning tool results', async () => {
+    stubFetch()
+    const extraContent = { google: { thought_signature: 'opaque-signature' } }
+    const details = [
+      { type: 'reasoning.text', text: 'First ', index: 0, signature: null },
+      { type: 'reasoning.text', text: 'second', index: 0, signature: 'signed' },
+      { type: 'reasoning.encrypted', data: 'opaque', index: 1 }
+    ]
+    const frames =
+      [
+        {
+          choices: [
+            {
+              delta: {
+                reasoning_content: 'Hidden ',
+                reasoning: 'Private ',
+                reasoning_details: [details[0]],
+                tool_calls: [
+                  {
+                    index: 0,
+                    id: 'call-a',
+                    extra_content: extraContent,
+                    function: { name: 'web_search', arguments: '{"query":"Rust"' }
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        {
+          choices: [
+            {
+              delta: {
+                reasoning_content: 'thought',
+                reasoning: 'analysis',
+                reasoning_details: details.slice(1),
+                tool_calls: [{ index: 0, function: { arguments: '}' } }]
+              },
+              finish_reason: 'tool_calls'
+            }
+          ]
+        }
+      ]
+        .map((frame) => `data: ${JSON.stringify(frame)}\n\n`)
+        .join('') + 'data: [DONE]\n\n'
+    fetchMock.mockResolvedValueOnce(sseResponse(frames, 9))
+    const events = await collect(openaiAdapter)
+    expect(textOf(events)).toBe('')
+    expect(callsOf(events)[0].extraContent).toEqual(extraContent)
+    expect(doneOf(events).providerMetadata?.openai).toEqual({
+      reasoningContent: 'Hidden thought',
+      reasoning: 'Private analysis',
+      reasoningDetails: details
+    })
+    fetchMock.mockResolvedValueOnce(sseResponse('data: [DONE]\n\n'))
+    await collect(openaiAdapter, {
+      messages: [
+        {
+          role: 'assistant',
+          content: '',
+          toolCalls: callsOf(events),
+          providerMetadata: doneOf(events).providerMetadata
+        },
+        { role: 'tool', content: 'Results', toolCallId: 'call-a', name: 'web_search' }
+      ]
+    })
+    const body = JSON.parse(String(fetchMock.mock.calls[1][1]?.body)) as { messages: unknown[] }
+    expect(body.messages[1]).toEqual({
+      role: 'assistant',
+      content: null,
+      reasoning_content: 'Hidden thought',
+      reasoning: 'Private analysis',
+      reasoning_details: details,
+      tool_calls: [
+        {
+          id: 'call-a',
+          type: 'function',
+          extra_content: extraContent,
+          function: { name: 'web_search', arguments: '{"query":"Rust"}' }
+        }
+      ]
+    })
+  })
+})
+
+describe('interrupted provider streams', () => {
+  it.each([true, false])('handles a socket failure with a terminal frame=%s', async (complete) => {
+    stubFetch()
+    let reads = 0
+    const stream = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        if (reads++ === 0) {
+          controller.enqueue(
+            encode(
+              `data: ${JSON.stringify({ choices: [{ delta: { content: 'Response' }, ...(complete ? { finish_reason: 'stop' } : {}) }] })}\n\n`
+            )
+          )
+        } else {
+          controller.error(new Error('terminated'))
+        }
+      }
+    })
+    fetchMock.mockResolvedValue(new Response(stream))
+    if (complete) {
+      const events = await collect(openaiAdapter)
+      expect(textOf(events)).toBe('Response')
+      expect(doneOf(events).stopReason).toBe('end_turn')
+    } else {
+      await expect(collect(openaiAdapter)).rejects.toThrow('No edits were applied. Try again.')
+    }
+  })
+  it.each([
+    [openaiAdapter, 'data: {"choices":[{"delta":{"content":"partial"}}]}\n\n'],
+    [
+      anthropicAdapter,
+      'data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"partial"}}\n\n'
+    ],
+    [geminiAdapter, 'data: {"candidates":[{"content":{"parts":[{"text":"partial"}]}}]}\n\n']
+  ] as const)('rejects an incomplete response from $descriptor.id', async (adapter, partial) => {
+    stubFetch()
+    fetchMock.mockResolvedValue(sseResponse(partial))
+    await expect(collect(adapter)).rejects.toThrow(/ended before it was complete/)
+  })
+})
+
 /* ------------------------------------------------------------------------ */
 /* OpenAI                                                                    */
 /* ------------------------------------------------------------------------ */
@@ -146,6 +342,122 @@ const OPENAI_TOOL_STREAM = [
 ].join('')
 
 describe('openai adapter', () => {
+  it.each(['<|DSML|tool_calls>', '<｜DSML｜function_calls>'])(
+    'rejects fragmented native markup %s after prose without leaking it',
+    async (marker) => {
+      stubFetch()
+      const pieces = ['Checking the note.\n', ...marker, 'raw tool instructions']
+      fetchMock.mockResolvedValue(
+        sseResponse(
+          pieces
+            .map((content) => `data: ${JSON.stringify({ choices: [{ delta: { content } }] })}\n\n`)
+            .join('') + 'data: [DONE]\n\n'
+        )
+      )
+      const events: StreamEvent[] = []
+      await expect(
+        (async () => {
+          for await (const event of openaiAdapter.stream(request())) events.push(event)
+        })()
+      ).rejects.toThrow(NATIVE_TOOL_MARKUP_ERROR)
+      expect(textOf(events)).toBe('Checking the note.\n')
+      expect(callsOf(events)).toEqual([])
+    }
+  )
+
+  it('disables DeepSeek thinking and tool choice only for the recovery request', async () => {
+    stubFetch()
+    fetchMock.mockImplementation(async () => sseResponse('data: [DONE]\n\n'))
+    await collect(openaiAdapter, {
+      baseUrl: 'https://api.deepseek.com',
+      model: 'deepseek-v4-pro',
+      disableThinking: true
+    })
+    const body = JSON.parse(String(fetchMock.mock.calls[0][1]?.body))
+    expect(body.thinking).toEqual({ type: 'disabled' })
+    expect(body.tool_choice).toBe('none')
+    expect(body.tools).toBeUndefined()
+    await collect(openaiAdapter, { baseUrl: 'https://api.deepseek.com', model: 'deepseek-v4-pro' })
+    expect(JSON.parse(String(fetchMock.mock.calls[1][1]?.body))).not.toHaveProperty('thinking')
+    await collect(openaiAdapter, { disableThinking: true })
+    expect(JSON.parse(String(fetchMock.mock.calls[2][1]?.body))).not.toHaveProperty('thinking')
+  })
+  it('does not report filtered output as a completed response', async () => {
+    stubFetch()
+    fetchMock.mockResolvedValue(
+      sseResponse(
+        'data: {"choices":[{"delta":{},"finish_reason":"content_filter"}]}\n\ndata: [DONE]\n\n'
+      )
+    )
+    const events = await collect(openaiAdapter)
+    expect(events.some((event) => event.type === 'error')).toBe(true)
+    expect(doneOf(events).stopReason).toBe('error')
+  })
+  it('renders refusal deltas as part of the reply', async () => {
+    stubFetch()
+    fetchMock.mockResolvedValue(
+      sseResponse(
+        'data: {"choices":[{"delta":{"refusal":"Cannot help."},"finish_reason":"stop"}]}\n\n'
+      )
+    )
+    expect(textOf(await collect(openaiAdapter))).toBe('Cannot help.')
+  })
+
+  it('stops at the completion sentinel even when the server keeps the socket open', async () => {
+    stubFetch()
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(encode('data: [DONE]\n\n'))
+      }
+    })
+    fetchMock.mockResolvedValue(new Response(body))
+    expect(await collect(openaiAdapter)).toEqual([{ type: 'done', stopReason: 'end_turn' }])
+  })
+
+  it('does not emit buffered text after cancellation', async () => {
+    stubFetch()
+    const controller = new AbortController()
+    fetchMock.mockResolvedValue(sseResponse(OPENAI_TEXT_STREAM))
+    const iterator = openaiAdapter.stream(request({ signal: controller.signal }))
+    expect((await iterator.next()).value?.type).toBe('text')
+    controller.abort()
+    await expect(iterator.next()).rejects.toMatchObject({ name: 'AbortError' })
+  })
+
+  it('redacts a key echoed by the provider in HTTP and stream errors', async () => {
+    stubFetch()
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse({ error: { message: 'Rejected sk-test-key' } }, 401)
+    )
+    const error = await collect(openaiAdapter).catch((caught: unknown) => caught)
+    expect(error).toBeInstanceOf(Error)
+    expect((error as Error).message).toContain('[redacted]')
+    expect((error as Error).message).not.toContain('sk-test-key')
+    fetchMock.mockResolvedValueOnce(
+      sseResponse('data: {"error":{"message":"Rejected sk-test-key"}}\n\n')
+    )
+    expect(await collect(openaiAdapter)).toEqual([
+      { type: 'error', message: 'Rejected [redacted]' }
+    ])
+  })
+  it.each(['o3', 'o4-mini', 'gpt-5', 'gpt-5.4', 'gpt-6-astra', 'ft:gpt-5:org:model'])(
+    'uses compatible generation parameters for %s',
+    async (model) => {
+      stubFetch()
+      fetchMock.mockResolvedValue(sseResponse('data: [DONE]\n\n'))
+      await collect(openaiAdapter, { model })
+      const body = JSON.parse(fetchMock.mock.calls[0][1]?.body as string) as Record<string, unknown>
+      expect(body.max_completion_tokens).toBe(128)
+      expect(body).not.toHaveProperty('max_tokens')
+      expect(body).not.toHaveProperty('temperature')
+    }
+  )
+
+  it('surfaces a provider error delivered inside a successful SSE response', async () => {
+    stubFetch()
+    fetchMock.mockResolvedValue(sseResponse('data: {"error":{"message":"Quota exceeded"}}\n\n'))
+    expect(await collect(openaiAdapter)).toEqual([{ type: 'error', message: 'Quota exceeded' }])
+  })
   it('accumulates text deltas into the full string', async () => {
     stubFetch()
     fetchMock.mockResolvedValue(sseResponse(OPENAI_TEXT_STREAM))
@@ -435,6 +747,23 @@ const ANTHROPIC_TOOL_STREAM = [
 ].join('')
 
 describe('anthropic adapter', () => {
+  it.each([undefined, 65536])('supplies the required output limit for %s', async (limit) => {
+    stubFetch()
+    fetchMock.mockResolvedValue(sseResponse(ANTHROPIC_TEXT_STREAM))
+    await collect(anthropicAdapter, { maxTokens: limit })
+    const body = JSON.parse(String(fetchMock.mock.calls[0][1]?.body)) as Record<string, unknown>
+    expect(body.max_tokens).toBe(limit ?? 4096)
+  })
+  it('reports a context-window limit as truncated output', async () => {
+    stubFetch()
+    fetchMock.mockResolvedValue(
+      sseResponse(
+        'data: {"type":"message_delta","delta":{"stop_reason":"model_context_window_exceeded"}}\n\n' +
+          'data: {"type":"message_stop"}\n\n'
+      )
+    )
+    expect(doneOf(await collect(anthropicAdapter)).stopReason).toBe('max_tokens')
+  })
   it('accumulates text deltas into the full string', async () => {
     stubFetch()
     fetchMock.mockResolvedValue(sseResponse(ANTHROPIC_TEXT_STREAM))
@@ -621,6 +950,56 @@ const GEMINI_TOOL_STREAM =
   '"finishReason":"STOP"}]}\n\n'
 
 describe('gemini adapter', () => {
+  it.each([undefined, 65536])('uses automatic or explicit output limit %s', async (limit) => {
+    stubFetch()
+    fetchMock.mockResolvedValue(sseResponse(GEMINI_TEXT_STREAM))
+    await collect(geminiAdapter, { maxTokens: limit })
+    const body = JSON.parse(String(fetchMock.mock.calls[0][1]?.body)) as {
+      generationConfig: Record<string, unknown>
+    }
+    if (limit === undefined) expect(body.generationConfig).not.toHaveProperty('maxOutputTokens')
+    else expect(body.generationConfig.maxOutputTokens).toBe(limit)
+  })
+  it.each(['LANGUAGE', 'OTHER', 'UNEXPECTED_TOOL_CALL', 'MALFORMED_RESPONSE'])(
+    'reports %s as a failed response',
+    async (finishReason) => {
+      stubFetch()
+      fetchMock.mockResolvedValue(
+        sseResponse(`data: ${JSON.stringify({ candidates: [{ finishReason }] })}\n\n`)
+      )
+      const events = await collect(geminiAdapter)
+      expect(events.some((event) => event.type === 'error')).toBe(true)
+      expect(doneOf(events).stopReason).toBe('error')
+    }
+  )
+  it('reports a provider error sent inside a successful event stream', async () => {
+    stubFetch()
+    fetchMock.mockResolvedValue(sseResponse('data: {"error":{"message":"Quota exceeded"}}\n\n'))
+    expect(await collect(geminiAdapter)).toEqual([{ type: 'error', message: 'Quota exceeded' }])
+  })
+
+  it('reports a blocked prompt instead of an empty successful reply', async () => {
+    stubFetch()
+    fetchMock.mockResolvedValue(
+      sseResponse('data: {"promptFeedback":{"blockReason":"SAFETY"}}\n\n')
+    )
+    expect(await collect(geminiAdapter)).toEqual([
+      {
+        type: 'error',
+        message: 'Gemini blocked this prompt (SAFETY). Rephrase the message and try again.'
+      }
+    ])
+  })
+
+  it('keeps thought summaries out of the assistant reply', async () => {
+    stubFetch()
+    fetchMock.mockResolvedValue(
+      sseResponse(
+        'data: {"candidates":[{"content":{"parts":[{"thought":true,"text":"Thinking"},{"text":"Answer"}]},"finishReason":"STOP"}]}\n\n'
+      )
+    )
+    expect(textOf(await collect(geminiAdapter))).toBe('Answer')
+  })
   it('accumulates text deltas into the full string', async () => {
     stubFetch()
     fetchMock.mockResolvedValue(sseResponse(GEMINI_TEXT_STREAM))

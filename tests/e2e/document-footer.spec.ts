@@ -319,20 +319,31 @@ test.describe('Document footer', () => {
         context.fillRect(0, 0, 1, 1)
         return context.getImageData(0, 0, 1, 1).data[3] / 255
       })
+    const paint = (locator: Locator): Promise<string> =>
+      locator.evaluate((element) => getComputedStyle(element).backgroundColor)
 
-    // Fully opaque surface: no translucency to follow.
+    // The bar paints nothing at any opacity. Whatever is behind it is the pane,
+    // so the footer and the document above it cannot end up different shades.
+    expect(await paint(footer)).toBe('rgba(0, 0, 0, 0)')
+
     await prefs(page, { 'appearance.surfaceOpacity': 100 })
-    expect(await alpha(footer)).toBeCloseTo(1, 2)
+    expect(await paint(footer)).toBe('rgba(0, 0, 0, 0)')
     expect(await footer.evaluate((el) => getComputedStyle(el).backdropFilter)).toBe('blur(0px)')
 
-    // Reduced opacity: the bar and the pane share one material, and the blur
-    // that goes with it switches on rather than the bar inventing its own.
+    /*
+     * Reduced opacity: the bar and the pane share one material.
+     *
+     * The bar paints nothing at all now and lets the pane's own surface show
+     * through it. It used to repaint the same translucent token, which put a
+     * second film over the first and left the footer a shade darker than the
+     * document directly above it at every opacity below 100.
+     */
     await prefs(page, { 'appearance.surfaceOpacity': 55 })
-    const footerAlpha = await alpha(footer)
-    expect(footerAlpha).toBeLessThan(0.95)
+    expect(await paint(footer)).toBe('rgba(0, 0, 0, 0)')
     expect(await footer.evaluate((el) => getComputedStyle(el).backdropFilter)).toBe('blur(8px)')
-    // Same token as the pane, so they stay one surface.
-    expect(footerAlpha).toBeCloseTo(await alpha(panel), 2)
+    // Whatever is behind the bar is the pane, so the two cannot drift apart.
+    const panelAlpha = await alpha(panel)
+    expect(panelAlpha).toBeLessThan(0.95)
     await page.screenshot({ path: 'artifacts/ui-review/document-footer-translucent.png' })
 
     await prefs(page, { 'appearance.surfaceOpacity': 100 })

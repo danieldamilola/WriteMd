@@ -1,6 +1,7 @@
 import { ipcMain, dialog, shell, app, type BrowserWindow } from 'electron'
 import { readFile, writeFile, stat, rename, unlink, open } from 'fs/promises'
-import { watch, existsSync, mkdirSync, type FSWatcher } from 'fs'
+import { existsSync, mkdirSync, type FSWatcher } from 'fs'
+import { watchDocument } from './file-watch'
 import { dirname, join, resolve } from 'path'
 import { randomUUID } from 'crypto'
 import {
@@ -39,21 +40,28 @@ import {
   isSubpath
 } from './path-guard'
 import { PRESETS, adapterFor } from './ai/providers'
+import { ensureSkillsFolder, listSkills } from './ai/skills'
 import { checkEndpoint } from './ai/endpoint'
 import { getApiKey, keyState, setApiKey } from './ai/key-store'
 import {
+  acceptPreview,
   cancelTurn,
   deleteSavedSession,
   getJournal,
   listChanges,
   readSessions,
   setEventEmitter,
+  setFileChangeEmitter,
   startTurn,
   writeSession,
   type AiSendInput
 } from './ai/service'
 import type { PersistedSession } from '../shared/ai/sessions'
-import type { SetKeyResult } from '../shared/electron-api'
+import type { FileChangeSnapshot, SetKeyResult } from '../shared/electron-api'
+import { statOrNull } from './ai/paths'
+import { chatgptAuth, cancelChatgptLogin, CHATGPT_API_BASE } from './ai/chatgpt-auth'
+import { chatgptModels } from './ai/providers/chatgpt'
+import { cancelAll } from './ai/service'
 
 /** A model listing is a single small GET; anything slower is a wrong endpoint. */
 const MODEL_LIST_TIMEOUT_MS = 20_000
@@ -72,6 +80,7 @@ export function registerPersistedPaths(): void {
 
 /** Close all fs watchers; called on app quit so nothing leaks. */
 export function closeAllWatchers(): void {
+  cancelChatgptLogin()
   for (const watcher of watchedPaths.values()) {
     try {
       watcher.close()
@@ -86,6 +95,10 @@ export function setupIpc(getWindow: () => BrowserWindow | null): void {
   setVaultRootProvider(getVaultPath)
   registerPersistedPaths()
   setEventEmitter((event) => getWindow()?.webContents.send('ai:event', event))
+  const fileChanged = (path: string, snapshot?: FileChangeSnapshot): void =>
+    getWindow()?.webContents.send('file:changed', path, snapshot)
+  setFileChangeEmitter(fileChanged)
+  chatgptAuth().subscribe((state) => getWindow()?.webContents.send('ai:chatgpt-auth', state))
   ipcMain.handle('appearance:import-background', () => importBackground(getWindow()))
   ipcMain.handle('appearance:get-background', (_, id: string) => getBackground(id))
   ipcMain.handle('appearance:remove-background', (_, id: string) => removeBackground(id))
@@ -209,14 +222,7 @@ export function setupIpc(getWindow: () => BrowserWindow | null): void {
     // instead of racing two 'change' events for the same file.
     const key = normalizePath(filePath)
     if (watchedPaths.has(key)) return
-    const watcher = watch(filePath, { persistent: false })
-    // 'rename' matters as much as 'change' here. macOS fs.watch is
-    // FSEvents-backed and reports an atomic replace as 'rename', and this app
-    // (plus Obsidian, git, and every sync client) writes via rename-over. On
-    // a 'change'-only subscription the conflict dialog never sees those.
-    const emit = (): void => getWindow()?.webContents.send('file:changed', filePath)
-    watcher.on('change', emit)
-    watcher.on('rename', emit)
+    const watcher = watchDocument(filePath, () => fileChanged(filePath))
     // Close before dropping the entry: a watcher removed from the map without
     // close() keeps its file descriptor open until app quit.
     watcher.on('error', (err) => {
@@ -320,6 +326,7 @@ export function setupIpc(getWindow: () => BrowserWindow | null): void {
   ipcMain.handle('settings:get', () => getSettings())
   ipcMain.handle('settings:set', async (_, settings: WriteMdSettingsPatch) => {
     const previousMaterial = getSettings().appearance.windowMaterial
+    const previousTheme = getSettings().appearance.theme
     // Every path guard measures against `getVaultPath()`. A vault change that
     // arrives through settings rather than `vault:set-path` still has to move
     // that boundary, so the cache cannot survive it.
@@ -327,7 +334,10 @@ export function setupIpc(getWindow: () => BrowserWindow | null): void {
       invalidateVaultPathCache()
     }
     await setSettings(settings)
-    if (getSettings().appearance.windowMaterial !== previousMaterial)
+    if (
+      getSettings().appearance.windowMaterial !== previousMaterial ||
+      getSettings().appearance.theme !== previousTheme
+    )
       applyWindowMaterial(getWindow())
   })
 
@@ -407,6 +417,37 @@ export function setupIpc(getWindow: () => BrowserWindow | null): void {
   // ---------------------------------------------------------------- AI
 
   ipcMain.handle('ai:presets', () => PRESETS)
+  ipcMain.handle('ai:chatgpt-state', () => chatgptAuth().state())
+  ipcMain.handle('ai:chatgpt-login', (_, addAccount: boolean) =>
+    chatgptAuth().login(addAccount === true)
+  )
+  ipcMain.handle('ai:chatgpt-cancel', () => chatgptAuth().cancelLogin())
+  ipcMain.handle('ai:chatgpt-logout', () => {
+    cancelAll()
+    return chatgptAuth().logout()
+  })
+  ipcMain.handle('ai:chatgpt-select', (_, id: string) => {
+    cancelAll()
+    return chatgptAuth().select(id)
+  })
+  ipcMain.handle('ai:chatgpt-acknowledge', () => chatgptAuth().acknowledgePlan())
+  ipcMain.handle('ai:chatgpt-models', async () =>
+    chatgptModels(
+      {
+        baseUrl: CHATGPT_API_BASE,
+        apiKey: await chatgptAuth().accessToken()
+      },
+      AbortSignal.timeout(MODEL_LIST_TIMEOUT_MS)
+    )
+  )
+
+  ipcMain.handle('ai:list-skills', () => listSkills(getVaultPath()))
+  ipcMain.handle('ai:open-skills-folder', async () => {
+    const folder = ensureSkillsFolder(getVaultPath())
+    const error = await shell.openPath(folder)
+    if (error) throw new Error('Could not open the skills folder. Open it from your vault instead.')
+    return folder
+  })
 
   ipcMain.handle('ai:key-state', () => keyState())
 
@@ -434,6 +475,16 @@ export function setupIpc(getWindow: () => BrowserWindow | null): void {
   ipcMain.handle(
     'ai:fetch-models',
     async (_, providerId: string, baseUrl: string, typedKey: string) => {
+      if (providerId === 'chatgpt')
+        return (
+          await chatgptModels(
+            {
+              baseUrl: CHATGPT_API_BASE,
+              apiKey: await chatgptAuth().accessToken()
+            },
+            AbortSignal.timeout(MODEL_LIST_TIMEOUT_MS)
+          )
+        ).map((model) => model.id)
       const adapter = adapterFor(providerId)
       if (!adapter) throw new Error(`Unknown provider: ${providerId}`)
       const apiKey = typedKey.trim() || getApiKey() || undefined
@@ -441,7 +492,10 @@ export function setupIpc(getWindow: () => BrowserWindow | null): void {
       // model listing, so only the endpoint and key checks are relevant here.
       const check = checkEndpoint(baseUrl, 'unused', apiKey)
       if (!check.ok) throw new Error(check.message)
-      return adapter.listModels({ baseUrl, apiKey }, AbortSignal.timeout(MODEL_LIST_TIMEOUT_MS))
+      return adapter.listModels(
+        { baseUrl, apiKey, providerId },
+        AbortSignal.timeout(MODEL_LIST_TIMEOUT_MS)
+      )
     }
   )
 
@@ -451,6 +505,7 @@ export function setupIpc(getWindow: () => BrowserWindow | null): void {
   ipcMain.handle('ai:send', (_, requestId: string, input: AiSendInput) =>
     startTurn(requestId, input)
   )
+  ipcMain.handle('ai:accept-preview', (_, previewId: string) => acceptPreview(previewId))
 
   ipcMain.handle('ai:cancel', (_, requestId: string) => {
     cancelTurn(requestId)
@@ -459,7 +514,24 @@ export function setupIpc(getWindow: () => BrowserWindow | null): void {
 
   ipcMain.handle('ai:list-changes', (_, sessionId?: string) => listChanges(sessionId))
 
-  ipcMain.handle('ai:undo-change', (_, journalId: string) => getJournal().undo(journalId))
+  ipcMain.handle('ai:undo-change', (_, journalId: string) => {
+    const journal = getJournal()
+    const entry = journal.list().find((entry) => entry.id === journalId)
+    const path = entry?.path
+    const outcome = journal.undo(journalId)
+    if (path && (outcome.status === 'restored' || outcome.status === 'gone'))
+      fileChanged(
+        path,
+        outcome.status === 'restored' && entry?.before !== null && entry
+          ? {
+              before: entry.after,
+              content: entry.before,
+              mtime: statOrNull(path)?.mtimeMs ?? Date.now()
+            }
+          : undefined
+      )
+    return outcome
+  })
 
   ipcMain.handle('ai:list-sessions', () => readSessions())
 

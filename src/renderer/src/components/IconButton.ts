@@ -1,5 +1,6 @@
 import { html, css, LitElement } from 'lit'
 import { customElement, property } from 'lit/decorators.js'
+import { ifDefined } from 'lit/directives/if-defined.js'
 
 export type IconButtonSize = 'sm' | 'md' | 'caption'
 
@@ -116,6 +117,7 @@ export class WriteMdIconButton extends LitElement {
   @property({ type: String, reflect: true }) variant: 'default' | 'close' = 'default'
   @property({ type: String }) title = ''
   @property({ type: String, attribute: 'aria-label' }) ariaLabel = ''
+  @property({ type: String, attribute: 'aria-pressed' }) pressed?: string
   @property({ type: Boolean, reflect: true }) disabled = false
 
   render(): unknown {
@@ -124,6 +126,7 @@ export class WriteMdIconButton extends LitElement {
         type="button"
         title="${this.title}"
         aria-label="${this.ariaLabel || this.title}"
+        aria-pressed=${ifDefined(this.pressed)}
         ?disabled=${this.disabled}
       >
         <slot></slot>

@@ -1,6 +1,13 @@
 import { makeSessionId } from '../../../../shared/ai/sessions'
 import { aiBridge } from './types'
-import type { AiEvent, AiSendInput, ChangeView, SessionView, SkippedView } from './types'
+import type {
+  AiEvent,
+  AiSendInput,
+  ChangeView,
+  PreviewChangeView,
+  SessionView,
+  SkippedView
+} from './types'
 
 /**
  * One exchange with the assistant, as the transcript shows it.
@@ -25,25 +32,32 @@ export interface ProposalView {
 }
 
 export interface TurnState {
+  status: string | null
   sessionId: string
   messages: TurnMessage[]
+  /** Authoritative reply, separate from provisional streamed edit blocks. */
+  reply: string | null
   busy: boolean
   error: string | null
   proposal: ProposalView | null
   /** Files written this session, each undoable on its own. */
   changes: ChangeView[]
+  previews: PreviewChangeView[]
   /** Files the model named and the applier declined to touch. */
   skipped: SkippedView[]
 }
 
 function initialState(): TurnState {
   return {
+    status: null,
     sessionId: makeSessionId(),
     messages: [],
+    reply: null,
     busy: false,
     error: null,
     proposal: null,
     changes: [],
+    previews: [],
     skipped: []
   }
 }
@@ -82,6 +96,10 @@ export class TurnController {
   /** The request whose session has already been written, so `done` after `error` is free. */
 
   constructor() {
+    this.ensureSubscribed()
+  }
+
+  connect(): void {
     this.ensureSubscribed()
   }
 
@@ -126,6 +144,7 @@ export class TurnController {
       return
     }
     this.ensureSubscribed()
+    this.cancel()
     const requestId = newId()
     const now = Date.now()
     // A second turn while one is streaming would interleave two transcripts, so
@@ -141,8 +160,10 @@ export class TurnController {
         { id: `${requestId}:assistant`, role: 'assistant', text: '', createdAt: now }
       ],
       busy: true,
+      reply: null,
       error: null,
-      proposal: null
+      proposal: null,
+      previews: []
     })
     try {
       await bridge.send(requestId, { ...input, sessionId })
@@ -165,7 +186,7 @@ export class TurnController {
     const requestId = this.activeRequestId
     if (!requestId) return
     this.activeRequestId = null
-    this.patch({ busy: false })
+    this.patch({ busy: false, status: null })
     void aiBridge()
       ?.cancel?.(requestId)
       .catch(() => undefined)
@@ -174,6 +195,7 @@ export class TurnController {
 
   /** Drop the transcript and start a new conversation. */
   reset(): void {
+    this.cancel()
     this.state = { ...initialState(), sessionId: makeSessionId() }
     this.activeRequestId = null
     this.notify()
@@ -181,10 +203,18 @@ export class TurnController {
 
   /** Show a conversation loaded from the session list. */
   load(session: SessionView): void {
+    this.cancel()
     this.state = {
       ...initialState(),
       sessionId: session.id,
-      messages: [],
+      messages: (session.messages ?? []).map((message, index) => ({
+        id: `${session.id}:saved:${index}`,
+        role: message.role,
+        text: message.content,
+        createdAt: session.createdAt
+      })),
+      reply:
+        session.messages?.filter((message) => message.role === 'assistant').at(-1)?.content ?? null,
       changes: [],
       skipped: []
     }
@@ -193,14 +223,40 @@ export class TurnController {
   }
 
   /** Changes already on disk for a conversation, for reopening the undo list. */
-  adoptChanges(changes: ChangeView[]): void {
+  adoptChanges(changes: ChangeView[], sessionId = this.state.sessionId): void {
+    if (sessionId !== this.state.sessionId) return
     this.patch({ changes })
+  }
+
+  acceptPreview(preview: PreviewChangeView, change: ChangeView | null): void {
+    const previews = this.state.previews.filter((entry) =>
+      preview.previewId ? entry.previewId !== preview.previewId : entry !== preview
+    )
+    this.patch({
+      previews,
+      changes: change ? [...this.state.changes, change] : this.state.changes
+    })
+    if (
+      previews.length === 0 &&
+      (!this.state.reply || this.state.reply === 'Review the suggested change before accepting it.')
+    ) {
+      this.setAnswer('Applied the requested change.')
+    }
+  }
+
+  discardPreviews(): void {
+    this.patch({ previews: [] })
   }
 
   private handleEvent = (event: AiEvent): void => {
     if (event.requestId !== this.activeRequestId) return
     switch (event.type) {
+      case 'status':
+        this.setAnswer('')
+        this.patch({ status: event.message })
+        return
       case 'text':
+        this.patch({ status: null })
         this.appendDelta(event.delta)
         return
       case 'proposal':
@@ -218,11 +274,11 @@ export class TurnController {
           skipped: [...this.state.skipped, ...event.skipped]
         })
         return
+      case 'preview':
+        this.patch({ previews: event.changes, skipped: event.skipped })
+        return
       case 'answer':
-        // Only when nothing streamed. A non-empty transcript means the text
-        // events already carried the answer and re-setting it would duplicate
-        // the whole thing at the end of the message.
-        if (!this.activeMessage().text.trim()) this.setAnswer(event.text)
+        this.setAnswer(event.text)
         return
       case 'error':
         this.settle(event.requestId, event.message)
@@ -231,7 +287,7 @@ export class TurnController {
         // `done` carries the authoritative text. Replace what streamed rather
         // than appending: when the model edited files, what streamed was the
         // protocol, and the real reply is the sentence around it.
-        if (event.text) this.setAnswer(event.text)
+        if (event.text !== undefined) this.setAnswer(event.text)
         this.settle(event.requestId, null)
         return
     }
@@ -261,7 +317,7 @@ export class TurnController {
   private settle(requestId: string, error: string | null): void {
     if (requestId !== this.activeRequestId) return
     this.activeRequestId = null
-    this.patch({ busy: false, error })
+    this.patch({ busy: false, error, status: null })
     void this.persist()
   }
 
@@ -285,7 +341,7 @@ export class TurnController {
     const index = messages.length - 1
     if (index >= 0 && messages[index].role === 'assistant') {
       messages[index] = { ...messages[index], text }
-      this.patch({ messages })
+      this.patch({ messages, reply: text })
     }
   }
 
@@ -305,6 +361,7 @@ export class TurnController {
   }
 
   dispose(): void {
+    this.cancel()
     this.unsubscribe?.()
     this.unsubscribe = null
     this.listeners.clear()

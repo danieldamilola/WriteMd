@@ -311,8 +311,11 @@ test.describe('Pane menus and sidebar updates', () => {
     const button = control.locator('.sidebar-action')
     await expect(button).toHaveText('Update available')
     await expect(page.locator('writemd-top-bar writemd-update-button')).toHaveCount(0)
+    // Settings is icon-only in the sidebar footer, so it is found by its
+    // accessible name rather than by its text.
     const settings = await page
-      .locator('writemd-sidebar .footer button', { hasText: 'Settings' })
+      .locator('writemd-sidebar')
+      .getByRole('button', { name: 'Settings', exact: true })
       .boundingBox()
     const bounds = await button.boundingBox()
     expect(bounds!.y + bounds!.height).toBeLessThanOrEqual(settings!.y)

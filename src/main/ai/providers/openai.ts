@@ -1,6 +1,8 @@
+import { NativeToolTextGuard, NATIVE_TOOL_MARKUP_ERROR } from './native-tool-markup'
 import type {
   ChatMessage,
   MessageContent,
+  ProviderMetadata,
   StopReason,
   StreamEvent,
   ToolSpec,
@@ -13,8 +15,11 @@ import {
   asString,
   assertEndpoint,
   assertListingEndpoint,
+  INTERRUPTED_STREAM_MESSAGE,
   normalizeModelIds,
   parsePayload,
+  ProviderHttpError,
+  redactSecrets,
   requestJson,
   streamSse,
   usageWith
@@ -46,6 +51,7 @@ interface OpenAiToolCallDelta {
   index: number | null
   name: string | null
   args: string | null
+  extraContent: Record<string, unknown> | null
 }
 
 function toOpenAiMessages(messages: ChatMessage[], system: string): unknown[] {
@@ -70,11 +76,19 @@ function toOpenAiMessages(messages: ChatMessage[], system: string): unknown[] {
       entry.tool_calls = message.toolCalls.map((call) => ({
         id: call.id,
         type: 'function',
-        function: { name: call.name, arguments: JSON.stringify(call.arguments) }
+        function: { name: call.name, arguments: JSON.stringify(call.arguments) },
+        ...(call.extraContent ? { extra_content: call.extraContent } : {})
       }))
       // A message that only calls tools has no text, and OpenAI rejects the
       // empty string where content is expected.
       if (!hasText(message.content)) entry.content = null
+    }
+    const metadata = assistant ? message.providerMetadata?.openai : undefined
+    if (metadata) {
+      if (metadata.reasoningContent !== undefined)
+        entry.reasoning_content = metadata.reasoningContent
+      if (metadata.reasoning !== undefined) entry.reasoning = metadata.reasoning
+      if (metadata.reasoningDetails) entry.reasoning_details = metadata.reasoningDetails
     }
     out.push(entry)
   }
@@ -121,8 +135,8 @@ function toOpenAiTools(tools: ToolSpec[]): unknown[] {
 function mapStopReason(reason: string): StopReason {
   if (reason === 'length') return 'max_tokens'
   if (reason === 'tool_calls' || reason === 'function_call') return 'tool_calls'
-  if (reason === 'stop' || reason === 'content_filter') return 'end_turn'
-  return 'end_turn'
+  if (reason === 'stop') return 'end_turn'
+  return 'error'
 }
 
 function authHeaders(apiKey: string | undefined): Record<string, string> {
@@ -142,10 +156,54 @@ function readToolCallDeltas(delta: Record<string, unknown>): OpenAiToolCallDelta
       id: asString(record.id),
       index: asNumber(record.index),
       name: fn ? asString(fn.name) : null,
-      args: fn ? asString(fn.arguments) : null
+      args: fn ? asString(fn.arguments) : null,
+      extraContent: asRecord(record.extra_content)
     })
   }
   return deltas
+}
+
+/** Known non-chat families cannot use this adapter's Chat Completions route. */
+function isChatModel(id: string): boolean {
+  const name = id.replace(/^ft:/, '').split(':')[0].toLowerCase()
+  return !(
+    /^(?:text-embedding|text-moderation|omni-moderation|tts-|whisper-|dall-e-|gpt-image-|sora(?:-|$)|babbage-|davinci-|computer-use-|codex-mini-)/.test(
+      name
+    ) ||
+    /(?:^|-)(?:realtime|transcribe|tts|embedding|moderation|deep-research|codex)(?:-|$)/.test(
+      name
+    ) ||
+    /^(?:o\d+|gpt-\d+(?:\.\d+)?)-pro(?:-|$)/.test(name) ||
+    name.endsWith('-instruct')
+  )
+}
+
+/** Cloud catalogues also contain audio, image and embedding-only models. */
+function chatModelIds(payload: unknown, config: ProviderConfig): string[] {
+  const host = new URL(config.baseUrl).hostname
+  const nativeOpenAi = config.providerId === 'openai' || host === 'api.openai.com'
+  const openrouter = config.providerId === 'openrouter' || host === 'openrouter.ai'
+  const mistral = config.providerId === 'mistral' || host === 'api.mistral.ai'
+  const groq = config.providerId === 'groq' || host === 'api.groq.com'
+  const xai = config.providerId === 'xai' || host === 'api.x.ai'
+  const entries = asArray(asRecord(payload)?.data).filter((entry) => {
+    const record = asRecord(entry)
+    const id = record ? asString(record.id) : null
+    if (!id) return false
+    if (nativeOpenAi) return isChatModel(id)
+    if (openrouter) {
+      const output = asRecord(record?.architecture)?.output_modalities
+      return !Array.isArray(output) || output.includes('text')
+    }
+    if (mistral && asRecord(record?.capabilities)?.completion_chat === false) return false
+    if (groq || mistral || xai) {
+      return !/(?:^|[/-])(?:whisper|orpheus|prompt-guard|safeguard|embed|embedding|imagine|voxtral)(?:-|$)/i.test(
+        id
+      )
+    }
+    return true
+  })
+  return readDataModelIds({ data: entries })
 }
 
 /**
@@ -186,13 +244,20 @@ export const openaiAdapter: ProviderAdapter = {
 
   async listModels(config: ProviderConfig, signal: AbortSignal): Promise<string[]> {
     const baseUrl = assertListingEndpoint(config.baseUrl, config.apiKey)
-    const payload = await requestJson(joinUrl(baseUrl, '/models'), {
-      method: 'GET',
-      headers: authHeaders(config.apiKey),
-      signal
-    })
-    const ids = readDataModelIds(payload)
-    if (ids.length > 0) return ids
+    // A cloud provider with an empty catalogue must not use Ollama's endpoint.
+    const ollama =
+      config.providerId === 'ollama' || (!config.providerId && new URL(baseUrl).port === '11434')
+    try {
+      const payload = await requestJson(joinUrl(baseUrl, '/models'), {
+        method: 'GET',
+        headers: authHeaders(config.apiKey),
+        signal
+      })
+      const ids = chatModelIds(payload, config)
+      if (ids.length > 0 || !ollama) return ids
+    } catch (error) {
+      if (!ollama || !(error instanceof ProviderHttpError) || error.status !== 404) throw error
+    }
     return ollamaTagFallback(baseUrl, config.apiKey, signal)
   },
 
@@ -200,6 +265,9 @@ export const openaiAdapter: ProviderAdapter = {
     const baseUrl = assertEndpoint(request.baseUrl, request.model, request.apiKey)
     const headers = authHeaders(request.apiKey)
     headers.accept = 'text/event-stream'
+    const reasoningModel = /^(?:ft:)?(?:o\d+(?:[:-]|$)|gpt-(?:[5-9]|\d{2,})(?:[:.-]|$))/.test(
+      request.model
+    )
 
     const body = JSON.stringify({
       model: request.model,
@@ -207,44 +275,94 @@ export const openaiAdapter: ProviderAdapter = {
       stream: true,
       // Without this the stream carries no usage at all, and the session cost
       // readout silently reports zero for every provider in this family.
-      stream_options: { include_usage: true },
-      max_tokens: request.maxTokens,
-      temperature: request.temperature,
-      ...(request.tools?.length ? { tools: toOpenAiTools(request.tools) } : {})
+      ...(new URL(baseUrl).hostname === 'api.mistral.ai'
+        ? {}
+        : { stream_options: { include_usage: true } }),
+      ...(reasoningModel
+        ? { max_completion_tokens: request.maxTokens }
+        : { max_tokens: request.maxTokens, temperature: request.temperature }),
+      ...(request.tools?.length ? { tools: toOpenAiTools(request.tools) } : {}),
+      ...(request.disableThinking && new URL(baseUrl).hostname === 'api.deepseek.com'
+        ? { thinking: { type: 'disabled' }, tool_choice: 'none' }
+        : {})
     })
 
     const calls = new ToolCallBuffer()
     let stopReason: StopReason | null = null
     let usage: Usage | undefined
+    let completed = false
+    const contentGuard = new NativeToolTextGuard()
+    const metadata: NonNullable<ProviderMetadata['openai']> = {}
 
     for await (const payload of streamSse({
       url: joinUrl(baseUrl, '/chat/completions'),
       headers,
       body,
-      signal: request.signal
+      signal: request.signal,
+      isComplete: () => stopReason !== null
     })) {
+      if (payload.trim() === '[DONE]') {
+        completed = true
+        break
+      }
       const frame = parsePayload(payload)
       if (!frame) continue
+      if (frame.error) {
+        const message = asString(asRecord(frame.error)?.message) ?? asString(frame.error)
+        yield {
+          type: 'error',
+          message: redactSecrets(
+            message ?? 'The provider could not complete the response.',
+            headers
+          )
+        }
+        return
+      }
 
       for (const choice of asArray(frame.choices)) {
         const record = asRecord(choice)
         if (!record) continue
         const delta = asRecord(record.delta)
         if (delta) {
+          // Keep these in main for signed tool replay; they are not reply text.
+          const reasoningContent = asString(delta.reasoning_content)
+          if (reasoningContent !== null) {
+            metadata.reasoningContent = (metadata.reasoningContent ?? '') + reasoningContent
+          }
+          const reasoning = asString(delta.reasoning)
+          if (reasoning !== null) metadata.reasoning = (metadata.reasoning ?? '') + reasoning
+          for (const detail of asArray(delta.reasoning_details)) {
+            const part = asRecord(detail)
+            if (part) (metadata.reasoningDetails ??= []).push(part)
+          }
           const content = asString(delta.content)
-          if (content) yield { type: 'text', delta: content }
+          if (content) {
+            const prose = contentGuard.push(content)
+            if (prose) yield { type: 'text', delta: prose }
+          }
+          const refusal = asString(delta.refusal)
+          if (refusal) yield { type: 'text', delta: refusal }
           for (const call of readToolCallDeltas(delta)) {
             // `index` is the only key that is stable across fragments: `id` and
             // `name` arrive once, on the first fragment of the call.
             calls.add(String(call.index ?? calls.size), {
               id: call.id,
               name: call.name,
-              args: call.args
+              args: call.args,
+              extraContent: call.extraContent
             })
           }
         }
         const finish = asString(record.finish_reason)
-        if (finish) stopReason = mapStopReason(finish)
+        if (finish) {
+          stopReason = mapStopReason(finish)
+          if (stopReason === 'error') {
+            yield {
+              type: 'error',
+              message: `The provider stopped this response (${finish}). Try rephrasing the message.`
+            }
+          }
+        }
       }
 
       const reported = asRecord(frame.usage)
@@ -260,7 +378,11 @@ export const openaiAdapter: ProviderAdapter = {
     // The stream closing is the completion signal for tool calls: OpenAI sends
     // the whole fragmented argument string and then a finish reason, with no
     // per-call "that one is done" event to flush against.
-    const emitted = calls.flushAll()
+    if (!completed && stopReason === null) throw new Error(INTERRUPTED_STREAM_MESSAGE)
+    const emitted = stopReason === 'error' ? [] : calls.flushAll()
+    if (contentGuard.native && emitted.length === 0) throw new Error(NATIVE_TOOL_MARKUP_ERROR)
+    const remaining = contentGuard.finish()
+    if (remaining) yield { type: 'text', delta: remaining }
     for (const call of emitted) yield { type: 'tool-call', call }
 
     // A tool call that actually arrived is the truth about why the model
@@ -268,7 +390,8 @@ export const openaiAdapter: ProviderAdapter = {
     yield {
       type: 'done',
       stopReason: emitted.length > 0 ? 'tool_calls' : (stopReason ?? 'end_turn'),
-      ...(usage ? { usage } : {})
+      ...(usage ? { usage } : {}),
+      ...(Object.keys(metadata).length ? { providerMetadata: { openai: metadata } } : {})
     }
   }
 }

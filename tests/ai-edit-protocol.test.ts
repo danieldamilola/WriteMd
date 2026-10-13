@@ -29,6 +29,47 @@ function contents(
 }
 
 describe('parseEdits', () => {
+  it('reads a direct whole-document rewrite without an echoed original', () => {
+    const parsed = parseEdits(
+      '<<<<<<< REWRITE path="note.md"\n# New document\n\nNew body.\n>>>>>>> REPLACE',
+      'open.md'
+    )
+    expect(parsed.blocks).toEqual([
+      { path: 'note.md', search: '', replace: '# New document\n\nNew body.', wholeFile: true }
+    ])
+    expect(parsed.explanation).toBe('')
+    const applied = applyEdits(
+      parsed,
+      contents({ 'note.md': 'Old body.' }),
+      NO_RESOLVE,
+      new Map([['note.md', 'Old body.']])
+    )
+    expect(applied.proposals[0].after).toBe('# New document\n\nNew body.')
+    expect(applied.proposals[0].failures).toEqual([])
+  })
+
+  it('refuses a whole rewrite of a changed or unseen file', () => {
+    const parsed = parseEdits('<<<<<<< REWRITE\nNew body.\n>>>>>>> REPLACE', 'note.md')
+    for (const snapshots of [new Map<string, string>(), new Map([['note.md', 'Stale body.']])]) {
+      const applied = applyEdits(
+        parsed,
+        contents({ 'note.md': 'Current body.' }),
+        NO_RESOLVE,
+        snapshots
+      )
+      expect(applied.skippedPaths).toEqual(['note.md'])
+      expect(applied.proposals[0].after).toBe('Current body.')
+    }
+  })
+
+  it('marks an unfinished rewrite incomplete, including after a completed local edit', () => {
+    const parsed = parseEdits(
+      '<<<<<<< SEARCH\nOld\n=======\nNew\n>>>>>>> REPLACE\n<<<<<<< REWRITE\nHalf a document',
+      'note.md'
+    )
+    expect(parsed.incomplete).toBe(true)
+    expect(parsed.blocks).toHaveLength(1)
+  })
   it('reads a single block', () => {
     const result = parseEdits(
       '<<<<<<< SEARCH path="a.md"\nold line\n=======\nnew line\n>>>>>>> REPLACE',

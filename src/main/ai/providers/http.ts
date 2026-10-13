@@ -23,6 +23,9 @@ const SNIPPET_LIMIT = 300
  */
 const LISTING_PROBE_MODEL = 'list-models-probe'
 
+export const INTERRUPTED_STREAM_MESSAGE =
+  'The provider response ended before it was complete. Try sending the message again.'
+
 /** An error shaped like a DOMException 'AbortError', which is what callers check. */
 export function abortError(message = 'The request was cancelled.'): Error {
   const error = new Error(message)
@@ -63,17 +66,30 @@ export interface JsonRequest {
   signal: AbortSignal
 }
 
+export class ProviderHttpError extends Error {
+  constructor(
+    public readonly status: number,
+    message: string
+  ) {
+    super(message)
+    this.name = 'ProviderHttpError'
+  }
+}
+
 /** GET/POST JSON with non-2xx turned into something a user can act on. */
 export async function requestJson(url: string, init: JsonRequest): Promise<unknown> {
   throwIfAborted(init.signal)
   const response = await send(url, init)
-  if (!response.ok) throw new Error(await httpFailure(response))
-  const text = await readText(response)
+  if (!response.ok)
+    throw new ProviderHttpError(response.status, await httpFailure(response, init.headers))
+  const text = await readText(response, init.signal)
   if (!text.trim()) return null
   try {
     return JSON.parse(text) as unknown
   } catch {
-    throw new Error(`The provider returned a response that is not JSON: ${snippet(text)}`)
+    throw new Error(
+      `The provider returned a response that is not JSON: ${snippet(redactSecrets(text, init.headers))}`
+    )
   }
 }
 
@@ -82,6 +98,8 @@ export interface SseStreamOptions {
   headers: Record<string, string>
   body: string
   signal: AbortSignal
+  /** A terminal provider frame arrived; drain buffered usage, then close. */
+  isComplete?: () => boolean
 }
 
 /**
@@ -103,20 +121,23 @@ export async function* streamSse(options: SseStreamOptions): AsyncGenerator<stri
     body: options.body,
     signal
   })
-  if (!response.ok) throw new Error(await httpFailure(response))
+  if (!response.ok) throw new Error(await httpFailure(response, options.headers))
   if (!response.body) throw new Error('The provider returned an empty response body.')
 
-  const framer = createSseFramer()
+  const framer = createSseFramer({ includeDone: true })
   const reader = response.body.getReader()
   const decoder = new TextDecoder()
 
   try {
     for (;;) {
-      const { done, value } = await readChunk(reader, signal)
+      const { done, value } = await readChunk(reader, signal, options.isComplete?.() === true)
       if (done) break
       // A chunk boundary can land mid-line, mid-UTF8 or mid-JSON; the framer owns
       // the partial line and the streaming decoder owns the partial character.
-      for (const payload of framer.push(decoder.decode(value, { stream: true }))) yield payload
+      for (const payload of framer.push(decoder.decode(value, { stream: true }))) {
+        throwIfAborted(signal)
+        yield payload
+      }
     }
     for (const payload of framer.push(decoder.decode())) yield payload
     for (const payload of framer.end()) yield payload
@@ -145,25 +166,49 @@ async function send(url: string, init: JsonRequest): Promise<Response> {
     // the signal is the only reliable signal. Cancellation is a normal outcome
     // (the user hit stop), not a fault worth surfacing as one.
     if (init.signal.aborted || isAbortError(error)) throw abortError()
-    throw new Error(`Could not reach ${hostOf(url)}: ${messageOf(error)}`, { cause: error })
+    throw new Error(
+      redactSecrets(`Could not reach ${hostOf(url)}: ${messageOf(error)}`, init.headers),
+      { cause: error }
+    )
   }
 }
 
 async function readChunk(
   reader: ReadableStreamDefaultReader<Uint8Array>,
-  signal: AbortSignal
+  signal: AbortSignal,
+  complete = false
 ): Promise<{ done: boolean; value?: Uint8Array }> {
+  let timeout: ReturnType<typeof setTimeout> | undefined
   try {
-    const chunk = await reader.read()
+    throwIfAborted(signal)
+    const chunk = await Promise.race([
+      reader.read(),
+      ...(complete
+        ? [
+            new Promise<{ done: true; value: undefined }>((resolve) => {
+              timeout = setTimeout(() => resolve({ done: true, value: undefined }), 0)
+            })
+          ]
+        : [])
+    ])
+    throwIfAborted(signal)
     return { done: chunk.done, value: chunk.value }
   } catch (error) {
     if (signal.aborted || isAbortError(error)) throw abortError()
-    throw new Error(`The provider stream failed: ${messageOf(error)}`, { cause: error })
+    // A provider can close its socket after the terminal frame but before a
+    // trailing usage frame. The completed response is still usable.
+    if (complete) return { done: true }
+    throw new Error(
+      'The provider connection ended before the response was complete. No edits were applied. Try again.',
+      { cause: error }
+    )
+  } finally {
+    if (timeout !== undefined) clearTimeout(timeout)
   }
 }
 
-async function httpFailure(response: Response): Promise<string> {
-  const detail = await readDetail(response)
+async function httpFailure(response: Response, headers: Record<string, string>): Promise<string> {
+  const detail = await readDetail(response, headers)
   return httpFailureMessage(response.status, response.statusText, detail)
 }
 
@@ -196,7 +241,7 @@ function headlineFor(status: number): string {
   return 'The provider request failed.'
 }
 
-async function readDetail(response: Response): Promise<string> {
+async function readDetail(response: Response, headers: Record<string, string>): Promise<string> {
   let raw: string
   try {
     raw = await response.text()
@@ -212,20 +257,37 @@ async function readDetail(response: Response): Promise<string> {
       const error = parsed.error
       const nested = typeof error === 'string' ? error : asRecord(error)?.message
       const message = firstString(nested, parsed.message)
-      if (message) return `(${snippet(message)})`
+      if (message) return `(${snippet(redactSecrets(message, headers))})`
     }
   } catch {
     // Not JSON. The raw text is more useful than a parse failure.
   }
-  return `(${snippet(trimmed)})`
+  return `(${snippet(redactSecrets(trimmed, headers))})`
 }
 
-async function readText(response: Response): Promise<string> {
+async function readText(response: Response, signal: AbortSignal): Promise<string> {
   try {
-    return await response.text()
-  } catch {
-    return ''
+    throwIfAborted(signal)
+    const text = await response.text()
+    throwIfAborted(signal)
+    return text
+  } catch (error) {
+    if (signal.aborted || isAbortError(error)) throw abortError()
+    throw new Error(`The provider response could not be read: ${messageOf(error)}`, {
+      cause: error
+    })
   }
+}
+
+/** Provider errors can echo credentials. Keep them out of renderer errors. */
+export function redactSecrets(message: string, headers: Record<string, string>): string {
+  let redacted = message
+  for (const [name, value] of Object.entries(headers)) {
+    if (!/^(authorization|x-api-key|x-goog-api-key)$/i.test(name)) continue
+    const secret = name.toLowerCase() === 'authorization' ? value.replace(/^Bearer\s+/i, '') : value
+    if (secret) redacted = redacted.split(secret).join('[redacted]')
+  }
+  return redacted
 }
 
 function snippet(text: string): string {

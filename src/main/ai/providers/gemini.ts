@@ -14,8 +14,10 @@ import {
   asString,
   assertEndpoint,
   assertListingEndpoint,
+  INTERRUPTED_STREAM_MESSAGE,
   normalizeModelIds,
   parsePayload,
+  redactSecrets,
   requestJson,
   streamSse,
   usageWith
@@ -73,6 +75,11 @@ function toGeminiContents(messages: ChatMessage[]): GeminiContent[] {
       continue
     }
     const model = message.role === 'assistant'
+    const replay = model ? message.providerMetadata?.gemini : undefined
+    if (replay) {
+      push('model', [...replay.parts])
+      continue
+    }
     const parts: GeminiPart[] = [...toGeminiParts(message.content)]
     for (const call of message.toolCalls ?? []) {
       parts.push({ functionCall: { id: call.id, name: call.name, args: call.arguments } })
@@ -118,11 +125,8 @@ function toGeminiTools(tools: ToolSpec[]): unknown[] {
 function mapFinishReason(reason: string): StopReason {
   if (reason === 'MAX_TOKENS') return 'max_tokens'
   if (reason === 'STOP' || reason === 'STOP_SEQUENCE') return 'end_turn'
-  // The safety family stops generation without producing anything runnable.
-  if (reason === 'SAFETY' || reason === 'RECITATION' || reason === 'BLOCKLIST') return 'error'
-  if (reason === 'PROHIBITED_CONTENT' || reason === 'SPII') return 'error'
-  if (reason === 'MALFORMED_FUNCTION_CALL') return 'error'
-  return 'end_turn'
+  // Every other reason describes a blocked or malformed response.
+  return 'error'
 }
 
 function headers(apiKey: string | undefined, accept: string): Record<string, string> {
@@ -142,20 +146,32 @@ export const geminiAdapter: ProviderAdapter = {
 
   async listModels(config: ProviderConfig, signal: AbortSignal): Promise<string[]> {
     const baseUrl = assertListingEndpoint(config.baseUrl, config.apiKey)
-    const payload = await requestJson(joinUrl(baseUrl, '/models'), {
-      method: 'GET',
-      headers: headers(config.apiKey, 'application/json'),
-      signal
-    })
-    const models = asRecord(payload)?.models
-    if (!Array.isArray(models)) return []
     const ids: string[] = []
-    for (const entry of models) {
-      const name = asRecord(entry)?.name
-      if (typeof name !== 'string') continue
-      const id = stripModelsPrefix(name)
-      if (id) ids.push(id)
-    }
+    const cursors = new Set<string>()
+    let cursor = ''
+    do {
+      const url = new URL(joinUrl(baseUrl, '/models'))
+      if (cursor) url.searchParams.set('pageToken', cursor)
+      const payload = await requestJson(url.toString(), {
+        method: 'GET',
+        headers: headers(config.apiKey, 'application/json'),
+        signal
+      })
+      const page = asRecord(payload)
+      for (const entry of asArray(page?.models)) {
+        const model = asRecord(entry)
+        const name = asString(model?.name)
+        if (!name) continue
+        const methods = model?.supportedGenerationMethods
+        if (Array.isArray(methods) && !methods.includes('generateContent')) continue
+        const id = stripModelsPrefix(name)
+        if (id) ids.push(id)
+      }
+      cursor = asString(page?.nextPageToken) ?? ''
+      if (cursor && cursors.has(cursor))
+        throw new Error('The provider returned an invalid model page. Try refreshing the models.')
+      if (cursor) cursors.add(cursor)
+    } while (cursor)
     return normalizeModelIds(ids)
   },
 
@@ -175,6 +191,7 @@ export const geminiAdapter: ProviderAdapter = {
     })
 
     const calls = new ToolCallBuffer()
+    const responseParts: GeminiPart[] = []
     let stopReason: StopReason | null = null
     let usage: Usage | undefined
     let callSeq = 0
@@ -182,13 +199,31 @@ export const geminiAdapter: ProviderAdapter = {
     for await (const payload of streamSse({
       // `alt=sse` is what turns this endpoint from a JSON array into an event
       // stream; without it the response arrives whole and the adapter hangs.
-      url: `${joinUrl(baseUrl, `/models/${model}:streamGenerateContent`)}?alt=sse`,
+      url: `${joinUrl(baseUrl, `/models/${encodeURIComponent(model)}:streamGenerateContent`)}?alt=sse`,
       headers: headers(request.apiKey, 'text/event-stream'),
       body,
       signal: request.signal
     })) {
       const frame = parsePayload(payload)
       if (!frame) continue
+      if (frame.error) {
+        yield {
+          type: 'error',
+          message: redactSecrets(
+            asString(asRecord(frame.error)?.message) ?? 'Gemini could not complete the response.',
+            headers(request.apiKey, 'text/event-stream')
+          )
+        }
+        return
+      }
+      const blocked = asString(asRecord(frame.promptFeedback)?.blockReason)
+      if (blocked && blocked !== 'BLOCK_REASON_UNSPECIFIED') {
+        yield {
+          type: 'error',
+          message: `Gemini blocked this prompt (${blocked}). Rephrase the message and try again.`
+        }
+        return
+      }
 
       for (const entry of asArray(frame.candidates)) {
         const candidate = asRecord(entry)
@@ -197,6 +232,11 @@ export const geminiAdapter: ProviderAdapter = {
         for (const raw of parts) {
           const part = asRecord(raw)
           if (!part) continue
+          // Signatures belong to their original parts, including text and
+          // thought parts. Replay them unchanged when returning tool results.
+          responseParts.push(part)
+          // Thought summaries are separate from the assistant's reply.
+          if (part.thought === true) continue
           const text = asString(part.text)
           if (text) {
             yield { type: 'text', delta: text }
@@ -216,7 +256,15 @@ export const geminiAdapter: ProviderAdapter = {
           })
         }
         const finish = asString(candidate.finishReason)
-        if (finish) stopReason = mapFinishReason(finish)
+        if (finish) {
+          stopReason = mapFinishReason(finish)
+          if (stopReason === 'error') {
+            yield {
+              type: 'error',
+              message: `Gemini could not finish this response (${finish}). Try rephrasing the message.`
+            }
+          }
+        }
       }
 
       const reported = asRecord(frame.usageMetadata)
@@ -230,12 +278,14 @@ export const geminiAdapter: ProviderAdapter = {
       }
     }
 
-    const emitted = calls.flushAll()
+    if (stopReason === null) throw new Error(INTERRUPTED_STREAM_MESSAGE)
+    const emitted = stopReason === 'error' ? [] : calls.flushAll()
     for (const call of emitted) yield { type: 'tool-call', call }
 
     yield {
       type: 'done',
       stopReason: emitted.length > 0 ? 'tool_calls' : (stopReason ?? 'end_turn'),
+      ...(emitted.length > 0 ? { providerMetadata: { gemini: { parts: responseParts } } } : {}),
       ...(usage ? { usage } : {})
     }
   }

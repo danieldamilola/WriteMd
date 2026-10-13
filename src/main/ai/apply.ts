@@ -47,6 +47,8 @@ export interface ApplyOptions {
   journal: ChangeJournal
   /** Max bytes read/written per file. Refuse larger rather than stall. */
   maxFileBytes?: number
+  /** Stop before committing another file when the user cancels the turn. */
+  signal?: AbortSignal
 }
 
 export interface AppliedChange {
@@ -107,6 +109,7 @@ export async function applyProposals(
   const skipped: SkippedFile[] = []
 
   for (const proposal of proposals) {
+    if (options.signal?.aborted) break
     const outcome = await applyOne(proposal, options, maxFileBytes)
     if (outcome.kind === 'applied') applied.push(outcome.change)
     else if (outcome.kind === 'skipped') skipped.push(outcome.skip)
@@ -204,6 +207,7 @@ async function applyOne(
   }
 
   const kind: ChangeKind = stats ? 'modified' : 'created'
+  if (options.signal?.aborted) return { kind: 'noop' }
   // null, not '', for a creation. The journal reads null as "this file did not
   // exist", and undo of a creation has to delete rather than write an empty file
   // over the user's.
@@ -234,8 +238,9 @@ async function applyOne(
     // widen a note the user had restricted. Carry the original mode across, or
     // fall back to owner-only for a brand new file.
     const mode = stats ? stats.mode & 0o777 : 0o600
-    await writeAtomic(path, proposal.after, mode)
+    await writeAtomic(path, proposal.after, mode, options.signal)
   } catch (err) {
+    if (options.signal?.aborted) return { kind: 'noop' }
     // The journal entry stays. It describes a change that did not land, so
     // undoing it is a no-op rather than a corruption, which is the recoverable
     // direction to fail in.
@@ -260,7 +265,13 @@ async function applyOne(
  * write a user's Markdown should not be able to disagree about what happens
  * when the disk fills up mid-write.
  */
-async function writeAtomic(path: string, content: string, mode: number): Promise<void> {
+async function writeAtomic(
+  path: string,
+  content: string,
+  mode: number,
+  signal?: AbortSignal
+): Promise<void> {
+  signal?.throwIfAborted()
   mkdirSync(dirname(path), { recursive: true })
   // Unique temp name: concurrent writes to the same file must not clobber
   // each other's temp file (and stale temps are cleaned up on failure).
@@ -275,6 +286,7 @@ async function writeAtomic(path: string, content: string, mode: number): Promise
     } finally {
       await handle.close()
     }
+    signal?.throwIfAborted()
     await rename(tempPath, path)
   } catch (e) {
     await unlink(tempPath).catch(() => {})

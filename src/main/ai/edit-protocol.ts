@@ -29,6 +29,8 @@ export interface EditBlock {
   path: string
   search: string
   replace: string
+  /** Replace a supplied snapshot without asking the model to echo it. */
+  wholeFile?: boolean
 }
 
 export interface ParsedEdits {
@@ -36,9 +38,11 @@ export interface ParsedEdits {
   /** Prose the model wrote outside the blocks. */
   explanation: string
   hasEdits: boolean
+  incomplete?: boolean
 }
 
 const HEADER_RE = /^<{7}[ \t]*SEARCH(?:[ \t]+path=(?:"([^"]*)"|'([^']*)'|(\S+)))?[ \t]*$/
+const REWRITE_HEADER_RE = /^<{7}[ \t]*REWRITE(?:[ \t]+path=(?:"([^"]*)"|'([^']*)'|(\S+)))?[ \t]*$/
 const SEPARATOR_RE = /^={7}[ \t]*$/
 const TERMINATOR_RE = /^>{7}[ \t]*REPLACE[ \t]*$/
 
@@ -65,9 +69,11 @@ export function parseEdits(response: string, defaultPath: string): ParsedEdits {
   const lines = response.split(/\r?\n/)
   const blocks: EditBlock[] = []
   const prose: string[] = []
+  let incomplete = false
 
   for (let i = 0; i < lines.length; i++) {
-    const header = HEADER_RE.exec(lines[i])
+    const rewrite = REWRITE_HEADER_RE.exec(lines[i])
+    const header = rewrite ?? HEADER_RE.exec(lines[i])
     if (!header) {
       prose.push(lines[i])
       continue
@@ -75,16 +81,17 @@ export function parseEdits(response: string, defaultPath: string): ParsedEdits {
 
     // Collect the search body up to the separator line.
     const search: string[] = []
-    while (i + 1 < lines.length && !SEPARATOR_RE.test(lines[i + 1])) {
+    while (!rewrite && i + 1 < lines.length && !SEPARATOR_RE.test(lines[i + 1])) {
       search.push(lines[++i])
     }
-    if (i + 1 >= lines.length) {
+    if (!rewrite && i + 1 >= lines.length) {
       // No separator: the model was cut off mid-block. Keep what was written so
       // far as prose rather than inventing a block with no replacement.
       prose.push(lines[i])
+      incomplete = true
       break
     }
-    i++ // step past the separator
+    if (!rewrite) i++ // step past the separator
 
     // Collect the replacement up to the terminator line.
     const replace: string[] = []
@@ -93,18 +100,25 @@ export function parseEdits(response: string, defaultPath: string): ParsedEdits {
     }
     if (i + 1 >= lines.length) {
       prose.push(lines[i])
+      incomplete = true
       break
     }
     i++ // step past the terminator
 
     const path = (header[1] ?? header[2] ?? header[3] ?? '').trim() || defaultPath
-    blocks.push({ path, search: search.join('\n'), replace: replace.join('\n') })
+    blocks.push({
+      path,
+      search: search.join('\n'),
+      replace: replace.join('\n'),
+      ...(rewrite ? { wholeFile: true } : {})
+    })
   }
 
   return {
     blocks,
     explanation: prose.join('\n').trim(),
-    hasEdits: blocks.length > 0
+    hasEdits: blocks.length > 0,
+    ...(incomplete ? { incomplete: true } : {})
   }
 }
 
@@ -177,7 +191,8 @@ export interface ApplyResult {
 export function applyEdits(
   parsed: ParsedEdits,
   contents: ReadonlyMap<string, { content: string; exists: boolean }>,
-  resolvePath: (requested: string) => string | null
+  resolvePath: (requested: string) => string | null,
+  snapshots: ReadonlyMap<string, string> = new Map()
 ): ApplyResult {
   const byPath = new Map<string, { requested: string; blocks: EditBlock[] }>()
   for (const block of parsed.blocks) {
@@ -199,6 +214,17 @@ export function applyEdits(
     // on an earlier block having landed, which is how multi-step rewrites are
     // expressed without a separate instruction.
     for (const block of entry.blocks) {
+      if (block.wholeFile) {
+        // Only replace text the model actually received. Never overwrite a
+        // document that changed during generation or an unseen file.
+        const snapshot = snapshots.get(path)
+        if (snapshot === undefined || working !== snapshot) {
+          failures.push({ block, reason: 'not-found' })
+        } else {
+          working = block.replace
+        }
+        continue
+      }
       const index = working.indexOf(block.search)
       if (index === -1) {
         failures.push({ block, reason: 'not-found' })
@@ -241,6 +267,7 @@ export function editSystemPrompt(defaultPathLabel: string): string {
     'Decide what the user wants:\n' +
     '- If they ask a QUESTION, answer concisely in Markdown. Do NOT output edit blocks.\n' +
     '- If they ask you to CHANGE a file, respond with edit blocks ONLY. You may put at most one short sentence of summary before the blocks.\n\n' +
+    '- Writing or drafting an article, post, or other content is a request to edit the open document. Put the content in edit blocks, not in the chat reply. An empty document is still an editable file.\n\n' +
     'Edit block format - one per change, EXACTLY:\n' +
     '<<<<<<< SEARCH' +
     (defaultPathLabel ? ` path="${defaultPathLabel}"` : '') +
@@ -253,10 +280,15 @@ export function editSystemPrompt(defaultPathLabel: string): string {
     '- SEARCH must match the file character-for-character.\n' +
     '- Omit the path header only when editing the file the user is in.\n' +
     '- Use a path header for every other file. One block header per file.\n' +
+    '- Markdown files may be outside the vault. Use their supplied absolute paths and edit only files the user asks you to change.\n' +
     '- SEARCH text must appear exactly once. If it appears twice, the change is not applied.\n' +
+    '- For a paragraph, sentence, backlink, or other local change, use the smallest unique SEARCH and replace only that region. Never copy the entire document for a local edit.\n' +
     '- To INSERT, SEARCH a nearby existing line and repeat it unchanged in REPLACE with the new text added around it.\n' +
+    '- To APPEND, SEARCH only the final unique line or paragraph and repeat it in REPLACE followed by the addition.\n' +
     "- To DELETE a line, end SEARCH with that line's trailing newline, or the line leaves a blank one behind.\n" +
-    '- To REWRITE a whole file, use ONE block whose SEARCH is the entire current file.\n' +
+    '- When the user asks to rewrite, reorganize, or replace the entire document, use this format instead of SEARCH/REPLACE:\n<<<<<<< REWRITE\n(the complete rewritten document)\n>>>>>>> REPLACE\n' +
+    '- REWRITE accepts the same optional path header. It replaces the supplied snapshot directly. Do not output the old document, a separator, or an appended second copy. Use it only for a document whose full contents were supplied.\n' +
+    '- For an empty document, leave SEARCH empty and put the entire draft in REPLACE. Do not add placeholder text to SEARCH. Example:\n<<<<<<< SEARCH\n=======\n(draft)\n>>>>>>> REPLACE\n' +
     "- Preserve the user's Markdown style, heading levels, and voice.\n" +
     '- Never wrap blocks in ``` fences. Output nothing after the final block.'
   )

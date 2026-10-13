@@ -30,7 +30,7 @@ export const SETTINGS_SEARCH_INDEX: Record<SettingsTab, string> = {
     'appearance theme dark graphite nord midnight light paper dracula accent color panel orientation horizontal vertical tabs side rail top bar layout window full screen shell',
   editor: 'editor font family size word wrap line numbers source mode highlight active line',
   files: 'files vault location path storage folder recent tabs open disk',
-  ai: 'ai assistant model provider openai anthropic gemini ollama lmstudio api key endpoint fetch models history privacy local cloud',
+  ai: 'ai assistant model provider openai anthropic gemini openrouter deepseek groq mistral xai grok ollama lmstudio api key endpoint fetch models history privacy local cloud',
   shortcuts: 'shortcuts keyboard keys bindings commands rebind reset',
   advanced:
     'advanced features mermaid diagrams export pdf page size theme margin paper a4 letter legal danger reset preferences factory defaults',
@@ -105,8 +105,24 @@ export const SETTINGS_ROW_INDEX: SettingsRowEntry[] = [
   },
   {
     tab: 'ai',
+    label: 'Automatically accept AI edits',
+    terms: 'auto accept automatic apply suggestions floating bar preview review'
+  },
+  {
+    tab: 'ai',
+    label: 'Output limit',
+    terms: 'maximum response length tokens reasoning thinking automatic draft article'
+  },
+  {
+    tab: 'ai',
+    label: 'Personal skills',
+    terms: 'skill.md writing instructions slash commands open skills folder refresh'
+  },
+  {
+    tab: 'ai',
     label: 'Provider',
-    terms: 'openai anthropic gemini ollama lmstudio local service'
+    terms:
+      'openai anthropic gemini openrouter deepseek groq mistral xai grok ollama lmstudio local service'
   },
   {
     tab: 'ai',

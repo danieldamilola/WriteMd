@@ -2,6 +2,7 @@ import { app } from 'electron'
 import { join, extname } from 'path'
 import { existsSync, mkdirSync, readdirSync, renameSync, type Dirent } from 'fs'
 import { getSettings, setSettings } from './settings'
+import { ensureSkillsFolder } from './ai/skills'
 
 const DEFAULT_VAULT_NAME = 'WriteMd Vault'
 const LEGACY_VAULT_NAME = 'WriteMD'
@@ -76,11 +77,17 @@ export interface VaultReady {
  */
 export function ensureVault(): VaultReady {
   const vaultDir = getVaultPath()
-  if (!existsSync(vaultDir)) {
+  const created = !existsSync(vaultDir)
+  if (created) {
     mkdirSync(vaultDir, { recursive: true })
-    return { path: vaultDir, created: true }
   }
-  return { path: vaultDir, created: false }
+  try {
+    ensureSkillsFolder(vaultDir)
+  } catch {
+    // A blocked Skills folder must not prevent the editor opening. AI Settings
+    // reports the folder error and lets the user fix it without losing notes.
+  }
+  return { path: vaultDir, created }
 }
 
 export function ensureVaultExists(): string {

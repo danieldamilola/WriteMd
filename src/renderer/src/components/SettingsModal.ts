@@ -1,6 +1,7 @@
 import { html, css, LitElement, type PropertyValues } from 'lit'
 import { customElement, property, state } from 'lit/decorators.js'
 import './BackgroundControls'
+import './Background'
 import './IconButton'
 import './SearchBar'
 import { controlStyles, settingsSelectStyles } from '../design/controls'
@@ -11,9 +12,12 @@ import './Modal'
 import { nativeModalAvailable } from './Modal'
 import { api } from '../api'
 import type { ProviderPresetView } from '../../../shared/electron-api'
+import type { AiSkillsView } from '../../../shared/ai/skills'
 import { deepActiveElement } from '../utils/links'
 import { MOTION_LABELS, MOTION_PREFERENCES, type MotionPreference } from '../utils/motion'
 import { SettingsStore } from '../state/settings'
+import { ChatgptState } from '../state/chatgpt'
+import { EMPTY_CHATGPT_AUTH, type ChatgptAuthView } from '../../../shared/ai/chatgpt'
 import { showConfirm } from './ConfirmDialog'
 import { icon } from './icons'
 import { scrollbarStyles } from './scrollbars'
@@ -38,6 +42,15 @@ import {
   type SettingsTab
 } from '../state/settings-search'
 
+const SKILLS_RESTART_MESSAGE = 'Restart WriteMd to finish enabling skills, then try again.'
+
+function skillsErrorMessage(error: unknown, fallback: string): string {
+  const message = error instanceof Error ? error.message : String(error)
+  return /No handler registered for ['"]?ai:(?:open-skills-folder|list-skills)/i.test(message)
+    ? SKILLS_RESTART_MESSAGE
+    : fallback
+}
+
 /**
  * The element that actually holds focus, descending through open shadow roots.
  *
@@ -61,7 +74,7 @@ const NAV_ICONS: Record<SettingsTab, string> = {
   editor: 'pencil',
   files: 'folder-open',
   appearance: 'palette',
-  ai: 'sparkle',
+  ai: 'ai',
   shortcuts: 'keyboard',
   advanced: 'settings',
   about: 'info'
@@ -568,6 +581,19 @@ export class SettingsModal extends LitElement {
       }
 
       .text-input {
+      }
+      .chatgpt-welcome {
+        width: 360px;
+        max-width: calc(100vw - 32px);
+        padding: 24px;
+        background: var(--bg-elevated);
+        color: var(--text);
+      }
+      .chatgpt-welcome p {
+        color: var(--text-secondary);
+        line-height: 1.5;
+      }
+      .text-input {
         width: 220px;
         min-height: 34px;
         max-width: 100%;
@@ -636,24 +662,38 @@ export class SettingsModal extends LitElement {
       }
       ${scrollbarStyles}
 
+      /* Settings fills the window, so it takes the app's surface tokens: rail like
+         the app's rail, content like a document pane, and a clear host so what
+         shows through is the workspace rather than a second solid layer. Cards
+         below keep --bg-card and read as objects on top, as in Windows Settings. */
       :host(.embedded) {
         position: absolute;
         inset: 0;
         z-index: 6;
-        background: var(--bg);
+        background: transparent;
       }
       :host(.embedded) .modal-dialog {
         width: 100%;
         height: 100%;
         border-radius: 0;
         box-shadow: none;
+        background: transparent;
       }
       :host(.embedded) .sidebar {
         width: var(--shell-sidebar-width);
         background: var(--frame-surface);
+        backdrop-filter: blur(var(--surface-blur, 0px));
       }
       :host(.embedded) .main-area {
-        padding-top: var(--shell-header-height);
+        position: relative;
+        isolation: isolate;
+        background: var(--editor-surface);
+        backdrop-filter: blur(var(--surface-blur, 0px));
+        margin-top: var(--shell-header-height);
+      }
+      :host(.embedded) .content-panel {
+        position: relative;
+        z-index: 1;
       }
       :host(.embedded) .main-header {
         display: none;
@@ -742,6 +782,7 @@ export class SettingsModal extends LitElement {
 
   // AI assistant
   @state() private aiEnabled = false
+  @state() private aiAutoAcceptEdits = false
   @state() private aiProviderId = 'openai'
   @state() private aiBaseUrl = ''
   @state() private aiModel = ''
@@ -749,10 +790,17 @@ export class SettingsModal extends LitElement {
   @state() private aiKeyUnreadable = false
   @state() private aiKeyInput = ''
   @state() private aiHistoryTurns = 8
+  @state() private aiMaxOutputTokens = 0
   @state() private aiModels: string[] = []
   @state() private aiPresets: ProviderPresetView[] = []
   @state() private aiFetchingModels = false
   @state() private aiFetchError = ''
+  @state() private aiChatgptState: ChatgptAuthView = { ...EMPTY_CHATGPT_AUTH }
+  private chatgptState = ChatgptState.getInstance()
+  @state() private aiSkills: AiSkillsView | null = null
+  @state() private aiSkillsError = ''
+  private aiModelRequest = 0
+  private aiSkillsRequest = 0
 
   private updaterUnsubs: Array<() => void> = []
 
@@ -763,8 +811,29 @@ export class SettingsModal extends LitElement {
     super.connectedCallback()
     this.loadCurrentSettings()
     void this.loadAiPresets()
+    void this.loadAiSkills()
     this.settingsSubscriptions = [
+      this.chatgptState.subscribe(() => {
+        const before = this.aiChatgptState
+        this.aiChatgptState = this.chatgptState.state()
+        if (
+          this.aiProviderId === 'chatgpt' &&
+          (before.activeId !== this.aiChatgptState.activeId ||
+            before.connected !== this.aiChatgptState.connected)
+        ) {
+          this.invalidateAiModels()
+          if (this.aiChatgptState.connected) void this.fetchAiModels()
+        }
+      }),
       this.settingsStore.subscribeSaveStatus(() => this.requestUpdate()),
+      this.settingsStore.subscribe('ai', () => {
+        const changed =
+          this.aiProviderId !== this.settingsStore.get('ai.providerId', 'openai') ||
+          this.aiBaseUrl !== this.settingsStore.get('ai.baseUrl', '') ||
+          this.aiKeySet !== this.settingsStore.get('ai.apiKeySet', false)
+        this.loadCurrentSettings()
+        if (changed) this.invalidateAiModels()
+      }),
       this.settingsStore.subscribe('appearance', () => {
         this.loadCurrentSettings()
         this.requestUpdate()
@@ -820,6 +889,8 @@ export class SettingsModal extends LitElement {
   }
 
   disconnectedCallback(): void {
+    this.aiModelRequest++
+    this.aiSkillsRequest++
     this.settingsSubscriptions.forEach((unsubscribe) => unsubscribe())
     this.settingsSubscriptions = []
     window.removeEventListener('keydown', this.handleKeyDown, true)
@@ -854,11 +925,13 @@ export class SettingsModal extends LitElement {
     this.motion = s.get('appearance.motion', 'system') as MotionPreference
     this.autoCheckForUpdates = s.get('updates.autoCheckForUpdates', true)
     this.aiEnabled = s.get('ai.enabled', false)
+    this.aiAutoAcceptEdits = s.get('ai.autoAcceptEdits', false)
     this.aiProviderId = s.get('ai.providerId', 'openai')
     this.aiBaseUrl = s.get('ai.baseUrl', '')
     this.aiModel = s.get('ai.model', '')
     this.aiKeySet = s.get('ai.apiKeySet', false)
     this.aiHistoryTurns = s.get('ai.historyTurns', 8)
+    this.aiMaxOutputTokens = s.get('ai.maxOutputTokens', 0)
     this.aiModels = s.get('ai.cachedModels', [])
   }
 
@@ -1293,6 +1366,7 @@ export class SettingsModal extends LitElement {
 
         <!-- Main Area -->
         <div class="main-area">
+          ${this.embedded ? html`<writemd-background target="workspace"></writemd-background>` : null}
           <div class="main-header">
             <h2>${TAB_LABELS[this.tab]}</h2>
             <writemd-icon-button class="close-btn" title="Close settings" @click=${this.close}
@@ -1655,9 +1729,6 @@ export class SettingsModal extends LitElement {
   private selectAiProvider(id: string): void {
     const preset = this.aiPresets.find((p) => p.id === id)
     this.updateSetting('ai.providerId', id)
-    // Adopting the preset's endpoint and model is the whole point of picking
-    // one, but only when the current values are still the ones we last wrote -
-    // clobbering a hand-edited endpoint would lose the user's proxy.
     if (preset) {
       this.updateSetting('ai.baseUrl', preset.defaultBaseUrl)
       this.updateSetting('ai.model', preset.defaultModel)
@@ -1675,14 +1746,30 @@ export class SettingsModal extends LitElement {
     this.aiKeySet = result?.state === 'stored'
     this.aiKeyUnreadable = result?.state === 'unavailable'
     if (result && !result.stored) this.aiFetchError = result.reason ?? 'Could not save the key.'
-    else if (result) this.updateSetting('ai.apiKeySet', true)
+    else if (result) {
+      this.invalidateAiModels()
+      this.updateSetting('ai.apiKeySet', true)
+    }
   }
 
   private async clearAiKey(): Promise<void> {
     const result = await api()?.ai?.clearKey?.()
     this.aiKeySet = result?.state === 'stored'
     this.aiKeyUnreadable = false
-    if (result) this.updateSetting('ai.apiKeySet', false)
+    if (result) {
+      this.invalidateAiModels()
+      this.updateSetting('ai.apiKeySet', false)
+    }
+  }
+
+  private invalidateAiModels(): void {
+    this.aiModelRequest++
+    this.aiFetchingModels = false
+    this.aiFetchError = ''
+    this.aiModels = []
+    if (this.settingsStore.get<string[]>('ai.cachedModels', []).length) {
+      this.settingsStore.set('ai.cachedModels', [])
+    }
   }
 
   /**
@@ -1694,14 +1781,16 @@ export class SettingsModal extends LitElement {
    * without another round trip.
    */
   private async fetchAiModels(): Promise<void> {
+    const request = ++this.aiModelRequest
+    const key = this.aiKeyInput.trim()
     this.aiFetchError = ''
     this.aiFetchingModels = true
     try {
-      const models = await api()?.ai?.fetchModels?.(
-        this.aiProviderId,
-        this.aiBaseUrl,
-        this.aiKeyInput.trim()
-      )
+      const models =
+        this.aiProviderId === 'chatgpt'
+          ? (await this.chatgptState.models()).map((model) => model.id)
+          : await api()?.ai?.fetchModels?.(this.aiProviderId, this.aiBaseUrl, key)
+      if (request !== this.aiModelRequest || key !== this.aiKeyInput.trim()) return
       if (!models || models.length === 0) {
         this.aiFetchError = 'No models returned for this endpoint.'
         return
@@ -1715,15 +1804,176 @@ export class SettingsModal extends LitElement {
         this.updateSetting('ai.model', first)
       }
     } catch (e) {
-      this.aiFetchError = e instanceof Error ? e.message : String(e)
+      if (request === this.aiModelRequest)
+        this.aiFetchError = e instanceof Error ? e.message : String(e)
     } finally {
-      this.aiFetchingModels = false
+      if (request === this.aiModelRequest) this.aiFetchingModels = false
     }
+  }
+
+  private async loadAiSkills(): Promise<void> {
+    const request = ++this.aiSkillsRequest
+    const list = api()?.ai?.listSkills
+    if (!list) {
+      if (this.isConnected) this.aiSkillsError = SKILLS_RESTART_MESSAGE
+      return
+    }
+    try {
+      const view = await list()
+      if (!this.isConnected || request !== this.aiSkillsRequest) return
+      this.aiSkills = view ?? null
+      this.aiSkillsError = ''
+    } catch (error) {
+      if (this.isConnected && request === this.aiSkillsRequest)
+        this.aiSkillsError = skillsErrorMessage(
+          error,
+          'Could not read skills. Try Refresh skills again.'
+        )
+    }
+  }
+
+  private async openAiSkillsFolder(): Promise<void> {
+    const open = api()?.ai?.openSkillsFolder
+    if (!open) {
+      if (this.isConnected) this.aiSkillsError = SKILLS_RESTART_MESSAGE
+      return
+    }
+    try {
+      const folder = await open()
+      if (!folder) throw new Error('The skills folder is available in the desktop app.')
+      await this.loadAiSkills()
+    } catch (error) {
+      if (this.isConnected)
+        this.aiSkillsError = skillsErrorMessage(
+          error,
+          'Could not open the Skills folder. Open Skills in your vault, or try again.'
+        )
+    }
+  }
+
+  private async chatgptAction(action: () => Promise<ChatgptAuthView> | undefined): Promise<void> {
+    this.aiFetchError = ''
+    try {
+      const state = await action()
+      if (!state) throw new Error('ChatGPT sign-in is unavailable. Restart WriteMd after updating.')
+      this.chatgptState.apply(state)
+    } catch (error) {
+      this.aiFetchError = error instanceof Error ? error.message : 'ChatGPT sign-in failed.'
+    }
+  }
+
+  private renderChatgptCredentials(): unknown {
+    const state = this.aiChatgptState
+    const bridge = api()?.ai?.chatgpt
+    return html`
+      <div class="setting-row">
+        <div>
+          <div class="setting-label">Use your ChatGPT plan</div>
+          <div class="setting-desc">
+            Eligible requests use your ChatGPT plan. No OpenAI API key is needed.
+          </div>
+        </div>
+        ${
+          state.pending
+            ? html`<button
+                class="control-btn"
+                @click=${() => void this.chatgptAction(() => bridge?.cancel())}
+              >
+                Cancel sign-in
+              </button>`
+            : html`<button
+                class="control-btn"
+                @click=${() => void this.chatgptAction(() => bridge?.login())}
+              >
+                Continue with ChatGPT
+              </button>`
+        }
+      </div>
+      ${
+        state.accounts.length
+          ? html` <div class="setting-row">
+                <div>
+                  <div class="setting-label">ChatGPT account</div>
+                  <div class="setting-desc">
+                    ${state.connected ? 'Using ChatGPT plan' : 'Sign in to enable ChatGPT plan use.'}
+                  </div>
+                </div>
+                <wa-select
+                  class="select-input"
+                  size="small"
+                  aria-label="ChatGPT account"
+                  .value=${state.activeId ?? ''}
+                  @change=${(event: Event) => void this.chatgptAction(() => bridge?.select(String((event.currentTarget as WaSelect).value)))}
+                >
+                  ${state.accounts.map((account) => html`<wa-option value=${account.id}>${account.label}</wa-option>`)}
+                </wa-select>
+              </div>
+              <div class="setting-row">
+                <button
+                  class="control-btn"
+                  ?disabled=${state.pending}
+                  @click=${() => void this.chatgptAction(() => bridge?.login(true))}
+                >
+                  Add account
+                </button>
+                <button
+                  class="control-btn"
+                  ?disabled=${!state.connected}
+                  @click=${() => void this.chatgptAction(() => bridge?.logout())}
+                >
+                  Sign out
+                </button>
+                <button
+                  class="control-btn"
+                  @click=${() => void api()?.shell?.openExternal?.('https://chatgpt.com/settings/usage')}
+                >
+                  Manage usage
+                </button>
+              </div>`
+          : null
+      }
+      ${state.pending ? html`<div class="setting-desc" role="status">Finish sign-in in your browser.</div>` : null}
+      ${state.error ? html`<div class="setting-desc" role="alert">${state.error}</div>` : null}
+      ${state.sessionOnly ? html`<div class="setting-desc">Secure storage is unavailable. This connection lasts for this app session.</div>` : null}
+      ${
+        state.needsWelcome
+          ? html` <writemd-modal
+              label="You're using your ChatGPT plan"
+              @modal-dismiss=${() => void this.chatgptAction(() => bridge?.acknowledgePlan())}
+            >
+              <div
+                class="section chatgpt-welcome"
+                role="dialog"
+                aria-label="You're using your ChatGPT plan"
+              >
+                <h2>You're using your ChatGPT plan</h2>
+                <p>
+                  Eligible AI requests in WriteMd use your ChatGPT plan. Manage usage and this app's
+                  access in ChatGPT Settings.
+                </p>
+                <button
+                  class="control-btn"
+                  @click=${() => void api()?.shell?.openExternal?.('https://chatgpt.com/settings/usage')}
+                >
+                  Manage usage
+                </button>
+                <button
+                  class="control-btn"
+                  @click=${() => void this.chatgptAction(() => bridge?.acknowledgePlan())}
+                >
+                  Got it
+                </button>
+              </div>
+            </writemd-modal>`
+          : null
+      }
+    `
   }
 
   private renderAi(): unknown {
     const preset = this.activeAiPreset()
     const needsKey = preset?.keyRequired ?? true
+    const chatgpt = this.aiProviderId === 'chatgpt'
     return html`
       <div class="section-title">Assistant</div>
       <div class="section">
@@ -1741,6 +1991,22 @@ export class SettingsModal extends LitElement {
             aria-checked="${this.aiEnabled}"
             aria-label="Enable AI assistant"
             @click=${() => this.updateSetting('ai.enabled', !this.aiEnabled)}
+          ></button>
+        </div>
+        <div class="setting-row">
+          <div>
+            <div class="setting-label">Automatically accept AI edits</div>
+            <div class="setting-desc">
+              Apply completed floating-bar edits without pressing Accept. The side panel already
+              applies edits automatically.
+            </div>
+          </div>
+          <button
+            class="toggle-switch"
+            role="switch"
+            aria-checked=${this.aiAutoAcceptEdits}
+            aria-label="Automatically accept AI edits"
+            @click=${() => this.updateSetting('ai.autoAcceptEdits', !this.aiAutoAcceptEdits)}
           ></button>
         </div>
       </div>
@@ -1774,7 +2040,9 @@ export class SettingsModal extends LitElement {
               ${
                 needsKey && !this.aiBaseUrl.startsWith('https://') && this.aiBaseUrl
                   ? 'An API key will not be sent over plain http to a remote host.'
-                  : 'Edit this for a proxy or a self-hosted server.'
+                  : chatgpt
+                    ? 'ChatGPT account requests use the official OpenAI service.'
+                    : 'Edit this for a proxy or a self-hosted server.'
               }
             </div>
           </div>
@@ -1784,6 +2052,7 @@ export class SettingsModal extends LitElement {
             aria-label="Endpoint"
             placeholder="https://api.openai.com/v1"
             .value=${this.aiBaseUrl}
+            ?disabled=${chatgpt}
             @change=${(e: Event) =>
               this.updateSetting('ai.baseUrl', (e.currentTarget as HTMLInputElement).value.trim())}
           />
@@ -1810,7 +2079,8 @@ export class SettingsModal extends LitElement {
               this.updateSetting('ai.model', String((e.currentTarget as WaSelect).value ?? ''))}
           >
             ${(this.aiModels.length ? this.aiModels : this.aiModel ? [this.aiModel] : []).map(
-              (m) => html`<wa-option value=${m}>${m}</wa-option>`
+              (m) =>
+                html`<wa-option value=${m}>${chatgpt ? this.chatgptState.label(m) : m}</wa-option>`
             )}
           </wa-select>
           <button
@@ -1831,53 +2101,90 @@ export class SettingsModal extends LitElement {
         }
       </div>
 
-      <div class="section-title">Credentials</div>
+      <div class="section-title">Response</div>
       <div class="section">
         <div class="setting-row">
           <div>
-            <div class="setting-label">API Key</div>
+            <div class="setting-label">Output limit</div>
             <div class="setting-desc">
+              Longer replies and reasoning need more tokens. The model's maximum still applies.
               ${
-                this.aiKeyUnreadable
-                  ? html`<span style="color: var(--warning)"
-                      >A key is stored but this install cannot decrypt it. Type a new one to replace
-                      it.</span
-                    >`
-                  : this.aiKeySet
-                    ? 'A key is stored on this machine, encrypted with your OS keychain.'
-                    : needsKey
-                      ? 'Your secret API key'
-                      : 'Not needed for this provider'
+                preset?.kind === 'anthropic'
+                  ? 'Automatic uses 4,096 tokens for Anthropic, which requires an explicit limit.'
+                  : 'Automatic uses the provider default.'
               }
-              ${preset?.keyHint ? html` &middot; ${preset.keyHint}` : ''}
             </div>
           </div>
-          <input
-            type="password"
-            class="text-input"
-            aria-label="API Key"
-            placeholder=${needsKey ? 'Paste your API key' : 'Not needed'}
-            .value=${this.aiKeyInput}
-            @input=${(e: Event) => {
-              this.aiKeyInput = (e.currentTarget as HTMLInputElement).value
-            }}
-          />
-          <button
-            class="control-btn"
-            @click=${() => void this.saveAiKey()}
-            ?disabled=${!this.aiKeyInput.trim()}
+          <wa-select
+            size="small"
+            class="select-input"
+            label="Output limit"
+            aria-label="Output limit"
+            .value=${String(this.aiMaxOutputTokens)}
+            @change=${(e: Event) => this.updateSetting('ai.maxOutputTokens', Number((e.currentTarget as WaSelect).value))}
           >
-            Save
-          </button>
-          ${
-            this.aiKeySet
-              ? html`<button class="control-btn" @click=${() => void this.clearAiKey()}>
-                  Clear
-                </button>`
-              : ''
-          }
+            ${[0, 4096, 8192, 16384, 32768, 65536, 131072].map(
+              (value) => html`
+                <wa-option value=${String(value)}
+                  >${value === 0 ? 'Automatic' : `${value.toLocaleString('en-US')} tokens`}</wa-option
+                >
+              `
+            )}
+          </wa-select>
         </div>
-
+      </div>
+      <div class="section-title">Credentials</div>
+      <div class="section">
+        ${
+          chatgpt
+            ? this.renderChatgptCredentials()
+            : html`
+                <div class="setting-row">
+                  <div>
+                    <div class="setting-label">API Key</div>
+                    <div class="setting-desc">
+                      ${
+                        this.aiKeyUnreadable
+                          ? html`<span style="color: var(--warning)"
+                              >A key is stored but this install cannot decrypt it. Type a new one to
+                              replace it.</span
+                            >`
+                          : this.aiKeySet
+                            ? 'A key is stored on this machine, encrypted with your OS keychain.'
+                            : needsKey
+                              ? 'Your secret API key'
+                              : 'Not needed for this provider'
+                      }
+                      ${preset?.keyHint ? html` &middot; ${preset.keyHint}` : ''}
+                    </div>
+                  </div>
+                  <input
+                    type="password"
+                    class="text-input"
+                    aria-label="API Key"
+                    placeholder=${needsKey ? 'Paste your API key' : 'Not needed'}
+                    .value=${this.aiKeyInput}
+                    @input=${(e: Event) => {
+                      this.aiKeyInput = (e.currentTarget as HTMLInputElement).value
+                    }}
+                  />
+                  <button
+                    class="control-btn"
+                    @click=${() => void this.saveAiKey()}
+                    ?disabled=${!this.aiKeyInput.trim()}
+                  >
+                    Save
+                  </button>
+                  ${
+                    this.aiKeySet
+                      ? html`<button class="control-btn" @click=${() => void this.clearAiKey()}>
+                          Clear
+                        </button>`
+                      : ''
+                  }
+                </div>
+              `
+        }
         <div class="setting-row">
           <div>
             <div class="setting-label">Chat history</div>
@@ -1904,11 +2211,56 @@ export class SettingsModal extends LitElement {
         </div>
       </div>
 
+      <div class="section-title">Skills</div>
+      <div class="section">
+        <div class="setting-row">
+          <div>
+            <div class="setting-label">Personal skills</div>
+            <div class="setting-desc">
+              Skills live in the <code>Skills</code> folder in your vault. Add
+              <code>proofread.md</code> or <code>proofread/SKILL.md</code> with your writing
+              instructions, then start a chat prompt with <code>/proofread</code> to use it. Skills
+              contain instructions only; scripts are not run.
+            </div>
+          </div>
+          <button class="control-btn" @click=${() => void this.openAiSkillsFolder()}>
+            Open skills folder
+          </button>
+          <button class="control-btn" @click=${() => void this.loadAiSkills()}>
+            Refresh skills
+          </button>
+        </div>
+        ${
+          this.aiSkills
+            ? html`<div class="setting-desc" style="overflow-wrap: anywhere">
+                  ${this.aiSkills.folder}
+                </div>
+                ${
+                  this.aiSkills.skills.length
+                    ? this.aiSkills.skills.map(
+                        (skill) =>
+                          html` <div class="setting-row">
+                            <div>
+                              <div class="setting-label"><code>/${skill.name}</code></div>
+                              <div class="setting-desc">${skill.description}</div>
+                            </div>
+                          </div>`
+                      )
+                    : html`<div class="setting-desc">
+                        No skills added yet. Files are read fresh when you send a prompt.
+                      </div>`
+                }
+                ${this.aiSkills.warnings.map((warning) => html`<div class="setting-desc" role="status">${warning}</div>`)}`
+            : ''
+        }
+        ${this.aiSkillsError ? html`<div class="setting-desc" role="alert">${this.aiSkillsError}</div>` : ''}
+      </div>
+
       <div class="section-title">Privacy</div>
       <div class="section">
         <div class="setting-desc">
           Text you send is delivered to the endpoint above, along with the open document and any
-          selection. The API key is stored in your operating system's keychain, never in
+          selection. Credentials are encrypted with your operating system's keychain, never in
           config.json, and is not readable by the interface. For notes you would rather keep on this
           machine, point the endpoint at a local provider such as Ollama.
         </div>

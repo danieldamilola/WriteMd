@@ -30,6 +30,17 @@ interface MenuItem {
   children?: MenuItem[]
 }
 
+export interface TextMenuSelection {
+  text: string
+  from: number
+  to: number
+  path?: string
+}
+
+export interface AiSelectionAction extends TextMenuSelection {
+  intent: 'explain' | 'summarize'
+}
+
 const MENU: MenuItem[] = [
   { id: 'add-link', label: 'Add link', icon: 'link' },
   { id: 'add-external-link', label: 'Add external link', icon: 'external' },
@@ -136,6 +147,9 @@ export class TextMenu extends LitElement {
   @property({ type: Number }) y = 0
   @property({ type: Boolean }) flip = false
   @property({ attribute: false }) view: EditorView | null = null
+  @property({ type: Boolean }) aiEnabled = false
+  /** Captured before the menu takes focus or the editor selection changes. */
+  @property({ attribute: false }) selection: TextMenuSelection | null = null
 
   @state() private linkFiles: Array<{ path: string; label: string }> = []
   @state() private openSub: string | null = null
@@ -365,6 +379,20 @@ export class TextMenu extends LitElement {
   }
 
   private async run(id: string): Promise<void> {
+    if (id === 'ai-explain' || id === 'ai-summarize') {
+      if (this.aiEnabled && this.selection?.text.trim()) {
+        this.restoreFocus = false
+        this.dispatchEvent(
+          new CustomEvent<AiSelectionAction>('ai-selection-action', {
+            detail: { ...this.selection, intent: id === 'ai-explain' ? 'explain' : 'summarize' },
+            bubbles: true,
+            composed: true
+          })
+        )
+      }
+      this.close()
+      return
+    }
     const view = this.view
     if (!view) {
       this.close()
@@ -530,6 +558,12 @@ export class TextMenu extends LitElement {
 
   render(): unknown {
     const items = MENU.map((item) => (item.id === 'add-link' ? this.linkMenuItem() : item))
+    if (this.aiEnabled && this.selection?.text.trim()) {
+      items.push(
+        { id: 'ai-explain', label: 'Explain with AI', icon: 'ai', dividerBefore: true },
+        { id: 'ai-summarize', label: 'Summarize with AI', icon: 'ai' }
+      )
+    }
     return html`
       <span id="text-anchor" class="anchor" style=${`left:${this.x}px;top:${this.y}px`}></span>
       <wa-popup

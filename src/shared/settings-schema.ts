@@ -46,6 +46,7 @@ export interface WriteMdSettings {
     motion: 'system' | 'full' | 'reduced'
     paneWidth: number
     railWidth: number
+    aiDockWidth: number
     backgroundId: string
     backgroundEffect: 'none' | 'haze' | 'dither' | 'ascii' | 'halftone' | 'scanlines'
     backgroundTarget: 'workspace'
@@ -73,8 +74,12 @@ export interface WriteMdSettings {
     pdfTheme: string
   }
   ai: {
-    /** Master switch. Off by default: an enabled-by-default feature that cannot work until a key is entered is just chrome. */
+    /** Master switch. New profiles show the assistant; a key is still required to send. */
     enabled: boolean
+    /** Apply completed floating-bar suggestions through the normal acceptance path. */
+    autoAcceptEdits: boolean
+    /** 0 follows the provider default. Other values cap one generated response. */
+    maxOutputTokens: number
     /** Which preset. See `PRESETS` in src/main/ai/providers. */
     providerId: string
     /** Editable, so a self-hosted or proxied endpoint works without a new adapter. */
@@ -139,6 +144,7 @@ export const DEFAULT_SETTINGS: WriteMdSettings = {
     motion: 'system',
     paneWidth: 600,
     railWidth: 208,
+    aiDockWidth: 360,
     backgroundId: '',
     backgroundEffect: 'none',
     backgroundTarget: 'workspace',
@@ -166,7 +172,9 @@ export const DEFAULT_SETTINGS: WriteMdSettings = {
     pdfTheme: 'light'
   },
   ai: {
-    enabled: false,
+    enabled: true,
+    autoAcceptEdits: false,
+    maxOutputTokens: 0,
     providerId: 'openai',
     baseUrl: 'https://api.openai.com/v1',
     model: 'gpt-4o-mini',
@@ -232,7 +240,19 @@ const STRING_UNIONS: Record<string, readonly string[]> = {
   'appearance.backgroundTarget': ['workspace'],
   'appearance.backgroundShowOn': ['all', 'empty'],
   'appearance.windowMaterial': ['none', 'mica', 'acrylic'],
-  'ai.providerId': ['openai', 'anthropic', 'gemini', 'ollama', 'lmstudio']
+  'ai.providerId': [
+    'chatgpt',
+    'openai',
+    'anthropic',
+    'gemini',
+    'openrouter',
+    'deepseek',
+    'groq',
+    'mistral',
+    'xai',
+    'ollama',
+    'lmstudio'
+  ]
 }
 
 const NUMBER_BOUNDS: Record<string, readonly [number, number]> = {
@@ -242,11 +262,13 @@ const NUMBER_BOUNDS: Record<string, readonly [number, number]> = {
   'appearance.themeDarkLightness': [0, 30],
   'appearance.paneWidth': [320, 10000],
   'appearance.railWidth': [160, 360],
+  'appearance.aiDockWidth': [280, 640],
   'appearance.backgroundEmptyOpacity': [0, 100],
   'appearance.backgroundContentOpacity': [0, 100],
   'appearance.surfaceOpacity': [0, 100],
   'appearance.backgroundBlur': [0, 40],
-  'ai.historyTurns': [0, 50]
+  'ai.historyTurns': [0, 50],
+  'ai.maxOutputTokens': [0, 131072]
 }
 
 /**

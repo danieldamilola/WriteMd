@@ -19,6 +19,8 @@ import './UpdateButton'
 export class Sidebar extends LitElement {
   @property({ type: Boolean }) welcome = false
   @property({ type: Boolean }) collapsed = false
+  @property({ type: Boolean }) aiEnabled = false
+  @property({ type: Boolean }) aiOpen = false
   /** Draws one icon per group in the collapsed strip. */
   @property({ type: Array }) tabGroups: TabGroup[] = []
   static styles = [
@@ -94,6 +96,17 @@ export class Sidebar extends LitElement {
       .footer {
         padding: 8px;
       }
+      .footer-actions {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 4px;
+      }
+      .assistant[aria-pressed='true'] {
+        color: var(--text);
+        background: var(--bg-active);
+        border-radius: var(--radius-sm);
+      }
       .version {
         padding: 8px;
         font-size: 11px;
@@ -120,6 +133,9 @@ export class Sidebar extends LitElement {
         padding-top: 12px;
       }
       .slim-bottom {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
         margin-top: auto;
         padding-bottom: 8px;
       }
@@ -203,6 +219,7 @@ export class Sidebar extends LitElement {
             )}
           </div>
           <div class="slim-bottom">
+            ${this.renderAssistantButton()}
             <writemd-icon-button
               size="md"
               title="Settings"
@@ -250,10 +267,30 @@ export class Sidebar extends LitElement {
       </div>
       <div class="footer">
         <writemd-update-button sidebar></writemd-update-button>
-        <button class="nav-row" @click=${() => this.action('open-settings')}>
-          ${chromeIcon('settings')}Settings
-        </button>
+        <div class="footer-actions">
+          <writemd-icon-button
+            size="md"
+            title="Settings"
+            @click=${() => this.action('open-settings')}
+          >
+            ${chromeIcon('settings')}
+          </writemd-icon-button>
+          ${this.renderAssistantButton()}
+        </div>
       </div>
     `
+  }
+  private renderAssistantButton(): unknown {
+    return this.aiEnabled
+      ? html`<writemd-icon-button
+          class="assistant"
+          size="md"
+          title="AI assistant"
+          aria-pressed=${this.aiOpen ? 'true' : 'false'}
+          @click=${() => this.action('toggle-ai')}
+          @mousedown=${(event: MouseEvent) => event.preventDefault()}
+          >${chromeIcon('ai')}</writemd-icon-button
+        >`
+      : null
   }
 }

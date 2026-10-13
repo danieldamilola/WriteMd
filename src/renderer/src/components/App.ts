@@ -15,6 +15,8 @@ import './Sidebar'
 import './Background'
 import './DocBar'
 import './Editor'
+import './ai/QuickAi'
+import type { QuickAi } from './ai/QuickAi'
 import './SettingsModal'
 import './WelcomeScreen'
 import './ConflictDialog'
@@ -28,6 +30,10 @@ import { FileState, type ConflictInfo, type TabDoc, type TabGroup } from '../sta
 import { COMMANDS, bindingFromEvent, bindingsEqual, effectiveBindings } from '../state/shortcuts'
 import { initAutoHideScrollbars } from '../utils/auto-hide-scrollbars'
 import { showSecondaryDocument } from '../utils/secondary-document'
+import { sameFilePath } from '../utils/paths'
+import type { QuickAiContext } from './ai/quick-context'
+import { quickAiReplacement } from './ai/quick-context'
+import type { PreviewChangeView } from './ai/types'
 import {
   applyMotionPreference,
   watchSystemMotionPreference,
@@ -54,6 +60,9 @@ export class WriteMdApp extends LitElement {
         width: 100vw;
         background: var(--frame-surface, var(--bg-frame));
         color: var(--text);
+      }
+      :host(.settings-open) {
+        background: transparent;
       }
       /* Transparent so the frame shows through at the window edges and in the
        editor's gutter. Dark theme sets --bg-frame one step darker than --bg,
@@ -267,6 +276,21 @@ export class WriteMdApp extends LitElement {
   @state() private settingsTab = 'general'
   @state() private showPalette = false
   @state() private splitActive = false
+  @state() private aiEnabled = false
+  @state() private aiAutoAcceptEdits = false
+  @state() private aiDockOpen = false
+  @state() private quickAiOpen = false
+  /**
+   * The bar is open but held behind a handle.
+   *
+   * Kept here rather than inside the bar so the AI icon knows which way its
+   * toggle goes: closing it and putting it away are different things, and the
+   * icon has to mean exactly one of them.
+   */
+  @state() private quickAiCollapsed = false
+  /** A question the bar opens with, so Explain and Summarize need no typing. */
+  @state() private quickAiPrompt = ''
+  @state() private quickAiContext: QuickAiContext = { path: null, content: '', selection: null }
   @state() private panelOrientation: 'horizontal' | 'vertical' = 'vertical'
   @state() private verticalPanelCollapsed = false
   /**
@@ -287,6 +311,8 @@ export class WriteMdApp extends LitElement {
   private fileState = FileState.getInstance()
   private unsubscribeFileState: (() => void) | null = null
   private unsubscribeOrientation: (() => void) | null = null
+  private unsubscribeAi: (() => void) | null = null
+  private unsubscribeAiAutoAccept: (() => void) | null = null
   private unsubscribeMotion: (() => void) | null = null
   private unsubscribeFileOpen: (() => void) | null = null
   private unsubscribeSettingsOpen: (() => void) | null = null
@@ -666,6 +692,7 @@ export class WriteMdApp extends LitElement {
     this.teardownAutoHideScrollbars = initAutoHideScrollbars()
     this.unsubscribeSettingsOpen = on('settings:open', ({ tab }) => {
       this.settingsTab = tab ?? 'general'
+      this.closeQuickAiForDialog()
       this.showSettings = true
     })
     this.unsubscribeFileOpen =
@@ -685,6 +712,18 @@ export class WriteMdApp extends LitElement {
     if (!this.isConnected) return
     this.panelOrientation = this.settingsStore.get('appearance.panelOrientation', 'vertical') as
       'horizontal' | 'vertical'
+    this.aiEnabled = this.settingsStore.get('ai.enabled', true)
+    this.aiAutoAcceptEdits = this.settingsStore.get('ai.autoAcceptEdits', false)
+    this.unsubscribeAiAutoAccept = this.settingsStore.subscribe('ai.autoAcceptEdits', (value) => {
+      this.aiAutoAcceptEdits = Boolean(value)
+    })
+    this.unsubscribeAi = this.settingsStore.subscribe('ai.enabled', (value) => {
+      this.aiEnabled = Boolean(value)
+      if (!this.aiEnabled) {
+        this.fileState.toggleAiDock(false)
+        this.quickAiOpen = false
+      }
+    })
     this.unsubscribeOrientation = this.settingsStore.subscribe(
       'appearance.panelOrientation',
       (v) => {
@@ -704,6 +743,7 @@ export class WriteMdApp extends LitElement {
     })
     this.unsubscribeFileState = this.fileState.subscribeSelector(chromeKey, (_, s) => {
       this.splitActive = s.splitActive
+      this.aiDockOpen = s.aiDockOpen
       this.tabs = s.tabs
       this.tabGroups = s.tabGroups ?? []
       this.activeTab = s.activeTab
@@ -730,6 +770,8 @@ export class WriteMdApp extends LitElement {
     this.unsubscribeSettingsOpen?.()
     this.unsubscribeFileState?.()
     this.unsubscribeOrientation?.()
+    this.unsubscribeAi?.()
+    this.unsubscribeAiAutoAccept?.()
     this.unsubscribeMotion?.()
     this.stripObserver?.disconnect()
     this.stripObserver = null
@@ -738,6 +780,7 @@ export class WriteMdApp extends LitElement {
   }
 
   protected updated(changed: PropertyValues): void {
+    this.classList.toggle('settings-open', this.showSettings)
     const strip = this.tabStrip
     if (strip) {
       strip.addEventListener('scroll', this.handleStripScroll, { passive: true })
@@ -882,9 +925,24 @@ export class WriteMdApp extends LitElement {
         this.fileState.setSplitSurface('preview')
         break
       case 'toggle-ai':
-        this.fileState.toggleAiDock()
+        // The bar is the AI surface the buttons open, so the shortcut follows
+        // them rather than reaching past them to the panel.
+        this.toggleQuickAi()
+        break
+      case 'ai-chat':
+        if (this.aiEnabled) {
+          this.closeQuickAiForDialog()
+          this.fileState.toggleAiDock(true)
+        }
+        break
+      case 'toggle-sidebar':
+        if (this.panelOrientation === 'vertical') this.toggleVerticalPanel()
+        break
+      case 'ai-selection':
+        this.renderRoot.querySelector('writemd-editor')?.openSelectionMenu()
         break
       case 'open-settings':
+        this.closeQuickAiForDialog()
         this.showSettings = true
         break
       case 'find':
@@ -945,6 +1003,185 @@ export class WriteMdApp extends LitElement {
     this.verticalPanelCollapsed = !this.verticalPanelCollapsed
   }
 
+  private toggleQuickAi = (): void => {
+    if (!this.aiEnabled) return
+    if (this.quickAiOpen) {
+      this.quickAiOpen = false
+      return
+    }
+    this.openQuickAi()
+  }
+
+  /**
+   * Open the bar over the current note.
+   *
+   * The single entry point for everything that used to go straight to the panel:
+   * the AI buttons, the hotkey, and Explain and Summarize from the text menu.
+   * A prompt means the caller already knows the question, so it is typed in for
+   * them - one click does the whole job, which is what those menu items did.
+   */
+  private openQuickAi(action?: { prompt: string; context?: QuickAiContext }): void {
+    if (!this.aiEnabled) return
+    if (this.aiDockOpen) this.fileState.toggleAiDock(false)
+    // A caller that captured its own selection brings that context; anything
+    // else reads whatever is selected in the pane with focus.
+    const editor = this.renderRoot.querySelector('writemd-editor') as
+      (HTMLElement & { getQuickAiContext: () => QuickAiContext }) | null
+    const captured = action?.context ??
+      editor?.getQuickAiContext() ?? { path: null, content: '', selection: null }
+    // The bar reaches the whole vault, so it needs the same things the panel
+    // sends: open tabs by path, and `@` notes resolved at send time.
+    this.quickAiContext = {
+      ...captured,
+      openPaths: [
+        ...new Set(this.tabs.map((tab) => tab.path).filter((path): path is string => !!path))
+      ]
+    }
+    this.quickAiPrompt = action?.prompt ?? ''
+    // A collapsed bar is still open: it is the same conversation, held behind a
+    // handle. Opening from anywhere puts the prompt back.
+    this.quickAiCollapsed = false
+    this.quickAiOpen = true
+  }
+
+  /**
+   * The pane the quick AI bar floats over: the note being written in.
+   *
+   * Null with no document open, which the bar reads as "use the whole content
+   * area" - the welcome screen has no pane to sit inside.
+   */
+  private quickAiPane = (): HTMLElement | null => {
+    const editor = this.renderRoot.querySelector('writemd-editor') as
+      (HTMLElement & { quickAiPane?: HTMLElement | null }) | null
+    return editor?.quickAiPane ?? null
+  }
+
+  private readQuickAiContext = (): QuickAiContext => {
+    const context = this.quickAiContext
+    const state = this.fileState.getState()
+    const doc =
+      state.tabs.find((tab) => sameFilePath(tab.path, context.path)) ??
+      (sameFilePath(state.secondaryDoc?.path, context.path) ? state.secondaryDoc : null)
+    if (!doc) return context
+    const selection = context.selection
+    return {
+      ...context,
+      content: doc.content,
+      selection:
+        selection && doc.content.slice(selection.from, selection.to) === selection.text
+          ? selection
+          : null
+    }
+  }
+
+  /**
+   * Settings and the command bar both want the middle of the window, and the
+   * bar is the higher layer of the two. Closing it means an opening dialog is
+   * never drawn under a prompt the user can no longer see.
+   */
+  private closeQuickAiForDialog(): void {
+    if (this.quickAiOpen) this.quickAiOpen = false
+  }
+
+  private applyQuickAi = (
+    event: CustomEvent<{ change: PreviewChangeView; context: QuickAiContext }>
+  ): Promise<void> =>
+    this.acceptQuickAi(event).catch((error: unknown) => {
+      this.renderRoot
+        .querySelector('writemd-ai-quick')
+        ?.reportApplyError(
+          error instanceof Error ? error.message : 'Could not apply the edit. Try again.',
+          event.detail.change
+        )
+    })
+
+  private async acceptQuickAi(
+    event: CustomEvent<{ change: PreviewChangeView; context: QuickAiContext }>
+  ): Promise<void> {
+    const { change, context } = event.detail
+    const current = this.fileState.getState()
+    const secondary = current.secondaryDoc
+    const isSecondary =
+      !!secondary?.path && !!context.path && sameFilePath(secondary.path, context.path)
+    const currentPath = isSecondary ? (secondary?.path ?? null) : current.path
+    const currentContent = isSecondary ? (secondary?.content ?? '') : current.content
+    const bar = this.renderRoot.querySelector('writemd-ai-quick')
+    /*
+     * Which route this is depends on the file the change is for, not the file
+     * the bar happened to open over. The bar reaches external Markdown too, so
+     * accepting can target a note that is not the one on screen.
+     */
+    const isOpenNote =
+      !!context.path &&
+      !!currentPath &&
+      sameFilePath(context.path, currentPath) &&
+      sameFilePath(change.path, context.path)
+    if (!isOpenNote) {
+      /*
+       * Not the note on screen, so the editor has no state for it. The bar
+       * reaches external Markdown too, so this is a normal case rather than a
+       * refusal: write it the way a manual edit would be written.
+       */
+      void this.writeSuggestedFile(change, bar)
+      return
+    }
+    const replacement = quickAiReplacement(context, change)
+    if (replacement === null || currentContent !== context.content) {
+      bar?.reportApplyError(
+        'This note changed after the suggestion was made. Ask again to get a current suggestion.',
+        change
+      )
+      return
+    }
+    const saved = await this.fileState.applyAiEdit(context.path!, context.content, replacement)
+    if (!saved) {
+      bar?.reportApplyError(
+        'Could not save the edit. The changed text is still in the editor.',
+        change
+      )
+      return
+    }
+    this.quickAiContext = {
+      ...context,
+      content: replacement,
+      selection: context.selection
+        ? {
+            from: context.selection.from,
+            to: context.selection.from + change.content.length,
+            text: change.content
+          }
+        : null
+    }
+    bar?.reportApplySuccess(change, null)
+  }
+
+  /**
+   * Write a suggested change to a file the editor is not holding.
+   *
+   * The user accepted it, so it is written the same way a manual edit would be:
+   * through the bridge, with the result checked. A refusal is reported in the
+   * bar rather than swallowed, because a suggestion that silently does not land
+   * is worse than one that says it could not.
+   */
+  private async writeSuggestedFile(change: PreviewChangeView, bar: QuickAi | null): Promise<void> {
+    const accept = api()?.ai?.acceptPreview
+    if (!accept || !change.previewId) {
+      bar?.reportApplyError('Writing files is unavailable in this build.', change)
+      return
+    }
+    try {
+      const applied = await accept(change.previewId)
+      await this.fileState.refreshFile(change.path)
+      bar?.reportApplySuccess(change, applied)
+    } catch (error) {
+      const name = change.path.replace(/\\/g, '/').split('/').pop() ?? change.path
+      bar?.reportApplyError(
+        error instanceof Error ? error.message : `Could not write ${name}.`,
+        change
+      )
+    }
+  }
+
   /**
    * A group icon in the collapsed strip opens the panel on that folder.
    *
@@ -998,9 +1235,12 @@ export class WriteMdApp extends LitElement {
           slot="header"
           .settingsOpen=${this.showSettings}
           .splitActive=${this.splitActive}
+          .showAiButton=${this.aiEnabled && this.panelOrientation === 'horizontal'}
+          .aiOpen=${this.aiDockOpen || this.quickAiOpen}
           .showSplitButton=${!this.showWelcome}
           .documentHeader=${this.panelOrientation === 'vertical'}
           @toggle-split=${() => this.fileState.toggleSplitView()}
+          @toggle-ai=${this.toggleQuickAi}
           @toggle-panel=${this.toggleVerticalPanel}
         >
           <div
@@ -1106,6 +1346,8 @@ export class WriteMdApp extends LitElement {
                 .collapsed=${this.verticalPanelCollapsed}
                 @toggle-rail=${this.toggleVerticalPanel}
                 ><writemd-sidebar
+                  .aiEnabled=${this.aiEnabled}
+                  .aiOpen=${this.aiDockOpen || this.quickAiOpen}
                   .collapsed=${this.verticalPanelCollapsed}
                   .welcome=${this.showWelcome}
                   .tabGroups=${this.tabGroups}
@@ -1114,6 +1356,7 @@ export class WriteMdApp extends LitElement {
                   @new-group=${this.handleCreateGroupVertical}
                   @open-menu=${() => (this.showPalette = true)}
                   @toggle-panel=${this.toggleVerticalPanel}
+                  @toggle-ai=${this.toggleQuickAi}
                   @open-group=${this.handleOpenGroup}
                   @open-settings=${() => (this.showSettings = true)}
                   >${
@@ -1141,7 +1384,7 @@ export class WriteMdApp extends LitElement {
         <div class="main-area" slot="content" ?inert=${this.showSettings}>
           <div class="editor-wrapper">
             ${
-              this.showWelcome
+              this.showWelcome && !this.aiDockOpen
                 ? html`<writemd-welcome-screen
                     .vertical=${this.panelOrientation === 'vertical'}
                     @new-file=${() => void this.fileState.newFile()}
@@ -1150,9 +1393,43 @@ export class WriteMdApp extends LitElement {
                     @open-recent=${(e: CustomEvent<{ path: string }>) =>
                       void this.fileState.openFile(e.detail.path)}
                   ></writemd-welcome-screen>`
-                : html`<writemd-editor></writemd-editor>`
+                : html`<writemd-editor
+                    @ai-open-floating=${(e: CustomEvent<{ path: string | null }>) => {
+                      const editor = e.currentTarget as HTMLElement & {
+                        getQuickAiContext: (path?: string | null) => QuickAiContext
+                      }
+                      this.openQuickAi({
+                        prompt: '',
+                        context: editor.getQuickAiContext(e.detail.path)
+                      })
+                    }}
+                    @open-ai-bar=${(e: CustomEvent<{ prompt: string; context: QuickAiContext }>) =>
+                      this.openQuickAi({ prompt: e.detail.prompt, context: e.detail.context })}
+                  ></writemd-editor>`
             }
           </div>
+          ${
+            // Inside the content slot rather than the shell's overlay, so the
+            // bar centres on the document. Centred on the window it sits off
+            // to the right of the writing by the width of the tab rail.
+            this.quickAiOpen
+              ? html`<writemd-ai-quick
+                  .context=${this.quickAiContext}
+                  .readContext=${this.readQuickAiContext}
+                  .autoAcceptEdits=${this.aiAutoAcceptEdits}
+                  .paneFor=${this.quickAiPane}
+                  .collapsed=${this.quickAiCollapsed}
+                  .initialPrompt=${this.quickAiPrompt}
+                  @quick-ai-close=${() => (this.quickAiOpen = false)}
+                  @quick-ai-collapse=${() => (this.quickAiCollapsed = true)}
+                  @quick-ai-accept=${this.applyQuickAi}
+                  @quick-ai-full-chat=${() => {
+                    this.quickAiOpen = false
+                    this.fileState.toggleAiDock(true)
+                  }}
+                ></writemd-ai-quick>`
+              : null
+          }
         </div>
 
         ${

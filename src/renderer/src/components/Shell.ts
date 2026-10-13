@@ -31,6 +31,10 @@ export class Shell extends LitElement {
       grid-column: 1 / -1;
       margin-left: var(--shell-sidebar-width);
     }
+    :host([settings-open]) ::slotted([slot='rail']),
+    :host([settings-open]) ::slotted([slot='content']) {
+      visibility: hidden;
+    }
     ::slotted([slot='rail']) {
       grid-column: 1;
       grid-row: 1 / -1;

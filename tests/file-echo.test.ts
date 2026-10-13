@@ -16,6 +16,9 @@ function makeTab(overrides: Partial<TabDoc> = {}): TabDoc {
 }
 
 describe('isOwnEcho', () => {
+  it('recognizes an empty pending write', () => {
+    expect(isOwnEcho(makeTab({ pendingWrite: '' }), '')).toBe(true)
+  })
   it('treats disk content equal to originalContent as our own echo', () => {
     expect(isOwnEcho(makeTab(), 'original')).toBe(true)
   })

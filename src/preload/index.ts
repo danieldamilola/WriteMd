@@ -1,7 +1,9 @@
 import { contextBridge, ipcRenderer, webUtils, type IpcRendererEvent } from 'electron'
+import type { ChatgptAuthView } from '../shared/ai/chatgpt'
 import type {
   AiEvent,
   AiSendInput,
+  FileChangeSnapshot,
   PersistedSessionView,
   UpdateInfo,
   UpdateProgress
@@ -63,7 +65,7 @@ const writemdAPI = {
     rename: (oldPath: string, newPath: string) =>
       ipcRenderer.invoke('file:rename', oldPath, newPath),
     delete: (path: string) => ipcRenderer.invoke('file:delete', path),
-    onChanged: (callback: (path: string) => void) =>
+    onChanged: (callback: (path: string, snapshot?: FileChangeSnapshot) => void) =>
       onChannel('file:changed', callback as (...args: unknown[]) => void)
   },
   vault: {
@@ -103,6 +105,19 @@ const writemdAPI = {
    * renderer, which is exactly the boundary `contextIsolation` exists to hold.
    */
   ai: {
+    chatgpt: {
+      state: () => ipcRenderer.invoke('ai:chatgpt-state'),
+      login: (addAccount = false) => ipcRenderer.invoke('ai:chatgpt-login', addAccount),
+      cancel: () => ipcRenderer.invoke('ai:chatgpt-cancel'),
+      logout: () => ipcRenderer.invoke('ai:chatgpt-logout'),
+      select: (id: string) => ipcRenderer.invoke('ai:chatgpt-select', id),
+      acknowledgePlan: () => ipcRenderer.invoke('ai:chatgpt-acknowledge'),
+      models: () => ipcRenderer.invoke('ai:chatgpt-models'),
+      onChanged: (callback: (state: ChatgptAuthView) => void) =>
+        onChannel('ai:chatgpt-auth', callback as (...args: unknown[]) => void)
+    },
+    listSkills: () => ipcRenderer.invoke('ai:list-skills'),
+    openSkillsFolder: () => ipcRenderer.invoke('ai:open-skills-folder'),
     presets: () => ipcRenderer.invoke('ai:presets'),
     fetchModels: (providerId: string, baseUrl: string, apiKey: string) =>
       ipcRenderer.invoke('ai:fetch-models', providerId, baseUrl, apiKey),
@@ -111,6 +126,7 @@ const writemdAPI = {
     keyState: () => ipcRenderer.invoke('ai:key-state'),
     send: (requestId: string, input: AiSendInput) =>
       ipcRenderer.invoke('ai:send', requestId, input),
+    acceptPreview: (previewId: string) => ipcRenderer.invoke('ai:accept-preview', previewId),
     cancel: (requestId: string) => ipcRenderer.invoke('ai:cancel', requestId),
     onEvent: (callback: (event: AiEvent) => void) =>
       onChannel('ai:event', (...args: unknown[]) => callback(args[0] as AiEvent)),

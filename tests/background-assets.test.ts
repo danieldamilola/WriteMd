@@ -107,7 +107,7 @@ describe('background encoding', () => {
     // Assets written before the JPEG switch keep their own media type.
     expect((await getBackground(asset!.id))?.url).toMatch(/^data:image\/png;base64,/)
   })
-  it('reads a pre-1.4.1 PNG id back as PNG', async () => {
+  it('reads a legacy PNG id back as PNG', async () => {
     const { getBackground, backgroundPath } = await import('../src/main/appearance')
     const id = '12345678-1234-1234-1234-123456789abc.png'
     writeFileSync(backgroundPath(id), 'owned copy')

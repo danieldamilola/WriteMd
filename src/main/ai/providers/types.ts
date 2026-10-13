@@ -17,18 +17,29 @@ import type { ChatMessage, StreamEvent, ToolSpec } from '../../../shared/ai/type
 export interface ProviderDescriptor {
   id: string
   label: string
-  kind: 'openai' | 'anthropic' | 'gemini'
+  kind: 'openai' | 'anthropic' | 'gemini' | 'responses'
   defaultBaseUrl: string
   defaultModel: string
   /** Local servers need no key. */
   keyRequired: boolean
   keyHint: string
+  /**
+   * Whether `matchPresetByBaseUrl` should return this preset for its
+   * `defaultBaseUrl`. Defaults to true.
+   *
+   * An account-based provider shares a host with the API-key preset for the
+   * same upstream, so matching its URL would take over a configuration the user
+   * set up with a key. Such a provider is still chosen by id in Settings; it is
+   * only excluded from inferring a provider from an address.
+   */
+  selectableByUrl?: false
 }
 
 /** Everything a non-streaming call needs to identify where it is going. */
 export interface ProviderConfig {
   baseUrl: string
   apiKey?: string
+  providerId?: string
 }
 
 export interface StreamRequest {
@@ -37,7 +48,8 @@ export interface StreamRequest {
   model: string
   messages: ChatMessage[]
   system: string
-  maxTokens: number
+  /** Omit to use the provider's default output allowance. */
+  maxTokens?: number
   temperature: number
   signal: AbortSignal
   /**
@@ -46,6 +58,8 @@ export interface StreamRequest {
    * it, and buffer the streamed arguments back into a whole `ToolCall`.
    */
   tools?: ToolSpec[]
+  /** Plain-response recovery after a provider emits unusable tool markup. */
+  disableThinking?: boolean
 }
 
 export interface ProviderAdapter {

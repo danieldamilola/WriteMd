@@ -85,22 +85,50 @@ describe('writemd-sidebar panel', () => {
     ).toBe(false)
   })
 
-  it('keeps the footer shortcuts as text rows', async () => {
+  it('keeps Settings as an icon-only footer shortcut', async () => {
     const el = mount()
     await el.updateComplete
     expect(el.shadowRoot?.querySelector('.footer')?.firstElementChild?.tagName).toBe(
       'WRITEMD-UPDATE-BUTTON'
     )
-    for (const [label, event] of [['Settings', 'open-settings']] as const) {
-      const buttons = Array.from(
-        el.shadowRoot?.querySelectorAll('.footer button') ?? []
-      ) as HTMLButtonElement[]
-      const target = buttons.find((b) => b.textContent?.includes(label))
-      const seen = new Promise<Event>((resolve) => el.addEventListener(event, resolve))
-      target?.click()
-      await seen
-    }
+    const button = el.shadowRoot!.querySelector<HTMLElement>(
+      '.footer-actions writemd-icon-button[title="Settings"]'
+    )!
+    expect(button.textContent?.trim()).toBe('')
+    const seen = new Promise<Event>((resolve) => el.addEventListener('open-settings', resolve))
+    button.click()
+    await seen
   })
+
+  it.each([false, true])(
+    'offers AI beside Settings in expanded mode and above it in collapsed mode (%s)',
+    async (collapsed) => {
+      const el = mount(collapsed)
+      el.aiEnabled = true
+      el.aiOpen = true
+      await el.updateComplete
+      const container = el.shadowRoot!.querySelector(
+        collapsed ? '.slim-bottom' : '.footer-actions'
+      )!
+      const buttons = Array.from(container.querySelectorAll('writemd-icon-button'))
+      expect(buttons.map((button) => button.getAttribute('title'))).toEqual(
+        collapsed ? ['AI assistant', 'Settings'] : ['Settings', 'AI assistant']
+      )
+      const assistant = container.querySelector<HTMLElement>('[title="AI assistant"]')!
+      expect(assistant.querySelector('svg')?.getAttribute('data-icon')).toBe('ai')
+      expect(assistant.getAttribute('aria-pressed')).toBe('true')
+      await (assistant as WriteMdIconButton).updateComplete
+      expect(assistant.shadowRoot!.querySelector('button')!.getAttribute('aria-pressed')).toBe(
+        'true'
+      )
+      const seen = new Promise<Event>((resolve) => el.addEventListener('toggle-ai', resolve))
+      assistant.click()
+      await seen
+      el.aiEnabled = false
+      await el.updateComplete
+      expect(el.shadowRoot!.querySelector('[title="AI assistant"]')).toBeNull()
+    }
+  )
 
   it('collapses to a slim strip holding expand, one icon per group, and settings', async () => {
     const el = mount(true)

@@ -79,7 +79,20 @@ export function getSettings(): WriteMdSettings {
  * not make the possibility go away.
  */
 function dropRemovedFeatures(settings: WriteMdSettings): WriteMdSettings {
-  const next = { ...settings, appearance: { ...settings.appearance } }
+  const next = {
+    ...settings,
+    appearance: { ...settings.appearance },
+    ai: {
+      ...settings.ai,
+      autoAcceptEdits: settings.ai.autoAcceptEdits === true,
+      maxOutputTokens:
+        Number.isInteger(settings.ai.maxOutputTokens) &&
+        settings.ai.maxOutputTokens >= 0 &&
+        settings.ai.maxOutputTokens <= 131072
+          ? settings.ai.maxOutputTokens
+          : 0
+    }
+  }
   if (next.appearance.backgroundTarget !== 'workspace') {
     next.appearance.backgroundTarget = 'workspace'
   }

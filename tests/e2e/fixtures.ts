@@ -95,6 +95,23 @@ export async function firstWindow(app: ElectronApplication): Promise<Page> {
   return window
 }
 
+/** Resize the desktop window; viewport emulation leaves native chrome clipped. */
+export async function resizeWindow(
+  app: ElectronApplication,
+  width: number,
+  height: number
+): Promise<void> {
+  await app.evaluate(
+    ({ BrowserWindow }, { width, height }) => {
+      const window = BrowserWindow.getAllWindows()[0]
+      if (!window) throw new Error('No app window opened')
+      if (window.isMaximized()) window.unmaximize()
+      window.setContentSize(width, height)
+    },
+    { width, height }
+  )
+}
+
 /**
  * The title bar is intentionally bare (no Menu/Settings icons), so specs open
  * settings through its keyboard shortcut instead of a button that no longer

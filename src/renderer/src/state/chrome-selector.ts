@@ -16,6 +16,7 @@ export function chromeKey(state: Readonly<FileStateData>): string {
     state.viewMode,
     state.splitActive,
     state.splitSurface,
+    state.aiDockOpen,
     state.secondaryDoc?.path,
     state.secondaryDoc?.dirty,
     state.conflict ? [state.conflict.path, state.conflict.diskMtime] : null

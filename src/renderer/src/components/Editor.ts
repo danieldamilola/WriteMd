@@ -3,7 +3,10 @@ import { customElement, query, state } from 'lit/decorators.js'
 import katexCss from 'katex/dist/katex.min.css?inline'
 import { findNext, findPrevious, getSearchQuery } from '@codemirror/search'
 import { scrollbarStyles } from './scrollbars'
+import { resizeHandleStyles } from '../design/controls'
+import { WorkspaceState, aiDockGeometry } from '../state/workspace'
 import { SettingsStore } from '../state/settings'
+import { documentChanges } from '../utils/document-changes'
 import { icon } from './icons'
 import './FindPanel'
 import './BacklinksPanel'
@@ -36,6 +39,7 @@ import {
 import { makeLinkClickHandler } from './extensions/link-click'
 import { mermaidEnabledFacet } from './extensions/mermaid-toggle'
 import { on } from '../events/bus'
+import { DURATION, reducedMotionNow } from '../utils/motion'
 import { mathPlugin } from './extensions/math-plugin'
 import { frontmatterPlugin } from './extensions/frontmatter-plugin'
 import { wikiLinkPlugin } from './extensions/wiki-link-plugin'
@@ -57,12 +61,15 @@ import { inlineTitle, renameTitleFacet, showInlineTitleFacet } from './extension
 import './DocBar'
 import './PreviewPanel'
 import './TextMenu'
+import type { AiSelectionAction, TextMenuSelection } from './TextMenu'
+import type { QuickAiContext } from './ai/quick-context'
 import './VaultExplorer'
 import { api } from '../api'
 import type { VaultTreeNode } from '../../../shared/electron-api'
 import { basenameNoExt, cleanWikiTarget, displayPath, shortPath } from '../utils/links'
 import { navigateLink, resolveOrCreateLink, type NavigateDeps } from '../utils/navigate'
 import { showSecondaryDocument } from '../utils/secondary-document'
+import { sameFilePath } from '../utils/paths'
 
 /**
  * Does a line's text declare the given anchor? GitHub slugifies headings by
@@ -90,6 +97,7 @@ export class Editor extends LitElement {
   static styles = [
     unsafeCSS(katexCss),
     scrollbarStyles,
+    resizeHandleStyles,
     css`
       :host {
         display: flex;
@@ -100,6 +108,8 @@ export class Editor extends LitElement {
         background: transparent;
         box-sizing: border-box;
         padding: 0;
+        container-type: inline-size;
+        container-name: editor;
       }
 
       .workspace {
@@ -118,18 +128,80 @@ export class Editor extends LitElement {
        * flex 1, so a fixed-basis sibling lands at the right edge with no change
        * to the existing layout - which is why it is here and not positioned.
        */
+      /*
+       * The panel slides its own box in from the right while the space it takes
+       * opens beside it, which is the sidebar's behaviour rather than a fade.
+       * A panel that simply appears looks like a different app opening over
+       * this one; one that slides reads as part of the same window rearranging
+       * itself, and the document takes its space as the panel goes rather than
+       * after it.
+       *
+       * Keyed on the transition attribute so it runs once per open and once per
+       * close, not on every resize the geometry store publishes.
+       */
+      .ai-column {
+        position: relative;
+        display: flex;
+        flex: 0 0 var(--ai-dock-width);
+        min-width: 0;
+        min-height: 0;
+        height: 100%;
+      }
+      .ai-column.entering {
+        animation: ai-column-in var(--motion-base) var(--motion-out);
+      }
+      .ai-column.leaving {
+        animation: ai-column-out var(--motion-fast) var(--motion-in);
+      }
+      @keyframes ai-column-in {
+        from {
+          opacity: 0;
+          transform: translateX(24px);
+        }
+        to {
+          opacity: 1;
+          transform: translateX(0);
+        }
+      }
+      @keyframes ai-column-out {
+        from {
+          opacity: 1;
+          transform: translateX(0);
+        }
+        to {
+          opacity: 0;
+          transform: translateX(16px);
+        }
+      }
+      :host-context([data-motion='reduced']) .ai-column {
+        animation: none;
+      }
       .ai-dock {
-        flex: 0 0 360px;
+        flex: 1;
         min-width: 0;
         height: 100%;
-        border-left: 1px solid var(--border-subtle, var(--border));
-        background: var(--bg-card);
+        background: var(--editor-surface);
       }
-
-      @container editor (width < 1100px) {
-        .ai-dock {
-          flex-basis: 300px;
-        }
+      .ai-divider {
+        position: absolute;
+        inset: 0 auto 0 -4px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 8px;
+        cursor: col-resize;
+        touch-action: none;
+        z-index: 4;
+      }
+      .ai-divider:focus-visible {
+        outline: none;
+      }
+      .ai-divider:hover .resize-handle {
+        color: var(--text);
+      }
+      .ai-divider:focus-visible .resize-handle {
+        outline: 2px solid var(--border-focus);
+        border-radius: var(--radius-sm);
       }
 
       .panes {
@@ -440,6 +512,48 @@ export class Editor extends LitElement {
   private editorView: EditorView | null = null
   private secondaryEditorView: EditorView | null = null
 
+  /**
+   * The pane the quick AI bar belongs to.
+   *
+   * The bar floats over the bottom of the note being written in, so it follows
+   * the pane rather than the window: opening the chat panel, a split pane or the
+   * tab rail narrows the writing, and a bar that stayed window-wide would sit
+   * across the panel it is meant to sit over.
+   */
+  get quickAiPane(): HTMLElement | null {
+    return this.renderRoot.querySelector<HTMLElement>('writemd-panel[slot="primary"]')
+  }
+
+  /** Capture text from the currently focused pane before the quick AI popup takes focus. */
+  getQuickAiContext(preferredPath?: string | null): QuickAiContext {
+    const secondary =
+      this.secondaryEditorView &&
+      (preferredPath
+        ? !sameFilePath(this.fileState.getState().path, preferredPath) &&
+          sameFilePath(this.fileState.getState().secondaryDoc?.path, preferredPath)
+        : this.secondaryEditorView.hasFocus)
+        ? this.secondaryEditorView
+        : null
+    const view = secondary ?? this.editorView
+    const state = this.fileState.getState()
+    const path = secondary ? (state.secondaryDoc?.path ?? null) : state.path
+    if (!view) return { path: null, content: '', selection: null }
+    const content = view.state.doc.toString()
+    const selected = view.state.selection.main
+    if (selected.empty || selected.to - selected.from > 20_000) {
+      return { path, content, selection: null }
+    }
+    return {
+      path,
+      content,
+      selection: {
+        from: selected.from,
+        to: selected.to,
+        text: view.state.sliceDoc(selected.from, selected.to)
+      }
+    }
+  }
+
   private primaryModeCompartment = new Compartment()
   private secondaryModeCompartment = new Compartment()
   private primaryPathCompartment = new Compartment()
@@ -508,8 +622,20 @@ export class Editor extends LitElement {
   /** The assistant dock, a right-hand column beside the workspace. */
   @state() private aiEnabled = false
   @state() private aiDockOpen = false
+  @state() private aiDockWidth = WorkspaceState.getInstance().aiDockWidth
+  @state() private aiAvailable = 0
+  private aiResizeObserver: ResizeObserver | null = null
+  private aiResizePointer: number | null = null
+  private aiResizeStart = 0
+  private aiResizeInitial = 0
+  private aiResizePreference = 0
   @state() private secondaryDoc: SecondaryDocState | null = null
-  @state() private textMenu: { x: number; y: number; secondary: boolean } | null = null
+  @state() private textMenu: {
+    x: number
+    y: number
+    secondary: boolean
+    selection: TextMenuSelection | null
+  } | null = null
   @state() private findPane: 'primary' | 'secondary' = 'primary'
   @state() private findOpen = false
   @state() private findMode: 'find' | 'replace' = 'find'
@@ -519,6 +645,16 @@ export class Editor extends LitElement {
   @state() private findRegex = false
   @state() private notice = ''
   private noticeTimer: number | null = null
+  /**
+   * The panel's exit, held for its length.
+   *
+   * Closing unmounts the panel the instant the preference flips, so there is
+   * nothing left to animate and the whole column blinks out of existence. This
+   * keeps it mounted for the length of the exit and then lets it go, the same
+   * shape the sidebar uses when it collapses.
+   */
+  @state() private aiClosing = false
+  private aiCloseTimer: number | null = null
 
   @state() private panelOrientation: 'horizontal' | 'vertical' = 'horizontal'
   /** Whether the footer shows the document path on its left. */
@@ -529,10 +665,23 @@ export class Editor extends LitElement {
 
   connectedCallback(): void {
     super.connectedCallback()
+    if (typeof ResizeObserver !== 'undefined') {
+      this.aiResizeObserver = new ResizeObserver(([entry]) => {
+        if (entry) this.aiAvailable = entry.contentRect.width
+      })
+      this.aiResizeObserver.observe(this)
+    }
     this.busUnsubs.push(on('find:open', this.handleGlobalFind))
     this.busUnsubs.push(on('editor:focus-inline-title', this.handleFocusInlineTitle))
     this.busUnsubs.push(on('wiki:open', this.handleOpenWikiLink))
     this.settingsStore = SettingsStore.getInstance()
+    this.aiDockWidth = WorkspaceState.getInstance().aiDockWidth
+    this.settingsUnsubs.push(
+      this.settingsStore.subscribe('appearance.aiDockWidth', () => {
+        if (this.aiResizePointer === null)
+          this.aiDockWidth = WorkspaceState.getInstance().aiDockWidth
+      })
+    )
     this.panelOrientation = this.settingsStore.get('appearance.panelOrientation', 'vertical') as
       'horizontal' | 'vertical'
     this.aiEnabled = this.settingsStore.get('ai.enabled', false) ?? false
@@ -569,6 +718,7 @@ export class Editor extends LitElement {
     this.aiDockOpen = current.aiDockOpen
     this.secondaryDoc = current.secondaryDoc
     this.unsubscribe = this.fileState.subscribe((s) => {
+      this.syncAiDockClose(s.aiDockOpen)
       const normalizedMode = s.viewMode === 'wysiwyg' ? 'live' : s.viewMode
       const modeChanged = this.viewMode !== normalizedMode
       const docChanged = this.content !== s.content
@@ -607,7 +757,7 @@ export class Editor extends LitElement {
         } else {
           this.viewContent = s.content
           this.editorView.dispatch({
-            changes: { from: 0, to: this.editorView.state.doc.length, insert: s.content }
+            changes: documentChanges(this.editorView.state.doc.toString(), s.content)
           })
         }
       }
@@ -629,11 +779,10 @@ export class Editor extends LitElement {
         } else {
           this.secondaryViewContent = s.secondaryDoc.content
           this.secondaryEditorView.dispatch({
-            changes: {
-              from: 0,
-              to: this.secondaryEditorView.state.doc.length,
-              insert: s.secondaryDoc.content
-            }
+            changes: documentChanges(
+              this.secondaryEditorView.state.doc.toString(),
+              s.secondaryDoc.content
+            )
           })
         }
       }
@@ -686,9 +835,14 @@ export class Editor extends LitElement {
   }
 
   disconnectedCallback(): void {
+    this.aiResizeObserver?.disconnect()
+    this.aiResizeObserver = null
+    this.aiResizePointer = null
     for (const unsub of this.busUnsubs) unsub()
     this.busUnsubs = []
     if (this.noticeTimer !== null) window.clearTimeout(this.noticeTimer)
+    if (this.aiCloseTimer !== null) window.clearTimeout(this.aiCloseTimer)
+    this.aiCloseTimer = null
     this.unsubscribe?.()
     // Before destroying the views: stopResize re-measures them, and it must not
     // run against an already-destroyed view. A teardown mid-drag would otherwise
@@ -1079,7 +1233,40 @@ export class Editor extends LitElement {
 
   private handleTextMenu = (e: MouseEvent, secondary = false): void => {
     e.preventDefault()
-    this.textMenu = { x: e.clientX, y: e.clientY, secondary }
+    const view = secondary ? this.secondaryEditorView : this.editorView
+    const range = view?.state.selection.main
+    const selection =
+      view && range && !range.empty
+        ? {
+            text: view.state.sliceDoc(range.from, range.to),
+            from: range.from,
+            to: range.to,
+            path: (secondary ? this.secondaryDoc?.path : this.filePath) ?? undefined
+          }
+        : null
+    this.textMenu = { x: e.clientX, y: e.clientY, secondary, selection }
+  }
+
+  /**
+   * Explain and Summarize ask the floating bar, not the panel.
+   *
+   * Both were panel-only actions, so a one-word question cost the width of a
+   * docked panel and buried the document. The bar captures the selection itself,
+   * so all this has to say is which question to ask.
+   */
+  private handleAiSelectionAction = (e: CustomEvent<AiSelectionAction>): void => {
+    if (!this.aiEnabled || !e.detail.text.trim()) return
+    const secondary = this.textMenu?.selection?.path === this.secondaryDoc?.path
+    const view = secondary ? this.secondaryEditorView : this.editorView
+    if (!view) return
+    this.openAiBar({
+      prompt:
+        e.detail.intent === 'explain'
+          ? 'Explain only the highlighted text.'
+          : 'Summarize only the highlighted text.',
+      view,
+      path: e.detail.path ?? null
+    })
   }
 
   /** View the find panel currently targets (secondary pane when focused). */
@@ -1333,6 +1520,59 @@ export class Editor extends LitElement {
   }
 
   /**
+   * Open the assistant with the editor's exact selection as context.
+   *
+   * The floating bar, not the panel: this is a question about a few words, and
+   * the bar answers it without taking half the window. The panel is one step
+   * further, through Open full chat.
+   */
+  openSelectionMenu(): void {
+    const view = this.secondaryEditorView?.hasFocus ? this.secondaryEditorView : this.editorView
+    if (!view || !this.aiEnabled) return
+    this.openAiBar({
+      prompt: 'Ask about your selection.',
+      view,
+      path: this.secondaryEditorView?.hasFocus ? (this.secondaryDoc?.path ?? null) : this.filePath
+    })
+  }
+
+  /**
+   * Open the floating bar for a selection action.
+   *
+   * The captured context travels with the request rather than being re-read from
+   * the focused pane. The bar is going to take focus, and a right-click in the
+   * split pane does not move CodeMirror's focus, so reading the selection after
+   * the fact returned the primary pane's text: Explain on a phrase in the
+   * secondary note asked about a word in the primary one.
+   */
+  openAiBar(action: { prompt: string; view: EditorView; path: string | null }): void {
+    this.dispatchEvent(
+      new CustomEvent<{ prompt: string; context: QuickAiContext }>('open-ai-bar', {
+        detail: { prompt: action.prompt, context: this.contextFor(action.view, action.path) },
+        bubbles: true,
+        composed: true
+      })
+    )
+  }
+
+  /** Frozen text and selection for one pane, as the bar captures it. */
+  private contextFor(view: EditorView, path: string | null): QuickAiContext {
+    const content = view.state.doc.toString()
+    const selected = view.state.selection.main
+    if (selected.empty || selected.to - selected.from > 20_000)
+      return { path, content, selection: null }
+    return {
+      path,
+      content,
+      selection: {
+        from: selected.from,
+        to: selected.to,
+        text: view.state.sliceDoc(selected.from, selected.to)
+      }
+    }
+  }
+
+  /**
    * Pick a surface from the tab strip.
    *
    * Document is a tab like the others, but with nothing open it has no content
@@ -1399,18 +1639,129 @@ export class Editor extends LitElement {
     ;(e.currentTarget as HTMLElement).click()
   }
 
+  private get aiGeometry(): ReturnType<typeof aiDockGeometry> {
+    return aiDockGeometry(
+      this.aiAvailable || this.getBoundingClientRect().width || 1000,
+      this.aiDockWidth
+    )
+  }
+
+  private beginAiResize = (event: PointerEvent): void => {
+    if (event.button !== 0) return
+    event.preventDefault()
+    this.aiResizePointer = event.pointerId
+    this.aiResizeStart = event.clientX
+    this.aiResizeInitial = this.aiGeometry.width
+    this.aiResizePreference = this.aiDockWidth
+    ;(event.currentTarget as HTMLElement).setPointerCapture(event.pointerId)
+  }
+
+  private moveAiResize = (event: PointerEvent): void => {
+    if (event.pointerId !== this.aiResizePointer) return
+    const geometry = this.aiGeometry
+    this.aiDockWidth = Math.max(
+      geometry.min,
+      Math.min(geometry.max, this.aiResizeInitial + this.aiResizeStart - event.clientX)
+    )
+  }
+
+  private finishAiResize = (event: PointerEvent): void => {
+    if (event.pointerId !== this.aiResizePointer) return
+    if (event.type === 'pointerup') this.moveAiResize(event)
+    this.aiResizePointer = null
+    if (event.type !== 'pointerup') this.aiDockWidth = this.aiResizePreference
+    else WorkspaceState.getInstance().resizeAiDock(this.aiDockWidth)
+  }
+
+  private keyAiResize = (event: KeyboardEvent): void => {
+    const geometry = this.aiGeometry
+    let width: number
+    if (event.key === 'ArrowLeft') width = geometry.width + 16
+    else if (event.key === 'ArrowRight') width = geometry.width - 16
+    else if (event.key === 'Home') width = geometry.min
+    else if (event.key === 'End') width = geometry.max
+    else return
+    event.preventDefault()
+    this.aiDockWidth = Math.max(geometry.min, Math.min(geometry.max, width))
+    WorkspaceState.getInstance().resizeAiDock(this.aiDockWidth)
+  }
+
+  /**
+   * Hold the panel mounted for its exit, then let it go.
+   *
+   * Reduced motion resolves on the next frame rather than after the animation's
+   * length, so a user who has asked for no motion is not made to wait out a
+   * transition they cannot see.
+   */
+  private syncAiDockClose(open: boolean): void {
+    if (this.aiCloseTimer !== null) {
+      clearTimeout(this.aiCloseTimer)
+      this.aiCloseTimer = null
+    }
+    if (open) {
+      this.aiClosing = false
+      return
+    }
+    if (!this.aiDockOpen) return
+    this.aiClosing = true
+    const done = (): void => {
+      this.aiCloseTimer = null
+      if (!this.aiDockOpen) this.aiClosing = false
+    }
+    this.aiCloseTimer = reducedMotionNow()
+      ? window.setTimeout(done, 0)
+      : window.setTimeout(done, DURATION.fast)
+  }
+
+  private renderAiDock(): unknown {
+    if ((!this.aiDockOpen && !this.aiClosing) || !this.aiEnabled) return null
+    const geometry = this.aiGeometry
+    /*
+     * One class for the direction, set once per open and once per close. Putting
+     * it on the element means the browser owns the timing and the reduced-motion
+     * guard is one rule rather than a branch in every caller.
+     */
+    const transition = this.aiClosing ? 'leaving' : 'entering'
+    return html`<div class="ai-column ${transition}" style=${`--ai-dock-width:${geometry.width}px`}>
+      <div
+        class="ai-divider"
+        role="separator"
+        tabindex="0"
+        aria-label="Resize AI assistant"
+        aria-orientation="vertical"
+        aria-valuemin=${Math.round(geometry.min)}
+        aria-valuemax=${Math.round(geometry.max)}
+        aria-valuenow=${Math.round(geometry.width)}
+        @pointerdown=${this.beginAiResize}
+        @pointermove=${this.moveAiResize}
+        @pointerup=${this.finishAiResize}
+        @pointercancel=${this.finishAiResize}
+        @lostpointercapture=${this.finishAiResize}
+        @keydown=${this.keyAiResize}
+      >
+        <span class="resize-handle" aria-hidden="true"><i></i><i></i><i></i></span>
+      </div>
+      <writemd-ai-dock
+        class="ai-dock"
+        @ai-close=${() => this.fileState.toggleAiDock(false)}
+      ></writemd-ai-dock>
+    </div>`
+  }
+
   render(): unknown {
     if (!this.filePath && !this.content) {
       return html`
-        <writemd-panel empty>
-          <div class="empty-state">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-              <polyline points="14 2 14 8 20 8" />
-            </svg>
-            <p>No document open</p>
-          </div>
-        </writemd-panel>
+        <div class="workspace">
+          <writemd-panel empty>
+            <div class="empty-state">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                <polyline points="14 2 14 8 20 8" />
+              </svg>
+              <p>No document open</p>
+            </div> </writemd-panel
+          >${this.renderAiDock()}
+        </div>
       `
     }
 
@@ -1557,14 +1908,7 @@ export class Editor extends LitElement {
               : ''
           }
         </writemd-workspace>
-        ${
-          this.aiDockOpen && this.aiEnabled
-            ? html`<writemd-ai-dock
-                class="ai-dock"
-                @ai-close=${() => this.fileState.toggleAiDock(false)}
-              ></writemd-ai-dock>`
-            : ''
-        }
+        ${this.renderAiDock()}
         ${
           this.textMenu && (this.textMenu.secondary ? this.secondaryEditorView : this.editorView)
             ? html`<writemd-text-menu
@@ -1572,6 +1916,9 @@ export class Editor extends LitElement {
                 .y=${this.textMenu.y}
                 .flip=${this.textMenu.x > window.innerWidth - 480}
                 .view=${this.textMenu.secondary ? this.secondaryEditorView : this.editorView}
+                .aiEnabled=${this.aiEnabled}
+                .selection=${this.textMenu.selection}
+                @ai-selection-action=${this.handleAiSelectionAction}
                 @close=${() => (this.textMenu = null)}
               ></writemd-text-menu>`
             : ''

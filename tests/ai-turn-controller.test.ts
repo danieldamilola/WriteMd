@@ -64,6 +64,68 @@ async function settle(): Promise<void> {
 }
 
 describe('TurnController', () => {
+  it('confirms acceptance once all previews are applied and preserves the conversation', async () => {
+    const controller = new TurnController()
+    await controller.start(input({ previewOnly: true }))
+    const requestId = controller.requestId!
+    const first = {
+      previewId: 'first',
+      path: 'one.md',
+      original: 'old',
+      content: 'new',
+      kind: 'modified' as const
+    }
+    const second = { ...first, previewId: 'second', path: 'two.md' }
+    emit({ type: 'preview', requestId, changes: [first, second], skipped: [] })
+    emit({ type: 'done', requestId, text: 'Review the suggested change before accepting it.' })
+    const sessionId = controller.sessionId
+    controller.acceptPreview(first, null)
+    expect(controller.getState().previews).toEqual([second])
+    expect(controller.getState().reply).toBe('Review the suggested change before accepting it.')
+    controller.acceptPreview(second, null)
+    expect(controller.getState().previews).toEqual([])
+    expect(controller.getState().reply).toBe('Applied the requested change.')
+    expect(controller.getState().messages.at(-1)?.text).toBe('Applied the requested change.')
+    expect(controller.sessionId).toBe(sessionId)
+    expect(controller.getState().messages).toHaveLength(2)
+    controller.dispose()
+  })
+
+  it('keeps a substantive assistant reply after accepting its suggestion', async () => {
+    const controller = new TurnController()
+    await controller.start(input({ previewOnly: true }))
+    const requestId = controller.requestId!
+    const preview = {
+      previewId: 'first',
+      path: 'one.md',
+      original: 'old',
+      content: 'new',
+      kind: 'modified' as const
+    }
+    emit({ type: 'preview', requestId, changes: [preview], skipped: [] })
+    emit({ type: 'done', requestId, text: 'The introduction now explains ownership.' })
+    controller.acceptPreview(preview, null)
+    expect(controller.getState().reply).toBe('The introduction now explains ownership.')
+    controller.dispose()
+  })
+
+  it('stores proposed text separately from written changes and drops stale previews', async () => {
+    installBridge()
+    const controller = new TurnController()
+    await controller.start(input({ previewOnly: true }))
+    const requestId = controller.requestId!
+    const changes = [
+      { path: 'note.md', original: 'Draft', content: 'Revision', kind: 'modified' as const }
+    ]
+    emit({ type: 'preview', requestId, changes, skipped: [] })
+    expect(controller.getState().previews).toEqual(changes)
+    expect(controller.getState().changes).toEqual([])
+    emit({ type: 'done', requestId, text: 'Review this change.' })
+    await controller.start(input({ previewOnly: true }))
+    emit({ type: 'preview', requestId, changes, skipped: [] })
+    expect(controller.getState().previews).toEqual([])
+    controller.dispose()
+  })
   beforeEach(() => {
     send.mockClear()
     cancel.mockClear()
@@ -89,6 +151,21 @@ describe('TurnController', () => {
     expect(messages[1].role).toBe('assistant')
     expect(messages[1].text).toBe('Here is the fix.')
     expect(controller.getState().busy).toBe(true)
+  })
+
+  it('shows search status and replaces intermediate prose with the terminal reply', async () => {
+    const controller = new TurnController()
+    await controller.start(input())
+    const requestId = controller.requestId as string
+    emit({ type: 'text', requestId, delta: 'Searching now' })
+    emit({ type: 'status', requestId, message: 'Searching the web for car…' })
+    expect(controller.getState().status).toBe('Searching the web for car…')
+    expect(controller.getState().messages.at(-1)?.text).toBe('')
+    emit({ type: 'text', requestId, delta: 'A car carries people.' })
+    expect(controller.getState().status).toBeNull()
+    emit({ type: 'done', requestId, text: 'A car carries people.' })
+    expect(controller.getState().messages.at(-1)?.text).toBe('A car carries people.')
+    expect(controller.getState().busy).toBe(false)
   })
 
   it('ignores events from a turn that is no longer the active one', async () => {
@@ -212,5 +289,106 @@ describe('TurnController', () => {
 
     expect(controller.getState().changes).toHaveLength(1)
     expect(controller.getState().skipped[0]?.reason).toBe('ambiguous')
+  })
+
+  it('restores the saved transcript when reopening a conversation', () => {
+    const controller = new TurnController()
+    controller.load({
+      id: 'saved',
+      title: 'Earlier question',
+      createdAt: 10,
+      updatedAt: 20,
+      messages: [
+        { role: 'user', content: 'Earlier question' },
+        { role: 'assistant', content: '**Saved answer**' }
+      ]
+    })
+    expect(controller.getState().messages.map(({ role, text }) => ({ role, text }))).toEqual([
+      { role: 'user', text: 'Earlier question' },
+      { role: 'assistant', text: '**Saved answer**' }
+    ])
+    expect(controller.sessionId).toBe('saved')
+    expect(controller.getState().busy).toBe(false)
+  })
+
+  it('ignores a change list that resolves after switching conversations', () => {
+    const controller = new TurnController()
+    controller.load({ id: 'new', title: 'New', createdAt: 1, updatedAt: 1 })
+    controller.adoptChanges(
+      [{ id: 'old-change', path: '/old.md', kind: 'modified', createdAt: 1, revertedAt: null }],
+      'old'
+    )
+    expect(controller.getState().changes).toEqual([])
+  })
+
+  it('ignores a delayed send failure after the next request starts', async () => {
+    let rejectFirst: (error: Error) => void = () => undefined
+    send.mockImplementationOnce(
+      () =>
+        new Promise((_resolve, reject) => {
+          rejectFirst = reject
+        })
+    )
+    const controller = new TurnController()
+    const first = controller.start(input({ userText: 'First' }))
+    await controller.start(input({ userText: 'Next' }))
+    const active = controller.requestId
+    rejectFirst(new Error('Old send failed'))
+    await first
+    expect(controller.requestId).toBe(active)
+    expect(controller.getState().busy).toBe(true)
+    expect(controller.getState().error).toBeNull()
+  })
+
+  it('recovers the composer when sending a request fails', async () => {
+    send.mockRejectedValueOnce(new Error('Could not send'))
+    const controller = new TurnController()
+    await controller.start(input())
+    expect(controller.requestId).toBeNull()
+    expect(controller.getState().busy).toBe(false)
+    expect(controller.getState().error).toBe('Could not send')
+  })
+
+  it('keeps the readable response when saving its conversation fails after an edit', async () => {
+    const controller = new TurnController()
+    await controller.start(input())
+    const requestId = controller.requestId as string
+    emit({ type: 'text', requestId, delta: '<<<<<<< SEARCH\nold\n=======\nnew\n>>>>>>> REPLACE' })
+    emit({ type: 'answer', requestId, text: 'Updated the note.' })
+    emit({ type: 'error', requestId, message: 'Could not save the AI conversation.' })
+    expect(controller.getState().messages.at(-1)?.text).toBe('Updated the note.')
+    expect(controller.getState().error).toBe('Could not save the AI conversation.')
+    expect(controller.getState().busy).toBe(false)
+  })
+
+  it.each(['reset', 'load', 'dispose', 'replace'] as const)(
+    'cancels the provider when a live conversation is abandoned by %s',
+    async (action) => {
+      const controller = new TurnController()
+      await controller.start(input())
+      const requestId = controller.requestId as string
+      if (action === 'load') {
+        controller.load({ id: 'saved', title: 'Saved', createdAt: 1, updatedAt: 1 })
+      } else if (action === 'replace') {
+        await controller.start(input({ userText: 'replacement' }))
+      } else {
+        controller[action]()
+      }
+      expect(cancel).toHaveBeenCalledWith(requestId)
+      emit({ type: 'text', requestId, delta: 'stale response' })
+      expect(
+        controller.getState().messages.some((message) => message.text.includes('stale response'))
+      ).toBe(false)
+    }
+  )
+
+  it('accepts an empty final answer to remove streamed edit protocol', async () => {
+    const controller = new TurnController()
+    await controller.start(input())
+    const requestId = controller.requestId as string
+    emit({ type: 'text', requestId, delta: '<<<<<<< SEARCH\nold\n=======\nnew\n>>>>>>> REPLACE' })
+    emit({ type: 'done', requestId, text: '' })
+    expect(controller.getState().messages.at(-1)?.text).toBe('')
+    expect(controller.getState().busy).toBe(false)
   })
 })

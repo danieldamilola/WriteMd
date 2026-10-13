@@ -29,6 +29,19 @@ export interface ToolCall {
   id: string
   name: string
   arguments: Record<string, unknown>
+  /** Signed provider fields replayed on this call during the tool loop. */
+  extraContent?: Record<string, unknown>
+}
+
+/** Provider response parts retained in main for replay during a tool loop. */
+export interface ProviderMetadata {
+  responses?: Record<string, unknown>[]
+  gemini?: { parts: Record<string, unknown>[] }
+  openai?: {
+    reasoningContent?: string
+    reasoning?: string
+    reasoningDetails?: Record<string, unknown>[]
+  }
 }
 
 export interface ChatMessage {
@@ -40,6 +53,8 @@ export interface ChatMessage {
   name?: string
   /** Set on an `assistant` message that requested tools. */
   toolCalls?: ToolCall[]
+  /** Preserve signed parts without rebuilding or merging their contents. */
+  providerMetadata?: ProviderMetadata
 }
 
 /**
@@ -82,10 +97,10 @@ export type StreamEvent =
   | { type: 'text'; delta: string }
   /** A tool call arrived whole. Adapters buffer partial JSON to get here. */
   | { type: 'tool-call'; call: ToolCall }
-  | { type: 'done'; stopReason: StopReason; usage?: Usage }
+  | { type: 'done'; stopReason: StopReason; usage?: Usage; providerMetadata?: ProviderMetadata }
   | { type: 'error'; message: string }
 
-export type ProviderKind = 'openai' | 'anthropic' | 'gemini'
+export type ProviderKind = 'openai' | 'anthropic' | 'gemini' | 'responses'
 
 /**
  * A configured provider. `id` is user-stable (stored in settings), `baseUrl` is

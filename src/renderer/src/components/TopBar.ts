@@ -58,6 +58,10 @@ export class WriteMdTopBar extends LitElement {
       align-self: stretch;
       margin: -6px 0;
     }
+    .assistant[aria-pressed='true'] {
+      background: var(--bg-active);
+      border-radius: var(--radius-sm);
+    }
 
     :host {
       height: var(--shell-header-height);
@@ -100,6 +104,8 @@ export class WriteMdTopBar extends LitElement {
   @property({ type: Boolean, reflect: true, attribute: 'document-header' }) documentHeader = false
   @property({ type: Boolean }) showSplitButton = true
   @property({ type: Boolean }) splitActive = false
+  @property({ type: Boolean }) showAiButton = false
+  @property({ type: Boolean }) aiOpen = false
 
   private emit(event: string, detail?: unknown): void {
     this.dispatchEvent(new CustomEvent(event, { detail, bubbles: true, composed: true }))
@@ -116,6 +122,18 @@ export class WriteMdTopBar extends LitElement {
       </div>
 
       <div class="right-group">
+        ${
+          this.showAiButton && !this.settingsOpen
+            ? html`<writemd-icon-button
+                class="assistant"
+                title="AI assistant"
+                aria-pressed=${this.aiOpen ? 'true' : 'false'}
+                @click=${() => this.emit('toggle-ai')}
+                @mousedown=${(event: MouseEvent) => event.preventDefault()}
+                >${chromeIcon('ai')}</writemd-icon-button
+              >`
+            : null
+        }
         ${
           this.showSplitButton && !this.settingsOpen
             ? html`

@@ -45,6 +45,50 @@ function lastUserText(built: ReturnType<typeof buildTurnMessages>): string {
 }
 
 describe('context block', () => {
+  it('includes a selected skill only as current system guidance and keeps it out of chat text', () => {
+    const request = {
+      context: context(),
+      userText: '/proofread fix grammar',
+      history: [],
+      historyTurns: 0,
+      skill: { name: 'proofread', instructions: 'PERSONAL_STYLE' }
+    }
+    const built = buildTurnMessages(request)
+    expect(built.system).toContain('PERSONAL_STYLE')
+    expect(built.system).toContain('do not authorize file edits')
+    expect(lastUserText(built)).not.toContain('PERSONAL_STYLE')
+    expect(
+      buildTurnMessages({ ...request, context: context({ selectionOnly: true }) }).system
+    ).not.toContain('PERSONAL_STYLE')
+  })
+  it('isolates selection actions from unrelated notes, attachments, and chat history', () => {
+    const built = buildTurnMessages({
+      context: context({
+        selectionOnly: true,
+        selection: 'car',
+        references: [{ path: 'private.md', content: 'PRIVATE_NOTE' }],
+        attachments: [{ name: 'private.txt', kind: 'text', text: 'PRIVATE_ATTACHMENT' }]
+      }),
+      userText: 'Explain only the highlighted text.',
+      history: [{ role: 'user', content: 'OLD_CHAT' }],
+      historyTurns: 10
+    })
+    expect(built.messages).toHaveLength(1)
+    expect(lastUserText(built)).toContain('<selection>\ncar\n</selection>')
+    expect(lastUserText(built)).not.toMatch(/PRIVATE|OLD_CHAT|Idea|C:\/vault/)
+    expect(built.system).toContain('Do not use en dashes or em dashes')
+    expect(built.system).not.toContain('<<<<<<< SEARCH')
+  })
+  it('keeps large selected passages complete for selection actions', () => {
+    const selection = 'Selected paragraph.\n'.repeat(2000) + 'SELECTION_END'
+    const built = buildTurnMessages({
+      context: context({ selectionOnly: true, selection }),
+      userText: 'Summarize this selection.',
+      history: [],
+      historyTurns: 0
+    })
+    expect(lastUserText(built)).toContain(selection)
+  })
   it('includes the open document inside a tag', () => {
     const block = buildContextBlock(context())
     expect(block).toContain('<document>')
@@ -178,18 +222,58 @@ describe('buildTurnMessages', () => {
     expect(lastUserText(built)).toContain('hello')
   })
 
-  it('truncates an oversized document and says so', () => {
-    // Silently handing the model half a file produces confident edits into the
-    // part it never saw, and the user has no way to tell.
+  it('sends the complete large document, including its ending', () => {
     const built = buildTurnMessages({
       context: context({
-        document: { path: 'C:/vault/big.md', content: 'x'.repeat(200_000), isOpen: true }
+        document: {
+          path: 'C:/vault/big.md',
+          content: 'x'.repeat(200_000) + 'DOCUMENT_END',
+          isOpen: true
+        }
       }),
       userText: 'q',
       history: [],
       historyTurns: 0
     })
-    expect(lastUserText(built)).toContain('truncated')
+    expect(lastUserText(built)).toContain('x'.repeat(200_000) + 'DOCUMENT_END')
+    expect(lastUserText(built)).not.toContain('[truncated:')
+  })
+
+  it('keeps context tags, paths, selection, and references intact when a document is oversized', () => {
+    const built = buildTurnMessages({
+      context: context({
+        document: { path: 'C:/vault/big.md', content: 'x'.repeat(200_000), isOpen: true },
+        selection: 'Selected passage',
+        references: [{ path: 'C:/vault/reference.md', content: 'Referenced passage' }],
+        attachments: [{ name: 'large.txt', kind: 'text', text: 'y'.repeat(200_000) }]
+      }),
+      userText: 'My question',
+      history: [],
+      historyTurns: 0
+    })
+    const text = lastUserText(built)
+    expect(text).toContain('(path: "big.md")')
+    expect(text).toContain('Selected passage')
+    expect(text).toContain('Referenced passage')
+    expect(text).toContain('My question')
+    expect(text.match(/<document>/g)?.length).toBe(text.match(/<\/document>/g)?.length)
+    expect(text).toContain('</attachment>')
+    expect(text).toContain('x'.repeat(200_000))
+    const content = built.messages.at(-1)!.content
+    expect(messageToText(content)).toContain('y'.repeat(200_000))
+    expect(messageToText(content)).not.toContain('[truncated:')
+  })
+
+  it('does not shorten paths that only share the vault name prefix', () => {
+    const built = buildTurnMessages({
+      context: context({
+        document: { path: 'C:/vault-other/note.md', content: 'Note', isOpen: true }
+      }),
+      userText: 'Question',
+      history: [],
+      historyTurns: 0
+    })
+    expect(built.system).toContain('path="C:/vault-other/note.md"')
   })
 
   it('adds an image attachment as an image block', () => {

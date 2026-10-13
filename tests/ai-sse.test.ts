@@ -58,6 +58,22 @@ describe('SSE framing', () => {
     expect(collect(['data: a\r\n\r\ndata: b\r\n\r\n'])).toEqual(['a', 'b'])
   })
 
+  it('keeps multiline events intact when a chunk ends between CR and LF', () => {
+    const stream = 'data: {"a":\r\ndata: 1}\r\n\r\n'
+    for (const size of [1, 2, 3, 5]) {
+      expect(collect(slice(stream, size))).toEqual(['{"a":\n1}'])
+    }
+  })
+
+  it('flushes a final data line with no line terminator', () => {
+    expect(collect(['data: a\n\ndata: b'])).toEqual(['a', 'b'])
+  })
+
+  it('can retain the completion sentinel for adapters that check completion', () => {
+    const framer = createSseFramer({ includeDone: true })
+    expect(framer.push('data: [DONE]\n\n')).toEqual(['[DONE]'])
+  })
+
   it('handles a lone CR terminator', () => {
     expect(collect(['data: a\r\rdata: b\r\r'])).toEqual(['a', 'b'])
   })

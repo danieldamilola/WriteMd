@@ -30,7 +30,7 @@ export interface SseRequest {
  * Yields payload strings rather than frames: every consumer wants the payload,
  * and an event with no `data:` line has nothing to hand back.
  */
-export function createSseFramer(): {
+export function createSseFramer(options: { includeDone?: boolean } = {}): {
   push(chunk: string): string[]
   end(): string[]
 } {
@@ -44,14 +44,14 @@ export function createSseFramer(): {
     // Providers end an OpenAI-compatible stream with a literal sentinel that is
     // not JSON. Treating it as a payload hands the adapter a parse error on a
     // stream that completed successfully.
-    if (data === '[DONE]') return null
+    if (data === '[DONE]' && !options.includeDone) return null
     return data
   }
 
   const drain = (final: boolean): string[] => {
     const frames: string[] = []
     for (;;) {
-      const newline = findLineEnd(buffer)
+      const newline = findLineEnd(buffer, final)
       if (!newline) break
       const line = buffer.slice(0, newline.index)
       buffer = buffer.slice(newline.index + newline.length)
@@ -70,6 +70,8 @@ export function createSseFramer(): {
       // off payload shape, which all three providers keep stable.
     }
     if (final) {
+      if (buffer.startsWith('data:')) dataLines.push(buffer.slice(5).replace(/^ /, ''))
+      buffer = ''
       // A stream that ends without a trailing blank line still has a payload.
       const payload = takePayload()
       if (payload !== null) frames.push(payload)
@@ -87,11 +89,13 @@ export function createSseFramer(): {
 }
 
 /** Returns the index and length of the next line terminator, or null. */
-function findLineEnd(buffer: string): { index: number; length: number } | null {
+function findLineEnd(buffer: string, final: boolean): { index: number; length: number } | null {
   for (let i = 0; i < buffer.length; i++) {
     const ch = buffer[i]
     if (ch === '\n') return { index: i, length: 1 }
     if (ch === '\r') {
+      // The next chunk may start with LF. Keep the CR until that is known.
+      if (i === buffer.length - 1 && !final) return null
       // A lone \r terminates a line; \r\n is one terminator, not two.
       return { index: i, length: buffer[i + 1] === '\n' ? 2 : 1 }
     }

@@ -125,9 +125,9 @@ Validation: build and all three typechecks passed; ESLint and formatting checks 
 
 Screenshots: [default vertical home](screenshots/ui-v1.4.0/welcome-vertical-graphite.png), [compact light home](screenshots/ui-v1.4.0/welcome-vertical-light-800.png), [horizontal Paper theme](screenshots/ui-v1.4.0/welcome-horizontal-paper-800.png), [short window](screenshots/ui-v1.4.0/welcome-short-window.png), [empty vault](screenshots/ui-v1.4.0/welcome-empty-vault.png), and [image background](screenshots/ui-v1.4.0/welcome-image-background.png).
 
-## v1.4.0 release validation
+## Archived v1.4.0 validation
 
-The package version is 1.4.0. [CHANGELOG.md](../CHANGELOG.md) describes the final workspace, settings, and home behavior and the one-time orientation/font migrations.
+These checks covered the previous 1.4.0 development baseline. Active release numbering now starts at 0.1.0. [CHANGELOG.md](../CHANGELOG.md) contains current notes; [the archived changelog](legacy-changelog.md) preserves the earlier workspace, settings, home, and migration notes. Screenshot paths below retain their original names.
 
 - `pnpm build` passed, including main, renderer, and test typechecks.
 - `pnpm test --maxWorkers=1` passed all 685 unit tests across 63 files.

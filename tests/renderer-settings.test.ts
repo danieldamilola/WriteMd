@@ -38,6 +38,17 @@ describe('SettingsStore', () => {
     )
   })
 
+  it.each(['graphite', 'nord', 'light', 'paper'])(
+    'keeps native form controls in the %s color scheme',
+    (theme) => {
+      store.set('appearance.theme', theme)
+      applySettingsToDOM(store)
+      const scheme = ['light', 'paper'].includes(theme) ? 'light' : 'dark'
+      expect(document.documentElement.style.colorScheme).toBe(scheme)
+      expect(document.documentElement.dataset.colorScheme).toBe(scheme)
+    }
+  )
+
   describe('get', () => {
     it('defaults to the Graphite theme with the red accent', () => {
       expect(store.get('appearance.theme', '')).toBe('graphite')

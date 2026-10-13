@@ -3,6 +3,7 @@ import type {
   AiEvent,
   AiSendInput,
   ChangeView,
+  PreviewChangeView,
   PersistedSessionView,
   SkippedView,
   UndoStatus
@@ -18,7 +19,7 @@ import type {
  * of bug that shows up as a silently-wrong undo message rather than a type
  * error. `shared/` is the one place both sides can reach.
  */
-export type { AiEvent, AiSendInput, ChangeView, SkippedView, UndoStatus }
+export type { AiEvent, AiSendInput, ChangeView, PreviewChangeView, SkippedView, UndoStatus }
 
 /** A file the user attached to one message. Images carry base64, text the text. */
 export interface AiAttachment {
@@ -39,13 +40,9 @@ export interface UndoOutcomeView {
   entryId?: string
 }
 
-/**
- * A saved conversation, without its messages.
- *
- * A narrower view of `PersistedSessionView` for the history list, which never
- * needs the transcript and should not have to hold twelve of them in memory.
- */
-export type SessionView = Pick<PersistedSessionView, 'id' | 'title' | 'createdAt' | 'updatedAt'>
+/** Saved history includes its transcript; a new conversation has none yet. */
+export type SessionView = Pick<PersistedSessionView, 'id' | 'title' | 'createdAt' | 'updatedAt'> &
+  Partial<Pick<PersistedSessionView, 'messages' | 'contextFile' | 'providerId' | 'model'>>
 
 /** The turn half of the bridge, as this panel calls it. */
 export interface AiBridge {

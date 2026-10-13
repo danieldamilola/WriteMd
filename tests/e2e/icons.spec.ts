@@ -60,7 +60,8 @@ test.describe('Icon set', () => {
     expect(new Set(paths).size).toBe(paths.length)
     expect(new Set(glyphs).size).toBe(glyphs.length)
 
-    const known = new Set([...paths, ...glyphs])
+    // The supplied WriteMd AI artwork is rendered separately from the Hugeicons catalog.
+    const known = new Set([...paths, ...glyphs, 'ai', 'ai-thinking'])
     const unknown: string[] = []
     for (const file of walk(join(SRC, 'renderer/src'))) {
       const text = readFileSync(file, 'utf-8')
@@ -97,13 +98,16 @@ test.describe('Icon set', () => {
           bad.push(`${label}: no icon`)
           continue
         }
-        // The set is Hugeicons: 24 grid, stroked outlines through currentColor.
-        if (svg.getAttribute('viewBox') !== '0 0 24 24') {
+        const customAi = svg.dataset.icon === 'ai'
+        // AI uses the supplied filled silhouette; the rest use Hugeicons outlines.
+        if (svg.getAttribute('viewBox') !== (customAi ? '260 220 740 840' : '0 0 24 24')) {
           bad.push(`${label}: viewBox ${svg.getAttribute('viewBox')}`)
         }
         if (svg.getAttribute('fill') !== 'none')
           bad.push(`${label}: fill ${svg.getAttribute('fill')}`)
-        if (svg.getAttribute('stroke') !== 'currentColor')
+        if (customAi && svg.querySelector('path[mask]')?.getAttribute('fill') !== 'currentColor')
+          bad.push(`${label}: AI artwork does not inherit currentColor`)
+        if (!customAi && svg.getAttribute('stroke') !== 'currentColor')
           bad.push(`${label}: not stroked through currentColor`)
         if (!svg.children.length) bad.push(`${label}: no path data`)
         const r = svg.getBoundingClientRect()

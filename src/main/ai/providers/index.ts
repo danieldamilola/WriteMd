@@ -2,6 +2,7 @@ import type { ProviderKind } from '../../../shared/ai/types'
 import { anthropicAdapter, anthropicDescriptor } from './anthropic'
 import { geminiAdapter, geminiDescriptor } from './gemini'
 import { openaiAdapter, openaiDescriptor } from './openai'
+import { chatgptAdapter, chatgptDescriptor } from './chatgpt'
 import type { ProviderAdapter, ProviderDescriptor } from './types'
 
 /**
@@ -18,7 +19,8 @@ import type { ProviderAdapter, ProviderDescriptor } from './types'
 export const ADAPTERS: Record<ProviderKind, ProviderAdapter> = {
   openai: openaiAdapter,
   anthropic: anthropicAdapter,
-  gemini: geminiAdapter
+  gemini: geminiAdapter,
+  responses: chatgptAdapter
 }
 
 /**
@@ -47,12 +49,69 @@ const lmStudioDescriptor: ProviderDescriptor = {
   keyHint: 'Local server on port 1234. No API key needed.'
 }
 
+/**
+ * ChatGPT account access is not a preset in the same sense as the rest.
+ *
+ * It shares `https://api.openai.com/v1` with the OpenAI preset because it is the
+ * same upstream service, so it is kept out of the list `matchPresetByBaseUrl`
+ * searches: a hand-typed or imported `api.openai.com` URL means a bearer API
+ * key, and silently reinterpreting it as an account sign-in would break an
+ * existing configuration with no visible cause. `selectableByUrl: false` says
+ * exactly that, and keeps the account provider selectable in Settings, which
+ * picks presets by id.
+ */
 export const PRESETS: ProviderDescriptor[] = [
   openaiDescriptor,
   anthropicDescriptor,
   geminiDescriptor,
+  {
+    id: 'openrouter',
+    label: 'OpenRouter',
+    kind: 'openai',
+    defaultBaseUrl: 'https://openrouter.ai/api/v1',
+    defaultModel: 'openrouter/auto',
+    keyRequired: true,
+    keyHint: 'Created at openrouter.ai/settings/keys.'
+  },
+  {
+    id: 'deepseek',
+    label: 'DeepSeek',
+    kind: 'openai',
+    defaultBaseUrl: 'https://api.deepseek.com',
+    defaultModel: 'deepseek-flash',
+    keyRequired: true,
+    keyHint: 'Created at platform.deepseek.com under API keys.'
+  },
+  {
+    id: 'groq',
+    label: 'Groq',
+    kind: 'openai',
+    defaultBaseUrl: 'https://api.groq.com/openai/v1',
+    defaultModel: 'openai/gpt-oss-20b',
+    keyRequired: true,
+    keyHint: 'Created at console.groq.com/keys.'
+  },
+  {
+    id: 'mistral',
+    label: 'Mistral',
+    kind: 'openai',
+    defaultBaseUrl: 'https://api.mistral.ai/v1',
+    defaultModel: 'mistral-small-latest',
+    keyRequired: true,
+    keyHint: 'Created at console.mistral.ai under API keys.'
+  },
+  {
+    id: 'xai',
+    label: 'xAI',
+    kind: 'openai',
+    defaultBaseUrl: 'https://api.x.ai/v1',
+    defaultModel: 'grok-4.7',
+    keyRequired: true,
+    keyHint: 'Created at console.x.ai under API keys.'
+  },
   ollamaDescriptor,
-  lmStudioDescriptor
+  lmStudioDescriptor,
+  chatgptDescriptor
 ]
 
 /** The adapter a preset id routes to, or null for an id nothing claims. */
@@ -73,13 +132,14 @@ export function adapterFor(descriptorId: string): ProviderAdapter | null {
 export function matchPresetByBaseUrl(url: string): ProviderDescriptor | null {
   const target = normalizeUrl(url)
   if (!target) return null
-  const exact = PRESETS.find((preset) => normalizeUrl(preset.defaultBaseUrl) === target)
+  const candidates = PRESETS.filter((preset) => preset.selectableByUrl !== false)
+  const exact = candidates.find((preset) => normalizeUrl(preset.defaultBaseUrl) === target)
   if (exact) return exact
   // A trailing path segment or two - `/v1/chat/completions`, a copied cURL URL -
   // is still the same server. Matching on a `/` boundary stops `/v1beta` from
   // being read as a prefix of `/v1beta-elsewhere`.
   return (
-    PRESETS.find((preset) => {
+    candidates.find((preset) => {
       const candidate = normalizeUrl(preset.defaultBaseUrl)
       if (!candidate) return false
       return target.startsWith(`${candidate}/`) || candidate.startsWith(`${target}/`)

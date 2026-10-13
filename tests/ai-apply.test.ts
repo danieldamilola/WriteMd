@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import {
   chmodSync,
   existsSync,
@@ -104,6 +104,43 @@ function run(proposals: FileProposal[], maxFileBytes?: number): Promise<ApplyOut
 }
 
 describe('applyProposals', () => {
+  it('does not write or journal proposals from an already cancelled turn', async () => {
+    const path = note('cancelled.md')
+    write(path, 'Original')
+    const controller = new AbortController()
+    controller.abort()
+    const outcome = await applyProposals(
+      [proposal({ path, before: 'Original', after: 'Changed' })],
+      { sessionId: 's1', base: vault, journal, signal: controller.signal }
+    )
+    expect(outcome).toEqual({ applied: [], skipped: [] })
+    expect(read(path)).toBe('Original')
+    expect(journal.list('s1')).toEqual([])
+  })
+
+  it('checks cancellation before committing the atomic replacement', async () => {
+    const path = note('cancelled.md')
+    write(path, 'Original')
+    const controller = new AbortController()
+    const record = journal.record.bind(journal)
+    vi.spyOn(journal, 'record').mockImplementation((input) => {
+      const entry = record(input)
+      queueMicrotask(() => controller.abort())
+      return entry
+    })
+    const outcome = await applyProposals(
+      [
+        proposal({ path, before: 'Original', after: 'Changed' }),
+        proposal({ path: note('later.md'), after: 'Later', isCreation: true })
+      ],
+      { sessionId: 's1', base: vault, journal, signal: controller.signal }
+    )
+    expect(outcome).toEqual({ applied: [], skipped: [] })
+    expect(read(path)).toBe('Original')
+    expect(existsSync(note('later.md'))).toBe(false)
+    expect(readdirSync(vault).some((name) => name.endsWith('.tmp'))).toBe(false)
+  })
+
   it('writes the proposed content and records one journal entry', async () => {
     const path = note('idea.md')
     write(path, '# old\n')

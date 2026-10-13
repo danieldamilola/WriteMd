@@ -4,7 +4,7 @@
   <p><strong>Frictionless, keyboard-first Markdown editor. Open → Edit → Save.</strong></p>
 
   <p>
-    <a href="https://github.com/danieldamilola/WriteMd/releases/latest"><img src="https://img.shields.io/github/v/release/danieldamilola/WriteMd?style=flat-square" alt="Release"></a>
+    <a href="CHANGELOG.md"><img src="https://img.shields.io/badge/version-0.1.0-blue?style=flat-square" alt="Version 0.1.0"></a>
     <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg?style=flat-square" alt="License"></a>
     <a href="https://github.com/danieldamilola/WriteMd/actions"><img src="https://img.shields.io/github/actions/workflow/status/danieldamilola/WriteMd/ci.yml?style=flat-square" alt="Build Status"></a>
   </p>
@@ -13,6 +13,8 @@
 WriteMd is a fast, private, local-first Markdown editor. Double-click any `.md` file and edit it where it lives - no vault to configure, no import step, no account. New notes land in your vault (`~/Documents/WriteMd Vault/`); existing files always save back in place.
 
 _Design inspired by OpenCode._
+
+The current release baseline is **v0.1.0**. Release numbering restarts with the existing editor and AI functionality. See [the changelog](CHANGELOG.md) for current notes and [release preparation](docs/releasing.md) for the reset procedure.
 
 <div align="center">
   <img src="docs/readme-screenshots/just-download.png" alt="A short note open in WriteMd, with a clickable wiki link to the repository" width="880">
@@ -95,7 +97,7 @@ IndexedDB and no separate `recent-files.json`.
 
 Built with **Electron + TypeScript + Lit Web Components** - no renderer framework. Editor: CodeMirror 6 (Lezer) with live-preview decorations; preview parsing via markdown-it; `contextIsolation: true`, all Node access through the typed `window.electronAPI` preload bridge.
 
-Prerequisites: Node.js 18+, pnpm.
+Prerequisites: Node.js 24.15.0 and pnpm 9, matching CI and release builds.
 
 ```bash
 git clone https://github.com/danieldamilola/WriteMd.git

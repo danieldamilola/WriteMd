@@ -1,4 +1,11 @@
-import { app, dialog, nativeImage, type BrowserWindow, type NativeImage } from 'electron'
+import {
+  app,
+  dialog,
+  nativeImage,
+  nativeTheme,
+  type BrowserWindow,
+  type NativeImage
+} from 'electron'
 import { mkdir, readFile, writeFile, rename, unlink, stat } from 'fs/promises'
 import { join, basename, extname } from 'path'
 import { randomUUID } from 'crypto'
@@ -10,7 +17,7 @@ const MAX_BYTES = 20 * 1024 * 1024
 const MAX_EDGE = 2560
 const JPEG_QUALITY = 85
 /** Ids are generated here, so both owned extensions are safe to accept. PNG keeps
- *  assets written before v1.4.1 readable. */
+ *  assets written by older builds readable. */
 const ASSET_ID = /^[0-9a-f-]{36}\.(?:jpg|png)$/
 
 function mediaType(id: string): string {
@@ -119,7 +126,9 @@ export function materialSupport(): MaterialSupport {
 
 export function applyWindowMaterial(window: BrowserWindow | null): void {
   if (!window) return
-  const choice = getSettings().appearance.windowMaterial
+  const { theme, windowMaterial: choice } = getSettings().appearance
+  nativeTheme.themeSource =
+    theme === 'system' ? 'system' : ['light', 'paper'].includes(theme) ? 'light' : 'dark'
   const material = materialSupport().supported ? choice : 'none'
   if (process.platform === 'win32')
     window.setBackgroundMaterial(material === 'none' ? 'none' : material)
