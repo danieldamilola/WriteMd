@@ -6,9 +6,27 @@ Release numbering restarts at v0.1.0. Earlier development notes remain in [the a
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-10-14
+
 ### Added
 
+- Local Markdown editing with live preview, source and reading modes, tables, code highlighting, and image attachments.
+- A default vault for new notes and in-place editing of existing Markdown files anywhere on the computer.
+- Tabs, pinned notes, groups, split documents, file browsing, backlinks, search, and keyboard shortcuts.
+- PDF, HTML, and Word export with export preview.
+- Seven themes, local backgrounds, surface opacity, and supported Windows Mica and Acrylic materials.
+- Optional AI with OpenAI, Anthropic, Gemini, OpenRouter, DeepSeek, Groq, Mistral, xAI, and compatible local providers.
+- Shared AI conversations, saved sessions, selections, file references, attachments, personal skills, web search, edit previews, and undo for journaled changes.
+- An AI setting to automatically accept completed floating-bar edits.
+- An "Open in floating bar" action in the AI side panel that continues the same conversation, including a running response.
 - Sign in to ChatGPT with your own account and use your plan, as a provider separate from API keys. Sign-in opens the system browser, supports multiple accounts and rotating refresh tokens, and keeps tokens encrypted in the main process with no API-key fallback.
+
+### Changed
+
+- Release numbering starts again at v0.1.0. Existing features and saved user settings remain available.
+- AI output limits default to Automatic. Compatible providers and Gemini use their own limits; Anthropic uses its required fallback. Custom limits are configurable in AI Settings.
+- Accepting a floating-bar edit updates the document and starts an atomic save immediately, even when typing autosave is disabled or delayed.
+- Committed AI edits and undo changes notify open documents immediately. External changes refresh without a typing debounce.
 
 ### Fixed
 
@@ -24,30 +42,6 @@ Release numbering restarts at v0.1.0. Earlier development notes remain in [the a
 - Floating AI hides Accept and Discard when automatic acceptance is enabled. Stopping or failing an edit releases the composer, and late save callbacks cannot alter a newer turn.
 - Discarding an edit removes it from the shared conversation, preventing it from reappearing after another response or a chat handoff.
 - AI updates no longer steal focus from the editor on each render.
-
-## [0.1.0] - 2026-10-13
-
-### Added
-
-- Local Markdown editing with live preview, source and reading modes, tables, code highlighting, and image attachments.
-- A default vault for new notes and in-place editing of existing Markdown files anywhere on the computer.
-- Tabs, pinned notes, groups, split documents, file browsing, backlinks, search, and keyboard shortcuts.
-- PDF, HTML, and Word export with export preview.
-- Seven themes, local backgrounds, surface opacity, and supported Windows Mica and Acrylic materials.
-- Optional AI with OpenAI, Anthropic, Gemini, OpenRouter, DeepSeek, Groq, Mistral, xAI, and compatible local providers.
-- Shared AI conversations, saved sessions, selections, file references, attachments, personal skills, web search, edit previews, and undo for journaled changes.
-- An AI setting to automatically accept completed floating-bar edits.
-- An "Open in floating bar" action in the AI side panel that continues the same conversation, including a running response.
-
-### Changed
-
-- Release numbering starts again at v0.1.0. Existing features and saved user settings remain available.
-- AI output limits default to Automatic. Compatible providers and Gemini use their own limits; Anthropic uses its required fallback. Custom limits are configurable in AI Settings.
-- Accepting a floating-bar edit updates the document and starts an atomic save immediately, even when typing autosave is disabled or delayed.
-- Committed AI edits and undo changes notify open documents immediately. External changes refresh without a typing debounce.
-
-### Fixed
-
 - Floating edits keep the conversation open after acceptance and use the accepted text for follow-up requests.
 - Article requests produce file edits, including for an empty note. Incomplete or truncated proposals never partially overwrite files.
 - File watching survives repeated atomic replacements and refreshes open tabs and split documents without changing the active tab.

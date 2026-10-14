@@ -3,7 +3,11 @@ import { existsSync, mkdirSync, readFileSync, symlinkSync, unlinkSync, writeFile
 import { join } from 'path'
 import { makeTempRoot, cleanupTempRoot } from './helpers/temp-root'
 import type { RunTurnRequest, TurnEvent } from '../src/main/ai/turn'
-import type { FileChangeSnapshot, FileReadResult, PreviewChangeView } from '../src/shared/electron-api'
+import type {
+  FileChangeSnapshot,
+  FileReadResult,
+  PreviewChangeView
+} from '../src/shared/electron-api'
 import { FileState, type FileStateData } from '../src/renderer/src/state/file-state'
 
 const mocks = vi.hoisted(() => ({
@@ -180,7 +184,12 @@ describe('editor notification for an accepted edit', () => {
     ;(files as unknown as { state: FileStateData }).state = { ...initial, tabs: [] }
     read.mockReset().mockResolvedValue({ content: 'Original', mtime: 1 })
     window.electronAPI = {
-      file: { read, write: async () => ({ mtime: 2 }), watch: async () => undefined, unwatch: async () => undefined },
+      file: {
+        read,
+        write: async () => ({ mtime: 2 }),
+        watch: async () => undefined,
+        unwatch: async () => undefined
+      },
       settings: { set: async () => undefined },
       vault: { getPath: async () => 'C:/vault' }
     } as unknown as NonNullable<Window['electronAPI']>

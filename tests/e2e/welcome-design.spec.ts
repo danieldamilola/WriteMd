@@ -219,7 +219,10 @@ test.describe('Welcome screen design', () => {
     await page.keyboard.press('Escape')
     // Settings is icon-only in the sidebar footer now, so it is found by its
     // accessible name rather than by its text.
-    await page.locator('writemd-sidebar').getByRole('button', { name: 'Settings', exact: true }).click()
+    await page
+      .locator('writemd-sidebar')
+      .getByRole('button', { name: 'Settings', exact: true })
+      .click()
     await expect(page.locator('writemd-settings-modal')).toBeVisible()
     await expect(page.locator('writemd-top-bar .window-controls writemd-icon-button')).toHaveCount(
       3

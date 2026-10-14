@@ -164,7 +164,9 @@ it('settles both aliases clean after the write', async () => {
 it('refuses the write when one alias has moved on', async () => {
   seedAliasTabs()
   files.setContent('Edited by hand')
-  expect(await files.applyAiEdit(SLASH, 'Original', 'Original\n\nRewritten by DeepSeek')).toBe(false)
+  expect(await files.applyAiEdit(SLASH, 'Original', 'Original\n\nRewritten by DeepSeek')).toBe(
+    false
+  )
   expect(write).not.toHaveBeenCalled()
   expect(files.getState().content).toBe('Edited by hand')
 })

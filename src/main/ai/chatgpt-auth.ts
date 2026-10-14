@@ -144,8 +144,13 @@ export class ChatgptAuth {
 
   private save(): void {
     let encrypted: Buffer | null = null
-    try { encrypted = this.options.encrypt(JSON.stringify({ version: 1, activeId: this.activeId, accounts: this.accounts })) }
-    catch { /* Keep credentials in memory when the OS keychain is unavailable. */ }
+    try {
+      encrypted = this.options.encrypt(
+        JSON.stringify({ version: 1, activeId: this.activeId, accounts: this.accounts })
+      )
+    } catch {
+      /* Keep credentials in memory when the OS keychain is unavailable. */
+    }
     this.sessionOnly = encrypted === null
     if (encrypted) this.atomic(join(this.options.directory, 'chatgpt-auth'), encrypted)
     else rmSync(join(this.options.directory, 'chatgpt-auth'), { force: true })
@@ -256,8 +261,14 @@ export class ChatgptAuth {
     this.starting = true
     this.error = null
     this.notify()
-    try { return await this.beginLogin(addAccount, generation) }
-    finally { if (this.loginGeneration === generation) { this.starting = false; this.notify() } }
+    try {
+      return await this.beginLogin(addAccount, generation)
+    } finally {
+      if (this.loginGeneration === generation) {
+        this.starting = false
+        this.notify()
+      }
+    }
   }
 
   private async beginLogin(addAccount: boolean, generation: number): Promise<ChatgptAuthView> {
@@ -459,7 +470,9 @@ export class ChatgptAuth {
   ): Promise<Awaited<ReturnType<typeof jwtVerify>>['payload']> {
     const metadata = await this.metadata()
     try {
-      const keys = this.keys ??= createRemoteJWKSet(new URL(metadata.jwks_uri), { [customFetch]: this.fetcher })
+      const keys = (this.keys ??= createRemoteJWKSet(new URL(metadata.jwks_uri), {
+        [customFetch]: this.fetcher
+      }))
       const { payload } = await jwtVerify(token, keys, {
         issuer: metadata.issuer,
         audience: clientId,
@@ -524,7 +537,8 @@ export class ChatgptAuth {
     }
     if (this.active() !== account || !account.tokens)
       throw new Error('The ChatGPT account changed. Send the request again.')
-    if (Date.now() >= tokens.expiresAt) throw new Error('ChatGPT access has expired and cannot renew yet. Try again later.')
+    if (Date.now() >= tokens.expiresAt)
+      throw new Error('ChatGPT access has expired and cannot renew yet. Try again later.')
     if (
       !tokens.scopes.includes('chatgpt.tokens.use.direct') ||
       !tokens.scopes.includes('resource.invoke')

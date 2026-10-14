@@ -374,9 +374,7 @@ export class FileState {
       .catch(() => undefined)
     const restored: TabDoc[] = []
     const seen = new Set(
-      this.state.tabs
-        .map((t) => filePathKey(t.path))
-        .filter((k): k is string => k !== null)
+      this.state.tabs.map((t) => filePathKey(t.path)).filter((k): k is string => k !== null)
     )
     for (const p of paths) {
       if (typeof p !== 'string') continue

@@ -27,8 +27,12 @@ interface SkillCandidate {
 }
 
 function commandName(value: string): string | undefined {
-  let name = value.normalize('NFKD').replace(/[\u0300-\u036f]/g, '').toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '')
+  let name = value
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
   if (!name) return undefined
   if (!/^[a-z]/.test(name)) name = `skill-${name}`
   name = name.slice(0, 64).replace(/-+$/g, '')
@@ -38,7 +42,9 @@ function commandName(value: string): string | undefined {
 function frontmatterValue(text: string, key: string): string | undefined {
   const block = text.match(/^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/)?.[1]
   if (!block) return undefined
-  const value = block.match(new RegExp(`^${key}:\\s*(?:"([^"\\r\\n]+)"|'([^'\\r\\n]+)'|([^#\\r\\n]+))`, 'm'))
+  const value = block.match(
+    new RegExp(`^${key}:\\s*(?:"([^"\\r\\n]+)"|'([^'\\r\\n]+)'|([^#\\r\\n]+))`, 'm')
+  )
   return (value?.[1] ?? value?.[2] ?? value?.[3])?.trim()
 }
 
@@ -180,10 +186,18 @@ function checkSkillsLocation(vault: string, folder: string): void {
 
 function candidates(folder: string): SkillCandidate[] {
   return readdirSync(folder, { withFileTypes: true })
-    .filter((entry) => entry.isDirectory() || entry.isSymbolicLink() || (entry.isFile() && /\.md$/i.test(entry.name)))
-    .sort((a, b) => Number(b.isDirectory()) - Number(a.isDirectory()) || a.name.localeCompare(b.name))
+    .filter(
+      (entry) =>
+        entry.isDirectory() ||
+        entry.isSymbolicLink() ||
+        (entry.isFile() && /\.md$/i.test(entry.name))
+    )
+    .sort(
+      (a, b) => Number(b.isDirectory()) - Number(a.isDirectory()) || a.name.localeCompare(b.name)
+    )
     .flatMap((entry) => {
-      const directory = entry.isDirectory() || (entry.isSymbolicLink() && !/\.md$/i.test(entry.name))
+      const directory =
+        entry.isDirectory() || (entry.isSymbolicLink() && !/\.md$/i.test(entry.name))
       const name = commandName(directory ? entry.name : entry.name.replace(/\.md$/i, ''))
       return name ? [{ path: join(folder, entry.name), label: entry.name, name, directory }] : []
     })
@@ -193,7 +207,9 @@ function readCandidate(folder: string, entry: SkillCandidate): LoadedSkill {
   const root = realpathSync(folder)
   if (entry.directory) {
     checkDirectory(entry.path, root)
-    const file = readdirSync(entry.path).sort().find((name) => name.toLowerCase() === 'skill.md')
+    const file = readdirSync(entry.path)
+      .sort()
+      .find((name) => name.toLowerCase() === 'skill.md')
     return readSkillFile(join(entry.path, file ?? 'SKILL.md'), entry.name, root)
   }
   return readSkillFile(entry.path, entry.name, root)
@@ -239,7 +255,8 @@ function scanSkills(vault: string): AiSkillsView & { loaded: LoadedSkill[] } {
 }
 
 export function listSkills(vault: string): AiSkillsView {
-  const { loaded: _loaded, ...view } = scanSkills(vault)
+  const view: AiSkillsView = { ...scanSkills(vault) }
+  delete (view as Partial<{ loaded: unknown }>).loaded
   return view
 }
 

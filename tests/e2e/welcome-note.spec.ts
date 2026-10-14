@@ -44,7 +44,9 @@ function profileWithVault(name: string): { userData: string; vault: string } {
  * and that promise is about everything that is not one of our own folders.
  */
 function userFiles(vault: string): string[] {
-  return readdirSync(vault).filter((entry) => entry !== 'Skills').sort()
+  return readdirSync(vault)
+    .filter((entry) => entry !== 'Skills')
+    .sort()
 }
 
 test.describe('Vault welcome note', () => {

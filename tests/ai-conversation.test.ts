@@ -7,8 +7,13 @@ import {
 import type { AiEvent, AiSendInput } from '../src/shared/electron-api'
 
 let emit: (event: AiEvent) => void
-const send = vi.fn(async (_id: string, _input: AiSendInput) => undefined)
-const cancel = vi.fn(async (_id: string) => undefined)
+const send = vi.fn(async (id: string, input: AiSendInput) => {
+  void id
+  void input
+})
+const cancel = vi.fn(async (id: string) => {
+  void id
+})
 const input = (): AiSendInput => ({
   sessionId: conversationController().sessionId,
   userText: 'Question',

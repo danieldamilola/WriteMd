@@ -174,7 +174,10 @@ function aiIcon(name: 'ai' | 'ai-thinking', size: number): TemplateResult {
 export function aiThinkingLabel(): TemplateResult {
   return html`<span class="writemd-ai-thinking-label" data-artwork="label">
     ${aiIcon('ai-thinking', 18)}
-    <span class="writemd-ai-thinking-text">Thinking<span class="writemd-ai-dot">.</span><span class="writemd-ai-dot">.</span><span class="writemd-ai-dot">.</span></span>
+    <span class="writemd-ai-thinking-text"
+      >Thinking<span class="writemd-ai-dot">.</span><span class="writemd-ai-dot">.</span
+      ><span class="writemd-ai-dot">.</span></span
+    >
   </span>`
 }
 

@@ -263,7 +263,8 @@ export const anthropicAdapter: ProviderAdapter = {
         case 'error': {
           const reported = asRecord(frame.error)
           const message = reported ? asString(reported.message) : null
-          stopReason = 'error'
+          // No stopReason assignment: this branch returns, so nothing reads it
+          // afterwards. The error event below is the whole outcome.
           yield {
             type: 'error',
             message: redactSecrets(

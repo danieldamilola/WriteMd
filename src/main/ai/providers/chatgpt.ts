@@ -205,7 +205,8 @@ export const chatgptAdapter: ProviderAdapter = {
             'ChatGPT authorization was rejected. Sign in again in AI Settings.'
           ),
           authorization
-        )
+        ),
+        { cause: error }
       )
     }
   }

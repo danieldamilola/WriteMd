@@ -20,7 +20,10 @@ export function filePathKey(path: string | null | undefined): string | null {
  * path still matches a forward-slash vault root, and requires a separator at
  * the boundary so `Vault2/note.md` is not treated as living in `Vault`.
  */
-export function isInsideDir(path: string | null | undefined, dir: string | null | undefined): boolean {
+export function isInsideDir(
+  path: string | null | undefined,
+  dir: string | null | undefined
+): boolean {
   const key = filePathKey(path)
   const dirKey = filePathKey(dir)
   if (key === null || dirKey === null) return false

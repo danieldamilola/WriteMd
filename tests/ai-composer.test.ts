@@ -429,7 +429,7 @@ describe('writemd-ai-composer', () => {
     const readFile = vi.spyOn(FileReader.prototype, 'readAsText').mockImplementation(function (
       this: FileReader
     ) {
-      reader = this
+      reader = this as FileReader
     })
     const drop = new Event('drop', { bubbles: true, cancelable: true })
     Object.defineProperty(drop, 'dataTransfer', {
