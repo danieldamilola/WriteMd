@@ -4,6 +4,7 @@ The current release baseline is v0.1.0. Release numbering restarted on 2026-10-1
 
 ## Current work
 
+- [x] Reserve `/` suggestions for installed personal skills and `@` for vault files in both composers. Accept leading whitespace for skill commands, explain empty or unavailable discovery without listing notes, and discard stale results when changing triggers.
 - [x] Rewrite the README around current editor, workspace, AI, privacy, and source-build behavior. Remove obsolete screenshots pending the user's replacements, correct linked skill and privacy guidance, and validate local links and commands against the repository.
 - [x] Open folder cards from collapsed Space icons with nested navigation, search, keyboard support, and New note/New folder actions. Keep the sidebar collapsed and choose unused note filenames.
 - [x] Show the target version in the sidebar update card and display upcoming release fixes from updater metadata on hover or keyboard focus. Preserve download, restart, and skip actions in both tab layouts and the collapsed strip.
@@ -27,6 +28,8 @@ The current release baseline is v0.1.0. Release numbering restarted on 2026-10-1
 Acceptance requires `pnpm typecheck`, related regression tests, and Electron verification. No commit, push, installer publication, or remote release deletion is part of this change.
 
 ## Verification
+
+Slash and file suggestions verified on 2026-10-15: all 72 focused unit tests and three Electron checks passed. Both the chat panel and floating bar list only installed skills after `/`, including after leading whitespace, and only files after `@`. Empty lists, failed discovery, unmatched queries, and ordinary slash paths stay out of the file picker. The existing skill delivery check also passed. Typecheck, production build, related lint, formatting, and whitespace checks passed. The empty message reuses the existing menu surface and theme tokens; the Figma reference has no AI picker design. Screenshots: [panel skills](../artifacts/ui-review/ai-panel-slash-skills.png), [panel files](../artifacts/ui-review/ai-panel-at-files.png), [floating skills](../artifacts/ui-review/ai-floating-slash-skills.png), and [empty skills](../artifacts/ui-review/ai-floating-slash-empty.png).
 
 README rewrite verified on 2026-10-15: typecheck and documentation formatting passed. Markdown parsing, all 11 local README links/assets, and the documented pnpm commands were checked against the repository. Previous UI screenshots are no longer embedded; a comment marks where the user's new images can be added. The README describes current source behavior and the absence of published installers, without claiming an Android build. Linked privacy text now covers account sign-in, model discovery, web search, credential storage, and AI context; linked skill guidance and the PRD use the implemented 256 KB limit.
 

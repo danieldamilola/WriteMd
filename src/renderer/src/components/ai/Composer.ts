@@ -72,6 +72,10 @@ interface SkillEntry {
   name: string
   description: string
 }
+interface SkillsResult {
+  skills: SkillEntry[]
+  error?: string
+}
 
 type MentionEntry = FileEntry | SkillEntry
 
@@ -88,6 +92,7 @@ interface MentionState {
   mode: 'files' | 'skills'
   /** Which trigger was used: `@` or `/`. */
   trigger: '@' | '/'
+  message?: string
 }
 
 const IMAGE_TYPES = /^image\//
@@ -282,7 +287,7 @@ export class AiComposer extends LitElement {
   @state() private accountMenuOpen = false
   @state() private accountMenuPosition = ''
   private attachmentToken = 0
-  private skillsRequest: Promise<SkillEntry[]> | null = null
+  private skillsRequest: Promise<SkillsResult> | null = null
 
   connectedCallback(): void {
     super.connectedCallback()
@@ -438,18 +443,28 @@ export class AiComposer extends LitElement {
       return
     }
     const token = ++this.mentionToken
-    if (
-      found.trigger === '/' &&
-      found.start === 0 &&
-      !found.query.includes('/') &&
-      !found.query.startsWith('"') &&
-      api()?.ai?.listSkills
-    ) {
+    if (found.trigger === '/') {
+      // Slash commands load skills only. Inline slashes and paths are ordinary
+      // text, and unavailable skill discovery must never turn into file search.
+      if (
+        !/^\s*$/.test(value.slice(0, found.start)) ||
+        found.query.includes('/') ||
+        found.query.startsWith('"')
+      ) {
+        this.mention = null
+        return
+      }
       if (this.mention?.mode !== 'skills' || !this.skillsRequest) {
-        this.mention = { ...found, mode: 'skills', index: 0, matches: [] }
+        this.mention = {
+          ...found,
+          mode: 'skills',
+          index: 0,
+          matches: [],
+          message: 'Loading skills...'
+        }
         this.skillsRequest = this.loadSkills()
       }
-      const skills = await this.skillsRequest
+      const { skills, error } = await this.skillsRequest
       if (token !== this.mentionToken) return
       const query = found.query.toLowerCase()
       const matches = skills
@@ -464,7 +479,17 @@ export class AiComposer extends LitElement {
               Number(!b.name.toLowerCase().startsWith(query)) || a.name.localeCompare(b.name)
         )
         .slice(0, 8)
-      this.mention = { ...found, mode: 'skills', index: 0, matches }
+      this.mention = {
+        ...found,
+        mode: 'skills',
+        index: 0,
+        matches,
+        message:
+          error ??
+          (skills.length
+            ? 'No matching skills.'
+            : 'No personal skills found. Add one in AI Settings.')
+      }
       return
     }
     const files = await this.loadFiles()
@@ -480,13 +505,15 @@ export class AiComposer extends LitElement {
     }
   }
 
-  private async loadSkills(): Promise<SkillEntry[]> {
+  private async loadSkills(): Promise<SkillsResult> {
+    const list = api()?.ai?.listSkills
+    if (!list) return { skills: [], error: 'Restart WriteMd to load personal skills.' }
     try {
-      const view = await api()?.ai?.listSkills?.()
-      return (view?.skills ?? []).map((skill) => ({ ...skill, kind: 'skill' }))
+      const view = await list()
+      return { skills: view.skills.map((skill) => ({ ...skill, kind: 'skill' })) }
     } catch (error) {
       console.error('Could not list AI skills:', error)
-      return []
+      return { skills: [], error: 'Could not load skills. Reopen the skill menu to try again.' }
     }
   }
 
@@ -511,7 +538,7 @@ export class AiComposer extends LitElement {
       : /\s/.test(entry.relative)
         ? `"${entry.relative}"`
         : entry.relative
-    const insertion = `${isSkill(entry) ? '/' : mention.trigger}${path} `
+    const insertion = `${isSkill(entry) ? '/' : '@'}${path} `
     const next = this.value.slice(0, mention.start) + insertion + this.value.slice(caret)
     this.value = next
     this.mention = null
@@ -905,7 +932,7 @@ export class AiComposer extends LitElement {
             : null
         }
         ${
-          this.mention && this.mention.matches.length
+          this.mention && (this.mention.matches.length || this.mention.mode === 'skills')
             ? html`
                 <div
                   class="mention m-panel"
@@ -913,6 +940,7 @@ export class AiComposer extends LitElement {
                   role="listbox"
                   aria-label=${this.mention.mode === 'skills' ? 'Skills' : 'Files'}
                 >
+                  ${!this.mention.matches.length ? html`<p class="mention-status" role="status">${this.mention.message}</p>` : null}
                   ${this.mention.matches.map(
                     (entry, index) => html`
                       <button
@@ -973,7 +1001,7 @@ export class AiComposer extends LitElement {
             aria-activedescendant=${this.mention?.matches.length ? `file-suggestion-${this.mention.index}` : ''}
             ?disabled=${this.disabled}
             .value=${this.value}
-            aria-expanded=${this.mention && this.mention.matches.length ? 'true' : 'false'}
+            aria-expanded=${this.mention && (this.mention.matches.length || this.mention.mode === 'skills') ? 'true' : 'false'}
             @input=${this.onInput}
             @focus=${() => {
               this.files = []
@@ -1202,6 +1230,13 @@ export class AiComposer extends LitElement {
         font-family: inherit;
         border: none;
         background: none;
+      }
+      .mention-status {
+        margin: 0;
+        padding: 8px 10px;
+        font: 12px var(--font-ui);
+        line-height: 1.5;
+        color: var(--text-muted);
       }
 
       .mention-item[aria-selected='true'] {

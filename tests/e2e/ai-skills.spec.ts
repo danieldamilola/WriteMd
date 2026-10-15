@@ -6,6 +6,93 @@ import { makeFixture, launch, firstWindow, resizeWindow } from './fixtures'
 
 test.setTimeout(120_000)
 
+for (const surface of ['panel', 'floating'] as const) {
+  test(`${surface} composer keeps slash skills separate from @ files`, async () => {
+    const fixture = makeFixture(`ai-mention-separation-${surface}`, ['README.md', 'vault-only.md'])
+    const skillFolder = join(fixture.vault, 'Skills')
+    mkdirSync(skillFolder)
+    writeFileSync(
+      join(skillFolder, 'proofread.md'),
+      '---\ndescription: Preserve my voice\n---\nProofread this note.'
+    )
+    const configPath = join(fixture.userData, 'config.json')
+    const config = JSON.parse(readFileSync(configPath, 'utf8'))
+    config.appearance.motion = 'reduced'
+    config.appearance.theme = 'graphite'
+    config.ai = {
+      enabled: true,
+      providerId: 'lmstudio',
+      baseUrl: 'http://127.0.0.1:1234/v1',
+      model: 'mock-model'
+    }
+    writeFileSync(configPath, JSON.stringify(config))
+    const app = await launch(fixture)
+    try {
+      const page = await firstWindow(app)
+      await resizeWindow(app, 1200, 800)
+      await expect(page.locator('writemd-editor')).toBeVisible()
+      await page.keyboard.press(surface === 'panel' ? 'Control+Alt+Shift+A' : 'Control+Alt+A')
+      const composer = page.locator(
+        `${surface === 'panel' ? 'writemd-ai-dock' : 'writemd-ai-quick'} writemd-ai-composer`
+      )
+      const textarea = composer.locator('textarea')
+      await textarea.fill(' \n /')
+      await expect(composer.getByRole('listbox', { name: 'Skills', exact: true })).toBeVisible()
+      await expect(composer.getByRole('option')).toHaveText([
+        /\/proofread.*Preserve my voice/s,
+        /\/unslop/
+      ])
+      await page.screenshot({ path: `artifacts/ui-review/ai-${surface}-slash-skills.png` })
+      await textarea.press('Tab')
+      await expect(textarea).toHaveValue(' \n /proofread ')
+
+      await textarea.fill('@vault-only')
+      await expect(composer.getByRole('listbox', { name: 'Files', exact: true })).toBeVisible()
+      await expect(composer.getByRole('option')).toHaveCount(1)
+      await expect(composer.getByRole('option')).toContainText('vault-only.md')
+      await page.screenshot({ path: `artifacts/ui-review/ai-${surface}-at-files.png` })
+      await textarea.press('Tab')
+      await expect(textarea).toHaveValue('@vault-only.md ')
+
+      await textarea.fill('/missing')
+      await expect(composer.getByRole('status')).toHaveText('No matching skills.')
+      await expect(composer.getByRole('option')).toHaveCount(0)
+      for (const text of ['/Skills/', 'compare /']) {
+        await textarea.fill(text)
+        await expect(composer.getByRole('listbox')).toHaveCount(0)
+      }
+
+      await app.evaluate(({ ipcMain }) => {
+        ipcMain.removeHandler('ai:list-skills')
+        ipcMain.handle('ai:list-skills', () => ({ folder: '', skills: [], warnings: [] }))
+      })
+      await textarea.fill('/')
+      await expect(composer.getByRole('status')).toHaveText(
+        'No personal skills found. Add one in AI Settings.'
+      )
+      await expect(composer.getByRole('option')).toHaveCount(0)
+      await page.screenshot({ path: `artifacts/ui-review/ai-${surface}-slash-empty.png` })
+
+      await textarea.press('Escape')
+      await app.evaluate(({ ipcMain }) => {
+        ipcMain.removeHandler('ai:list-skills')
+        ipcMain.handle('ai:list-skills', () => {
+          throw new Error('Skill discovery unavailable')
+        })
+      })
+      await textarea.fill('/')
+      await expect(composer.getByRole('status')).toHaveText(
+        'Could not load skills. Reopen the skill menu to try again.'
+      )
+      await expect(composer.getByRole('option')).toHaveCount(0)
+      await textarea.fill('@vault-only')
+      await expect(composer.getByRole('option')).toContainText('vault-only.md')
+    } finally {
+      await app.close()
+    }
+  })
+}
+
 test('personal skills are selectable, discoverable in Settings, and sent only on explicit requests', async () => {
   const requests: Array<{ messages: Array<{ role: string; content: unknown }> }> = []
   const server = createServer((req, res) => {

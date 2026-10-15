@@ -18,6 +18,7 @@ Release numbering restarts at v0.1.0. Earlier development notes remain in [the a
 
 ### Fixed
 
+- Slash suggestions show only installed personal skills, including after leading spaces or newlines. Empty, unavailable, and failed skill discovery no longer fall back to vault files; file references use `@`.
 - New notes choose an unused filename instead of selecting another open untitled note or replacing an existing default-named file.
 - Escape closes a model-options drawer in Settings before closing the Settings page.
 - OpenCode's free-model access restriction is explained directly instead of being presented as an API-key permissions problem.

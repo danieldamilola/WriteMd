@@ -451,11 +451,13 @@ describe('writemd-ai-composer', () => {
 
 describe('AI skill autocomplete', () => {
   const listSkills = vi.fn<() => Promise<AiSkillsView>>()
+  const getTree = vi.fn<() => Promise<VaultTreeNode>>()
   const settings = SettingsStore.getInstance()
   let previous: Record<string, unknown>
 
   beforeEach(() => {
     installBridge()
+    getTree.mockReset().mockResolvedValue(TREE)
     listSkills.mockReset().mockResolvedValue({
       folder: 'C:/vault/.writemd/skills',
       skills: [
@@ -464,7 +466,7 @@ describe('AI skill autocomplete', () => {
       ],
       warnings: []
     })
-    Object.assign(window.electronAPI!, { ai: { listSkills } })
+    Object.assign(window.electronAPI!, { ai: { listSkills }, vault: { getTree } })
     previous = {
       'ai.enabled': settings.get('ai.enabled', false),
       'ai.providerId': settings.get('ai.providerId', 'openai'),
@@ -552,19 +554,130 @@ describe('AI skill autocomplete', () => {
     )
   })
 
-  it('keeps slash paths as file references and leaves an unmatched skill request intact', async () => {
+  it('keeps slash paths as ordinary text and reserves file references for @', async () => {
     const el = await mount()
     type(el, '/Notes/Al')
+    await settle(el)
+    expect(options(el)).toHaveLength(0)
+    expect(getTree).not.toHaveBeenCalled()
+    type(el, '@Notes/Al')
     await settle(el)
     expect(options(el)[0].textContent).toContain('Alpha.md')
     press(el, 'Enter')
     await settle(el)
-    expect(input(el).value).toBe('/Notes/Alpha.md ')
+    expect(input(el).value).toBe('@Notes/Alpha.md ')
     type(el, '/missing-skill Explain this note')
     await settle(el)
     expect(options(el)).toHaveLength(0)
     expect(input(el).value).toBe('/missing-skill Explain this note')
   })
+
+  it.each([' /', '\n\t/'])('loads only skills after leading whitespace %j', async (prefix) => {
+    const el = await mount()
+    type(el, prefix)
+    await settle(el)
+    expect(el.shadowRoot!.querySelector('[role="listbox"]')?.getAttribute('aria-label')).toBe(
+      'Skills'
+    )
+    expect(options(el).map((option) => option.querySelector('.mention-name')?.textContent)).toEqual(
+      ['/alpha', '/outline']
+    )
+    expect(getTree).not.toHaveBeenCalled()
+    press(el, 'Tab')
+    await settle(el)
+    expect(input(el).value).toBe(`${prefix}alpha `)
+  })
+
+  it('keeps missing discovery in the skill menu instead of loading files', async () => {
+    Reflect.deleteProperty(window.electronAPI!.ai, 'listSkills')
+    const el = await mount()
+    type(el, '/')
+    await settle(el)
+    expect(options(el)).toHaveLength(0)
+    expect(el.shadowRoot!.querySelector('.mention-status')?.textContent).toContain(
+      'Restart WriteMd'
+    )
+    expect(getTree).not.toHaveBeenCalled()
+    type(el, '@Al')
+    await settle(el)
+    expect(options(el)[0].textContent).toContain('Alpha.md')
+    expect(el.shadowRoot!.querySelector('[role="listbox"]')?.getAttribute('aria-label')).toBe(
+      'Files'
+    )
+    expect(el.shadowRoot!.querySelector('.mention-status')).toBeNull()
+  })
+
+  it('distinguishes an empty skill list from a query with no matching skill', async () => {
+    listSkills.mockResolvedValueOnce({ folder: 'C:/vault/Skills', skills: [], warnings: [] })
+    const el = await mount()
+    type(el, '/')
+    await settle(el)
+    expect(options(el)).toHaveLength(0)
+    expect(el.shadowRoot!.querySelector('.mention-status')?.textContent).toContain(
+      'No personal skills found'
+    )
+    press(el, 'Escape')
+    type(el, '/missing')
+    await settle(el)
+    expect(el.shadowRoot!.querySelector('.mention-status')?.textContent).toContain(
+      'No matching skills'
+    )
+    expect(options(el)).toHaveLength(0)
+    expect(getTree).not.toHaveBeenCalled()
+  })
+
+  it('keeps discovery errors out of the file picker and retries when reopened', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    listSkills.mockRejectedValueOnce(new Error('Skill discovery unavailable'))
+    const el = await mount()
+    type(el, '/')
+    await settle(el)
+    expect(options(el)).toHaveLength(0)
+    expect(el.shadowRoot!.querySelector('.mention-status')?.textContent).toContain(
+      'Could not load skills'
+    )
+    expect(getTree).not.toHaveBeenCalled()
+    press(el, 'Escape')
+    type(el, '/')
+    await settle(el)
+    expect(options(el)).toHaveLength(2)
+    expect(listSkills).toHaveBeenCalledTimes(2)
+  })
+
+  it('ignores a late file search after switching to skills', async () => {
+    let resolve!: (tree: VaultTreeNode) => void
+    getTree.mockImplementationOnce(
+      () =>
+        new Promise((done) => {
+          resolve = done
+        })
+    )
+    const el = await mount()
+    type(el, '@')
+    await settle(el)
+    type(el, '/')
+    await settle(el)
+    resolve(TREE)
+    await settle(el)
+    expect(el.shadowRoot!.querySelector('[role="listbox"]')?.getAttribute('aria-label')).toBe(
+      'Skills'
+    )
+    expect(options(el).map((option) => option.querySelector('.mention-name')?.textContent)).toEqual(
+      ['/alpha', '/outline']
+    )
+  })
+
+  it.each(['review /', 'compare /Al', '/"Notes', '//', '/Notes/Al'])(
+    'never uses a non-command slash %j for file suggestions',
+    async (value) => {
+      const el = await mount()
+      type(el, value)
+      await settle(el)
+      expect(options(el)).toHaveLength(0)
+      expect(getTree).not.toHaveBeenCalled()
+      expect(listSkills).not.toHaveBeenCalled()
+    }
+  )
 })
 
 describe('mentionStartAt', () => {

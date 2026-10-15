@@ -28,7 +28,10 @@ Explain the changes. Edit the note only when I ask you to apply them.
 Use commas or separate sentences instead of en or em dashes.
 ```
 
-Type `/` at the start of an AI prompt to select a skill. For example:
+Type `/` at the start of an AI prompt to select a skill. Leading spaces or newlines are allowed.
+Slash suggestions list only your installed skills; `@` searches vault files. A slash in
+ordinary text or a path does not open the file picker. If skills cannot be loaded or none
+match, the skill menu explains that instead of listing notes. For example:
 
 ```text
 /proofread review this note and explain your suggested changes
