@@ -33,6 +33,24 @@ interface Discovery {
   jwks_uri: string
   revocation_endpoint?: string
 }
+
+// Published production endpoints: https://developers.openai.com/siwc/website
+// Discovery remains preferred. Its gateway can fail while these routes work.
+const PUBLISHED_DISCOVERY: Discovery = {
+  issuer: AUTH_ORIGIN,
+  authorization_endpoint: `${AUTH_ORIGIN}/api/accounts/authorize`,
+  token_endpoint: `${AUTH_ORIGIN}/api/accounts/oauth/token`,
+  jwks_uri: `${AUTH_ORIGIN}/.well-known/jwks.json`
+}
+
+class AuthHttpError extends Error {
+  constructor(
+    message: string,
+    readonly status: number
+  ) {
+    super(message)
+  }
+}
 interface Attempt {
   server: Server
   state: string
@@ -214,6 +232,11 @@ export class ChatgptAuth {
       })
       .catch((error: unknown) => {
         this.discovery = null
+        // Fall back only for discovery gateway failures, never for rejected or
+        // malformed metadata. Retry discovery on the next operation. There is
+        // no published revocation fallback; logout reports that limitation.
+        if (error instanceof AuthHttpError && [502, 503, 504].includes(error.status))
+          return { ...PUBLISHED_DISCOVERY }
         throw error
       })
     return this.discovery
@@ -244,11 +267,12 @@ export class ChatgptAuth {
     }
     const payload = asRecord(await response.json().catch(() => null))
     if (!response.ok) {
-      const code = asString(payload?.error)
-      throw new Error(
+      const code = asString(payload?.error) ?? asString(asRecord(payload?.error)?.code)
+      throw new AuthHttpError(
         code && /^[a-z_]{1,80}$/.test(code)
           ? `ChatGPT authorization failed: ${code}`
-          : `ChatGPT sign-in is unavailable (${response.status}). Try again.`
+          : `ChatGPT sign-in is unavailable (${response.status}). Try again.`,
+        response.status
       )
     }
     if (!payload) throw new Error('ChatGPT sign-in returned an invalid response.')

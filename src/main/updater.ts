@@ -4,6 +4,7 @@ import { ipcMain, BrowserWindow } from 'electron'
 import type { UpdaterState } from '../shared/electron-api'
 import { getSettings } from './settings'
 import { humanizeUpdaterError } from './updater-error'
+import { updateReleaseNotes } from '../shared/release-notes'
 
 let snapshot: UpdaterState = { status: 'idle', version: '', percent: 0, error: '' }
 
@@ -24,21 +25,31 @@ export function setupUpdater(getWindow: () => BrowserWindow | null): void {
     const version = info?.version ?? ''
     if (version && version === getSettings().updates.skippedVersion) {
       log.info(`Update v${version} was skipped by the user; not offering it`)
-      setSnapshot({ status: 'idle', version: '', percent: 0, error: '' })
+      setSnapshot({ status: 'idle', version: '', percent: 0, error: '', releaseNotes: '' })
       return
     }
-    setSnapshot({ status: 'available', version, percent: 0, error: '' })
-    getWindow()?.webContents.send('updater:update-available', info)
+    const releaseNotes = updateReleaseNotes(info.releaseNotes)
+    setSnapshot({ status: 'available', version, percent: 0, error: '', releaseNotes })
+    getWindow()?.webContents.send('updater:update-available', { version, releaseNotes })
   })
 
   autoUpdater.on('update-not-available', (info) => {
-    setSnapshot({ status: 'idle', version: '', error: '' })
+    setSnapshot({ status: 'idle', version: '', error: '', releaseNotes: '' })
     getWindow()?.webContents.send('updater:update-not-available', info)
   })
 
   autoUpdater.on('update-downloaded', (info) => {
-    setSnapshot({ status: 'downloaded', version: info?.version ?? snapshot.version, percent: 100 })
-    getWindow()?.webContents.send('updater:update-downloaded', info)
+    const releaseNotes = updateReleaseNotes(info.releaseNotes) || snapshot.releaseNotes
+    setSnapshot({
+      status: 'downloaded',
+      version: info?.version ?? snapshot.version,
+      percent: 100,
+      releaseNotes
+    })
+    getWindow()?.webContents.send('updater:update-downloaded', {
+      version: snapshot.version,
+      releaseNotes
+    })
   })
 
   autoUpdater.on('download-progress', (progressObj) => {

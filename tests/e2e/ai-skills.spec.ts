@@ -46,7 +46,12 @@ test('personal skills are selectable, discoverable in Settings, and sent only on
   try {
     const page = await firstWindow(app)
     await expect.poll(() => existsSync(skillFolder)).toBe(true)
-    writeFileSync(skillPath, '---\ndescription: Preserve my voice\n---\nPERSONAL_STYLE_ONLY')
+    writeFileSync(
+      skillPath,
+      '---\ndescription: Preserve my voice\n---\nPERSONAL_STYLE_ONLY\n' +
+        "Preserve the meaning and the author's wording.\n".repeat(500) +
+        'FULL_SKILL_END'
+    )
     const nested = join(skillFolder, 'outline')
     mkdirSync(nested)
     writeFileSync(join(nested, 'SKILL.md'), '# Outline a note\nOUTLINE_GUIDANCE')
@@ -72,6 +77,7 @@ test('personal skills are selectable, discoverable in Settings, and sent only on
     ).toBeVisible()
     await expect(settings).toContainText('/proofread')
     await expect(settings).toContainText('/outline')
+    await expect(settings).not.toContainText('must be 16 KB')
     const openFolder = settings.getByRole('button', { name: 'Open skills folder', exact: true })
     await openFolder.click()
     await expect
@@ -134,6 +140,9 @@ test('personal skills are selectable, discoverable in Settings, and sent only on
     expect(
       JSON.stringify(requests[0].messages.filter((message) => message.role === 'system'))
     ).toContain('PERSONAL_STYLE_ONLY')
+    expect(
+      JSON.stringify(requests[0].messages.filter((message) => message.role === 'system'))
+    ).toContain('FULL_SKILL_END')
     expect(
       JSON.stringify(requests[0].messages.filter((message) => message.role !== 'system'))
     ).not.toContain('PERSONAL_STYLE_ONLY')

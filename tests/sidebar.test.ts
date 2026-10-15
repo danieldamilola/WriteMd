@@ -164,7 +164,10 @@ describe('writemd-sidebar panel', () => {
       el.addEventListener('open-group', (e) => resolve(e as CustomEvent))
     )
     ;(el.shadowRoot!.querySelector('.slim-group') as HTMLElement).click()
-    expect((await seen).detail).toEqual({ groupId: 'g1' })
+    expect((await seen).detail).toEqual({
+      groupId: 'g1',
+      anchor: el.shadowRoot!.querySelector('.slim-group')
+    })
   })
 
   it('keeps settings reachable from the collapsed strip', async () => {

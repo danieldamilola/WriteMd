@@ -615,11 +615,12 @@ describe('preset registry', () => {
       'xai',
       'ollama',
       'lmstudio',
-      'chatgpt'
+      'chatgpt',
+      'opencode'
     ])
   })
 
-  it('defaults each provider to a real model', () => {
+  it('uses defaults for key-based providers and discovers account models after sign-in', () => {
     const defaults = Object.fromEntries(PRESETS.map((p) => [p.id, p.defaultModel]))
     expect(defaults).toEqual({
       openai: 'gpt-4o-mini',
@@ -634,15 +635,17 @@ describe('preset registry', () => {
       lmstudio: 'local-model',
       // The account catalogue is read from the signed-in account at runtime, so
       // there is no model to ship as a default.
-      chatgpt: ''
+      chatgpt: '',
+      opencode: ''
     })
   })
 
-  it('needs no API key for the local servers or the account provider', () => {
+  it('needs no API key for local servers or account providers', () => {
     expect(PRESETS.filter((preset) => !preset.keyRequired).map((p) => p.id)).toEqual([
       'ollama',
       'lmstudio',
-      'chatgpt'
+      'chatgpt',
+      'opencode'
     ])
   })
 

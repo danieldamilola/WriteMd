@@ -1,6 +1,12 @@
 /// <reference types="electron" />
+import type { OpenCodeAuthView, OpenCodeModelView } from './ai/opencode'
 import type { WriteMdSettings, WriteMdSettingsPatch } from './settings-schema'
 import type { ChatgptAuthView, ChatgptModelView } from './ai/chatgpt'
+
+export interface AppBuildInfo {
+  development: boolean
+  version: string
+}
 
 export interface BackgroundAsset {
   id: string
@@ -173,6 +179,7 @@ export type AiEvent =
 /** Update info pushed by electron-updater. Only version is contractual. */
 export interface UpdateInfo {
   version?: string
+  releaseNotes?: string | { version: string; note: string | null }[] | null
 }
 
 /** Download progress pushed by electron-updater. */
@@ -189,6 +196,7 @@ export interface UpdaterState {
   version: string
   percent: number
   error: string
+  releaseNotes?: string
 }
 
 export interface ElectronAPI {
@@ -199,6 +207,7 @@ export interface ElectronAPI {
     materialSupport: () => Promise<MaterialSupport>
   }
   app: {
+    getBuildInfo: () => Promise<AppBuildInfo>
     getVersion: () => Promise<string>
     getPath: (name: 'home' | 'documents' | 'downloads' | 'temp') => Promise<string>
     quit: () => Promise<void>
@@ -268,6 +277,14 @@ export interface ElectronAPI {
    * bridge in the readable direction.
    */
   ai: {
+    opencode?: {
+      state: () => Promise<OpenCodeAuthView>
+      login: () => Promise<OpenCodeAuthView>
+      cancel: () => Promise<OpenCodeAuthView>
+      logout: () => Promise<OpenCodeAuthView>
+      models: () => Promise<OpenCodeModelView[]>
+      onChanged: (callback: (state: OpenCodeAuthView) => void) => () => void
+    }
     chatgpt?: {
       state: () => Promise<ChatgptAuthView>
       login: (addAccount?: boolean) => Promise<ChatgptAuthView>

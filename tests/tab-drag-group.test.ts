@@ -140,6 +140,92 @@ describe('tab reordering, pinning, and grouping in FileState', () => {
     expect((s.tabGroups ?? []).map((g) => g.id)).toEqual([g2, g1])
   })
 
+  it('nests a group with its tabs and descendants, opens the parent, and persists the hierarchy', () => {
+    const parent = fileState.createTabGroup('Parent', undefined, [0])
+    const child = fileState.createTabGroup('Child', undefined, [1])
+    const grandchild = fileState.createTabGroup('Grandchild', undefined, [2])
+    fileState.moveTabGroup(grandchild, child)
+    fileState.toggleTabGroupCollapse(parent)
+    fileState.setContent('Keep this unsaved content')
+    const before = fileState.getState()
+    fileState.moveTabGroup(child, parent)
+    const after = fileState.getState()
+    expect(after.tabs).toEqual(before.tabs)
+    expect(after.activeTab).toBe(before.activeTab)
+    expect(after.tabGroups?.find((group) => group.id === parent)?.collapsed).toBe(false)
+    expect(after.tabGroups?.find((group) => group.id === child)?.parentId).toBe(parent)
+    expect(after.tabGroups?.find((group) => group.id === grandchild)?.parentId).toBe(child)
+    const persisted = JSON.parse(SettingsStore.getInstance().get('files.tabGroups', ''))
+    expect(normalizeTabGroups(persisted.groups)).toEqual(after.tabGroups)
+    fileState.moveTabGroup(child, null)
+    expect(
+      fileState.getState().tabGroups?.find((group) => group.id === child)?.parentId
+    ).toBeUndefined()
+    expect(fileState.getState().tabGroups?.find((group) => group.id === grandchild)?.parentId).toBe(
+      child
+    )
+  })
+
+  it('rejects cycles, missing parents, and invalid sibling destinations without losing groups', () => {
+    const parent = fileState.createTabGroup('Parent')
+    const child = fileState.createTabGroup('Child')
+    const grandchild = fileState.createTabGroup('Grandchild')
+    fileState.moveTabGroup(child, parent)
+    fileState.moveTabGroup(grandchild, child)
+    const before = fileState.getState()
+    fileState.moveTabGroup(parent, grandchild)
+    fileState.moveTabGroup(child, child)
+    fileState.moveTabGroup(child, 'missing')
+    fileState.moveTabGroup(child, null, grandchild)
+    expect(fileState.getState()).toEqual(before)
+  })
+
+  it('reorders siblings without changing their parent or their tabs', () => {
+    const parent = fileState.createTabGroup('Parent')
+    const first = fileState.createTabGroup('First', undefined, [0])
+    const second = fileState.createTabGroup('Second', undefined, [1])
+    fileState.moveTabGroup(first, parent)
+    fileState.moveTabGroup(second, parent)
+    const tabs = fileState.getState().tabs
+    fileState.moveTabGroup(second, parent, first)
+    expect(
+      fileState
+        .getState()
+        .tabGroups?.filter((group) => group.parentId === parent)
+        .map((group) => group.id)
+    ).toEqual([second, first])
+    expect(fileState.getState().tabs).toEqual(tabs)
+  })
+
+  it('promotes children when ungrouping a nested group', async () => {
+    const parent = fileState.createTabGroup('Parent')
+    const child = fileState.createTabGroup('Child', undefined, [0])
+    const grandchild = fileState.createTabGroup('Grandchild', undefined, [1])
+    fileState.moveTabGroup(child, parent)
+    fileState.moveTabGroup(grandchild, child)
+    await fileState.deleteTabGroup(child, false)
+    expect(fileState.getState().tabs[0].groupId).toBe(parent)
+    expect(fileState.getState().tabs[1].groupId).toBe(grandchild)
+    expect(fileState.getState().tabGroups?.find((group) => group.id === grandchild)?.parentId).toBe(
+      parent
+    )
+  })
+
+  it('asks before closing dirty descendants, then closes the whole subtree once confirmed', async () => {
+    const parent = fileState.createTabGroup('Parent', undefined, [0])
+    const child = fileState.createTabGroup('Child', undefined, [2])
+    fileState.moveTabGroup(child, parent)
+    fileState.setContent('Keep my nested edit')
+    const before = fileState.getState()
+    confirm.mockResolvedValueOnce(false)
+    await fileState.deleteTabGroup(parent, true)
+    expect(fileState.getState()).toEqual(before)
+    await fileState.deleteTabGroup(parent, true)
+    expect(fileState.getState().tabGroups).toEqual([])
+    expect(fileState.getState().tabs).toHaveLength(1)
+    expect(confirm).toHaveBeenCalledTimes(2)
+  })
+
   it('moves tabs relatively for keyboard shortcuts', () => {
     fileState.switchTab(1)
     const middlePath = fileState.getState().tabs[1].path
@@ -194,6 +280,20 @@ describe('tab reordering, pinning, and grouping in FileState', () => {
 })
 
 describe('restoring groups persisted before icon presets', () => {
+  it('repairs orphaned, cyclic, duplicate, and self-parented groups on restore', () => {
+    const groups = normalizeTabGroups([
+      { id: 'a', label: 'A', parentId: 'b' },
+      { id: 'b', label: 'B', parentId: 'a' },
+      { id: 'c', label: 'C', parentId: 'missing' },
+      { id: 'd', label: 'D', parentId: 'd' },
+      { id: 'd', label: 'Duplicate' }
+    ])
+    expect(groups).toHaveLength(4)
+    expect(groups.find((group) => group.id === 'a')?.parentId).toBeUndefined()
+    expect(groups.find((group) => group.id === 'b')?.parentId).toBe('a')
+    expect(groups.find((group) => group.id === 'c')?.parentId).toBeUndefined()
+    expect(groups.find((group) => group.id === 'd')?.parentId).toBeUndefined()
+  })
   it('drops the old colour and keeps a valid icon', () => {
     const restored = normalizeTabGroups([
       { id: 'g1', label: 'Docs', color: '#3b82f6', collapsed: false },

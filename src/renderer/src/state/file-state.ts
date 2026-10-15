@@ -5,7 +5,11 @@ import { showConfirm } from '../services/confirm'
 import { sameFilePath, filePathKey, isInsideDir } from '../utils/paths'
 import { placeTab, type TabDestination } from './tab-order'
 import { isGroupIcon } from './group-icons'
-import type { FileChangeSnapshot, FileWriteResult } from '../../../shared/electron-api'
+import type {
+  FileChangeSnapshot,
+  FileWriteResult,
+  VaultTreeNode
+} from '../../../shared/electron-api'
 
 /**
  * Drop anything a group no longer understands.
@@ -16,11 +20,17 @@ import type { FileChangeSnapshot, FileWriteResult } from '../../../shared/electr
  */
 export function normalizeTabGroups(groups: unknown): TabGroup[] {
   if (!Array.isArray(groups)) return []
-  return groups
+  const ids = new Set<string>()
+  const normalized = groups
     .filter(
       (group): group is TabGroup & { color?: string } =>
         !!group && typeof group === 'object' && typeof (group as TabGroup).id === 'string'
     )
+    .filter((group) => {
+      if (ids.has(group.id)) return false
+      ids.add(group.id)
+      return true
+    })
     .map((group) => {
       // Built field by field rather than spread, so a `color` left over from
       // an older profile cannot ride along as an untyped extra key.
@@ -30,8 +40,33 @@ export function normalizeTabGroups(groups: unknown): TabGroup[] {
         collapsed: !!group.collapsed
       }
       if (isGroupIcon(group.icon)) next.icon = group.icon
+      if (typeof group.parentId === 'string' && group.parentId) next.parentId = group.parentId
       return next
     })
+  for (const group of normalized) {
+    if (
+      group.parentId &&
+      (!ids.has(group.parentId) || isGroupWithin(normalized, group.parentId, group.id))
+    )
+      delete group.parentId
+  }
+  return normalized
+}
+
+/** Includes the group itself; also terminates safely for corrupt saved cycles. */
+export function isGroupWithin(
+  groups: readonly TabGroup[],
+  id: string,
+  ancestorId: string
+): boolean {
+  const seen = new Set<string>()
+  let current: string | undefined = id
+  while (current && !seen.has(current)) {
+    if (current === ancestorId) return true
+    seen.add(current)
+    current = groups.find((group) => group.id === current)?.parentId
+  }
+  return false
 }
 
 /**
@@ -102,6 +137,8 @@ export interface TabGroup {
   /** Name of a group icon preset. Absent means the folder pair. */
   icon?: string
   collapsed: boolean
+  /** Absent for a top-level Space group. This never moves files on disk. */
+  parentId?: string
 }
 
 export interface TabDoc {
@@ -569,7 +606,9 @@ export class FileState {
    */
   updateTabGroup(groupId: string, patch: Partial<TabGroup>): void {
     const currentGroups = this.state.tabGroups ?? []
-    const tabGroups = currentGroups.map((g) => (g.id === groupId ? { ...g, ...patch } : g))
+    const tabGroups = normalizeTabGroups(
+      currentGroups.map((g) => (g.id === groupId ? { ...g, ...patch, id: g.id } : g))
+    )
     this.state = { ...this.state, tabGroups }
     this.persistTabs()
     this.notify()
@@ -579,23 +618,30 @@ export class FileState {
    * Delete a tab group. If closeTabs is true, member tabs are closed; otherwise ungrouped.
    */
   async deleteTabGroup(groupId: string, closeTabs = false): Promise<void> {
+    const groups = this.state.tabGroups ?? []
+    const group = groups.find((entry) => entry.id === groupId)
+    if (!group) return
+    const subtree = new Set(
+      groups.filter((entry) => isGroupWithin(groups, entry.id, groupId)).map((entry) => entry.id)
+    )
+    const belongs = (tab: TabDoc): boolean => !!tab.groupId && subtree.has(tab.groupId)
     if (closeTabs) {
       const active = this.activeTabDoc()
-      if (this.state.tabs.some((tab) => tab.groupId === groupId && tab.dirty)) {
-        if (active?.groupId === groupId) this.clearAutoSaveTimer()
+      if (this.state.tabs.some((tab) => belongs(tab) && tab.dirty)) {
+        if (active && belongs(active)) this.clearAutoSaveTimer()
         const confirmed = await showConfirm(
           'This group has unsaved changes. Close all tabs in the group anyway?'
         )
         if (!confirmed) {
-          if (active?.groupId === groupId && this.activeTabDoc()?.id === active.id)
+          if (active && belongs(active) && this.activeTabDoc()?.id === active.id)
             this.scheduleAutoSave()
           return
         }
       }
       const currentActive = this.activeTabDoc()
-      if (currentActive?.groupId === groupId) this.clearAutoSaveTimer()
-      const closedTabs = this.state.tabs.filter((tab) => tab.groupId === groupId)
-      const remainingTabs = this.state.tabs.filter((t) => t.groupId !== groupId)
+      if (currentActive && belongs(currentActive)) this.clearAutoSaveTimer()
+      const closedTabs = this.state.tabs.filter(belongs)
+      const remainingTabs = this.state.tabs.filter((tab) => !belongs(tab))
       const remainingActive = remainingTabs.findIndex((tab) => tab.id === currentActive?.id)
       const activeTab = Math.max(
         0,
@@ -607,7 +653,7 @@ export class FileState {
         ...this.state,
         tabs: remainingTabs,
         activeTab,
-        tabGroups: this.state.tabGroups?.filter((g) => g.id !== groupId)
+        tabGroups: this.state.tabGroups?.filter((g) => !subtree.has(g.id))
       }
       this.syncMirror()
       if (remainingActive >= 0) this.scheduleAutoSave()
@@ -622,11 +668,21 @@ export class FileState {
             .catch(() => undefined)
       }
     } else {
-      const tabs = this.state.tabs.map((t) => (t.groupId === groupId ? { ...t, groupId: null } : t))
+      const tabs = this.state.tabs.map((t) =>
+        t.groupId === groupId ? { ...t, groupId: group.parentId ?? null } : t
+      )
       this.state = {
         ...this.state,
         tabs,
-        tabGroups: this.state.tabGroups?.filter((g) => g.id !== groupId)
+        tabGroups: this.state.tabGroups
+          ?.filter((g) => g.id !== groupId)
+          .map((entry) => {
+            if (entry.parentId !== groupId) return entry
+            const promoted = { ...entry }
+            if (group.parentId) promoted.parentId = group.parentId
+            else delete promoted.parentId
+            return promoted
+          })
       }
     }
     this.persistTabs()
@@ -672,6 +728,43 @@ export class FileState {
     const [moved] = tabGroups.splice(fromIndex, 1)
     tabGroups.splice(toIndex, 0, moved)
 
+    this.state = { ...this.state, tabGroups }
+    this.persistTabs()
+    this.notify()
+  }
+
+  /** Move a group with its descendants, preserving tabs, selections, and edits. */
+  moveTabGroup(groupId: string, parentId: string | null, beforeId?: string): void {
+    const groups = this.state.tabGroups ?? []
+    const source = groups.find((group) => group.id === groupId)
+    if (!source || beforeId === groupId) return
+    if (
+      parentId &&
+      (!groups.some((group) => group.id === parentId) || isGroupWithin(groups, parentId, groupId))
+    )
+      return
+    const moved = { ...source }
+    if (parentId) moved.parentId = parentId
+    else delete moved.parentId
+    const remaining = groups.filter((group) => group.id !== groupId)
+    let index = beforeId
+      ? remaining.findIndex(
+          (group) => group.id === beforeId && (group.parentId ?? null) === parentId
+        )
+      : -1
+    if (beforeId && index < 0) return
+    if (index < 0) {
+      index = remaining.reduce(
+        (last, group, i) => ((group.parentId ?? null) === parentId ? i + 1 : last),
+        remaining.length
+      )
+    }
+    remaining.splice(index, 0, moved)
+    const tabGroups = remaining.map((group) =>
+      parentId && isGroupWithin(remaining, parentId, group.id)
+        ? { ...group, collapsed: false }
+        : group
+    )
     this.state = { ...this.state, tabGroups }
     this.persistTabs()
     this.notify()
@@ -827,8 +920,22 @@ export class FileState {
       .catch(() => undefined)
     const defaultName = this.settingsStore.get('files.defaultNewFileName', 'Untitled.md')
     const defaultContent = this.settingsStore.get('files.defaultNewFileContent', '')
+    const occupied = new Set(this.state.tabs.map((tab) => filePathKey(tab.path)))
+    const tree = vaultPath ? await api()?.vault?.getTree?.() : undefined
+    const collect = (node: VaultTreeNode): void => {
+      occupied.add(filePathKey(node.path))
+      for (const child of node.children ?? []) collect(child)
+    }
+    if (tree) collect(tree)
+    const pathFor = (name: string): string => (vaultPath ? `${vaultPath}/${name}` : name)
+    const dot = defaultName.lastIndexOf('.')
+    const stem = dot > 0 ? defaultName.slice(0, dot) : defaultName
+    const extension = dot > 0 ? defaultName.slice(dot) : ''
+    let name = defaultName
+    for (let number = 2; occupied.has(filePathKey(pathFor(name))); number++)
+      name = `${stem} ${number}${extension}`
     this.openTab({
-      path: vaultPath ? `${vaultPath}/${defaultName}` : defaultName,
+      path: pathFor(name),
       content: defaultContent,
       originalContent: defaultContent,
       mtime: Date.now(),

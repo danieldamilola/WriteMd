@@ -176,6 +176,10 @@ export const anthropicAdapter: ProviderAdapter = {
 
   async *stream(request: StreamRequest): AsyncGenerator<StreamEvent> {
     const baseUrl = assertEndpoint(request.baseUrl, request.model, request.apiKey)
+    const options = supportedModelOptions(
+      request.modelOptions ?? {},
+      modelCapabilities('anthropic', request.model)
+    )
     const body = JSON.stringify({
       model: request.model,
       // Anthropic has no `system` message role; it is a top-level string.
@@ -183,6 +187,7 @@ export const anthropicAdapter: ProviderAdapter = {
       // max_tokens is required by this API, unlike the others.
       max_tokens: request.maxTokens ?? 4096,
       temperature: request.temperature,
+      ...(options.reasoning ? { output_config: { effort: options.reasoning } } : {}),
       messages: toAnthropicMessages(request.messages),
       stream: true,
       ...(request.tools?.length ? { tools: toAnthropicTools(request.tools) } : {})
@@ -195,7 +200,7 @@ export const anthropicAdapter: ProviderAdapter = {
 
     for await (const payload of streamSse({
       url: joinUrl(baseUrl, '/messages'),
-      headers: headers(request.apiKey, 'text/event-stream'),
+      headers: { ...headers(request.apiKey, 'text/event-stream'), ...request.gatewayHeaders },
       body,
       signal: request.signal
     })) {
@@ -269,7 +274,7 @@ export const anthropicAdapter: ProviderAdapter = {
             type: 'error',
             message: redactSecrets(
               message ?? 'Anthropic reported an error part way through the stream.',
-              headers(request.apiKey, 'text/event-stream')
+              { ...headers(request.apiKey, 'text/event-stream'), ...request.gatewayHeaders }
             )
           }
           return
@@ -297,3 +302,4 @@ export const anthropicAdapter: ProviderAdapter = {
     }
   }
 }
+import { modelCapabilities, supportedModelOptions } from '../../../shared/ai/model-options'

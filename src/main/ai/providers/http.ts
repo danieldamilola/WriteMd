@@ -156,6 +156,7 @@ export async function* streamSse(options: SseStreamOptions): AsyncGenerator<stri
 async function send(url: string, init: JsonRequest): Promise<Response> {
   try {
     return await fetch(url, {
+      redirect: 'error',
       method: init.method,
       headers: init.headers,
       body: init.body,
@@ -220,6 +221,8 @@ async function httpFailure(response: Response, headers: Record<string, string>):
  * and the body trails as corroborating detail.
  */
 export function httpFailureMessage(status: number, statusText: string, detail: string): string {
+  if (status === 403 && /free tier can only be used from within OpenCode/i.test(detail))
+    return 'This free model is restricted to the OpenCode app. Choose another model available to your workspace in AI Settings.'
   const label = statusText ? ` ${status} ${statusText}` : ` ${status}`
   const headline = headlineFor(status)
   return detail ? `${headline} (${label.trim()}) ${detail}` : `${headline} (${label.trim()})`

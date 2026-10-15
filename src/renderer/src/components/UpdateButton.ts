@@ -1,462 +1,344 @@
 import { css, html, LitElement } from 'lit'
 import { customElement, property, state } from 'lit/decorators.js'
-import './IconButton'
+import './Popover'
 import { api } from '../api'
 import { SettingsStore } from '../state/settings'
+import { menuStyles } from './menu-styles'
 import { scrollbarStyles } from './scrollbars'
-import { summarizeNotesForVersion } from '../services/whats-new'
+import { summarizeNotes, summarizeNotesForVersion } from '../services/whats-new'
+import { updateReleaseNotes } from '../../../shared/release-notes'
 import { chromeIcon } from '../design/icons'
+import type { UpdaterState } from '../../../shared/electron-api'
 
-type UpStatus = 'idle' | 'checking' | 'available' | 'downloading' | 'downloaded' | 'error'
-
-/**
- * Update action in the vertical sidebar or horizontal toolbar.
- *
- * The button only exists while there is something to act on: idle, error and
- * checking all render nothing so the bar stays quiet. The three live states
- * are distinct at a glance - a red dot for an update waiting, a ring around
- * the icon while it downloads, a green check once it is ready - and each one
- * says what a click will do in its hover card.
- */
 @customElement('writemd-update-button')
 export class WriteMdUpdateButton extends LitElement {
+  @property({ type: Boolean, reflect: true }) sidebar = false
+  @state() private status: UpdaterState['status'] = 'idle'
+  @state() private version = ''
+  @state() private releaseNotes = ''
+  @state() private percent = 0
+  @state() private cardOpen = false
+  private unsubs: (() => void)[] = []
+  private closeTimer?: ReturnType<typeof setTimeout>
+  private receivedEvent = false
   static styles = [
+    menuStyles,
     scrollbarStyles,
     css`
       :host {
         display: inline-flex;
-        position: relative;
+        font-family: var(--font-ui);
       }
       :host([sidebar]) {
         display: block;
-        font-family: var(--font-ui);
       }
-      .sidebar-action {
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        width: 100%;
-        min-height: 34px;
-        padding: 6px 8px;
-        border: 0;
-        border-radius: var(--radius-sm);
-        background: transparent;
-        color: var(--text);
-        font: 500 14px var(--font-ui);
-        cursor: pointer;
-        text-align: left;
-      }
-      .sidebar-action:hover {
-        background: var(--bg-hover);
-      }
-      .sidebar-action:focus-visible {
-        outline: 2px solid var(--border-focus);
-        outline-offset: -2px;
-      }
-      .sidebar-action svg {
-        width: var(--icon-size, 18px);
-        height: var(--icon-size, 18px);
-        flex-shrink: 0;
-        color: var(--accent);
-      }
-      .sidebar-action:disabled {
-        cursor: default;
-        color: var(--text-secondary);
-      }
-
       .wrap {
-        position: relative;
         display: inline-flex;
+        position: relative;
       }
-
-      /* Red dot for a waiting update, green check for a ready-to-install one. */
-      .dot {
-        position: absolute;
-        top: 3px;
-        right: 3px;
-        width: 6px;
-        height: 6px;
-        border-radius: 50%;
-        background: var(--danger);
-        pointer-events: none;
+      :host([sidebar]) .wrap {
+        display: block;
       }
-
-      .check-badge {
-        position: absolute;
-        top: 2px;
-        right: 2px;
-        width: 8px;
-        height: 8px;
-        border-radius: 50%;
-        background: var(--bg-elevated);
+      button {
+        font-family: inherit;
+        cursor: pointer;
+      }
+      .action {
+        position: relative;
         display: flex;
         align-items: center;
         justify-content: center;
-        pointer-events: none;
+        gap: 10px;
+        min-width: 32px;
+        min-height: 32px;
+        padding: 6px;
+        border: 0;
+        border-radius: var(--radius-md);
+        background: transparent;
+        color: var(--text-secondary);
       }
-
-      /* Dash ring around the button while the download runs. */
+      .action:hover {
+        background: var(--bg-hover);
+        color: var(--text);
+      }
+      .action:focus-visible,
+      .skip:focus-visible {
+        outline: 2px solid var(--border-focus);
+        outline-offset: -2px;
+      }
+      .sidebar-action {
+        width: 100%;
+        min-height: 34px;
+        box-sizing: border-box;
+        padding: 8px;
+        gap: 8px;
+        text-align: left;
+        justify-content: flex-start;
+        background: color-mix(in srgb, var(--accent) 12%, transparent);
+        color: var(--text);
+      }
+      .sidebar-action:hover {
+        background: color-mix(in srgb, var(--accent) 18%, transparent);
+      }
+      .sidebar-action > svg {
+        color: var(--accent);
+        flex-shrink: 0;
+      }
+      .copy {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        font-size: 12px;
+        font-weight: 500;
+        line-height: 16px;
+      }
+      .action:disabled {
+        cursor: default;
+      }
+      .progress {
+        position: absolute;
+        bottom: 0;
+        left: 0;
+        height: 2px;
+        background: var(--accent);
+        border-radius: var(--radius-sm);
+      }
+      .dot,
+      .check-badge {
+        position: absolute;
+        top: 3px;
+        right: 3px;
+        width: 5px;
+        height: 5px;
+        border-radius: 50%;
+        background: var(--accent);
+      }
+      .check-badge {
+        background: var(--success);
+      }
       .ring {
         position: absolute;
-        inset: -2px;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        color: var(--accent);
         pointer-events: none;
-        animation: spin 1.2s linear infinite;
       }
-
-      @keyframes spin {
-        from {
-          transform: rotate(-90deg);
-        }
-        to {
-          transform: rotate(270deg);
-        }
-      }
-
-      /*
-       * Hover card. Anchored to the wrap rather than the host so it can sit
-       * outside the 20px button box without stretching the bar's hit area.
-       * opacity rather than display, so opening it does not reflow the toolbar
-       * and the transition has something to interpolate.
-       */
       .card {
-        position: absolute;
-        top: calc(100% + 8px);
-        right: 0;
-        width: 280px;
-        padding: 10px 12px;
-        background: var(--menu-bg);
-        border: 1px solid var(--border-subtle);
-        border-radius: var(--radius-md);
-        box-shadow: var(--shadow-3);
-        z-index: 300;
-        opacity: 0;
-        transform: translateY(calc(var(--motion-reveal-shift) * -1));
-        pointer-events: none;
-        transition:
-          opacity var(--motion-fast) var(--motion-ease),
-          transform var(--motion-fast) var(--motion-ease);
-      }
-
-      .card.open {
-        opacity: 1;
-        transform: translateY(0);
-      }
-
-      :host-context([data-motion='reduced']) .card {
-        transform: none;
-        transition: opacity var(--motion-fast) var(--motion-ease);
-      }
-
-      :host-context([data-motion='reduced']) .card.open {
-        transform: none;
-      }
-
-      /*
-       * The card sits below the bar, so the pointer has to travel across the
-       * gap between button and card without the card closing. Padding on the
-       * wrap bridges it: the card stays a child, so :hover never lifts.
-       */
-      .card-bridge {
-        position: absolute;
-        top: 100%;
-        left: 0;
-        right: 0;
-        height: 8px;
-      }
-
-      .card-title {
-        font-size: 12px;
-        font-weight: 600;
-        color: var(--text);
-        margin-bottom: 2px;
-      }
-
-      .card-action {
-        font-size: 11px;
-        color: var(--text-muted);
-      }
-
-      .card ul {
-        margin: 6px 0 0 0;
-        padding: 0;
-        list-style: none;
-      }
-
-      .card li {
         position: relative;
-        font-size: 11.5px;
-        line-height: 1.45;
-        color: var(--text-secondary);
-        padding-left: 12px;
-        margin-bottom: 4px;
-      }
-
-      .card li:last-child {
-        margin-bottom: 0;
-      }
-
-      .card li::before {
-        content: '';
-        position: absolute;
-        left: 2px;
-        top: 7px;
-        width: 3px;
-        height: 3px;
-        border-radius: 50%;
-        background: var(--text-muted);
-      }
-
-      /* Long titles wrap to two lines and the card grows with them. */
-      .card-scroll {
-        max-height: 180px;
+        width: 290px;
+        max-width: calc(100vw - 16px);
+        max-height: min(65vh, var(--auto-size-available-height, 65vh));
+        box-sizing: border-box;
         overflow-y: auto;
+        padding: 12px;
       }
-
-      .skip {
-        margin-top: 8px;
-        padding: 0;
-        border: none;
-        background: none;
-        font-family: var(--font-ui);
-        font-size: 11px;
-        color: var(--text-muted);
-        cursor: pointer;
-        text-decoration: underline;
-        text-underline-offset: 2px;
-      }
-
-      .skip:hover {
+      .card-title {
         color: var(--text);
+        font-size: 13px;
+        font-weight: 500;
+      }
+      .card-action,
+      .empty {
+        font-size: 11px;
+        line-height: 1.5;
+        color: var(--text-muted);
+        margin-top: 5px;
+      }
+      .card ul {
+        padding-left: 16px;
+        margin: 12px 0;
+        color: var(--text-secondary);
+        font-size: 12px;
+        line-height: 1.5;
+      }
+      .card li + li {
+        margin-top: 5px;
+      }
+      .card li {
+        overflow-wrap: anywhere;
+      }
+      .skip {
+        color: var(--text-muted);
+        background: transparent;
+        border: 0;
+        font-size: 11px;
+        padding: 5px 0 0;
+        text-decoration: underline;
+        text-underline-offset: 3px;
       }
     `
   ]
-
-  @state() private status: UpStatus = 'idle'
-  @property({ type: Boolean, reflect: true }) sidebar = false
-  @state() private version = ''
-  @state() private percent = 0
-  @state() private cardOpen = false
-
-  private unsubs: Array<() => void> = []
-
   connectedCallback(): void {
     super.connectedCallback()
-    const u = api()?.updater
-    if (!u) return
-    void u
+    const updater = api()?.updater
+    if (!updater) return
+    void updater
       .getState()
-      .then((s) => {
-        this.status = s.status
-        this.version = s.version
-        this.percent = s.percent
+      .then((snapshot) => {
+        if (!this.isConnected || this.receivedEvent) return
+        this.status = snapshot.status
+        this.version = snapshot.version
+        this.percent = snapshot.percent
+        this.releaseNotes = snapshot.releaseNotes ?? ''
       })
       .catch(() => undefined)
-    this.unsubs.push(
-      u.onUpdateAvailable((info) => {
+    this.unsubs = [
+      updater.onUpdateAvailable((info) => {
+        this.receivedEvent = true
         this.status = 'available'
-        this.version = info?.version ?? ''
+        this.version = info.version ?? ''
+        this.releaseNotes = updateReleaseNotes(info.releaseNotes)
       }),
-      u.onUpdateNotAvailable(() => {
+      updater.onUpdateNotAvailable(() => {
+        this.receivedEvent = true
         this.status = 'idle'
+        this.cardOpen = false
+        this.releaseNotes = ''
       }),
-      u.onDownloadProgress((p) => {
+      updater.onDownloadProgress((info) => {
+        this.receivedEvent = true
         this.status = 'downloading'
-        this.percent = Math.round(p.percent ?? 0)
+        this.percent = Math.max(0, Math.min(100, Math.round(info.percent ?? 0)))
       }),
-      u.onUpdateDownloaded((info) => {
+      updater.onUpdateDownloaded((info) => {
+        this.receivedEvent = true
         this.status = 'downloaded'
-        this.version = info?.version ?? this.version
+        this.version = info.version ?? this.version
         this.percent = 100
+        this.releaseNotes = updateReleaseNotes(info.releaseNotes) || this.releaseNotes
       }),
-      u.onError(() => {
+      updater.onError(() => {
+        this.receivedEvent = true
         this.status = 'error'
+        this.cardOpen = false
       })
-    )
+    ]
   }
-
   disconnectedCallback(): void {
-    this.unsubs.forEach((fn) => fn())
-    this.unsubs = []
+    this.unsubs.forEach((unsubscribe) => unsubscribe())
+    clearTimeout(this.closeTimer)
     super.disconnectedCallback()
   }
-
-  private handleClick(): void {
+  private showCard = (): void => {
+    clearTimeout(this.closeTimer)
+    this.cardOpen = true
+  }
+  private hideCard = (): void => {
+    clearTimeout(this.closeTimer)
+    this.closeTimer = setTimeout(() => {
+      this.cardOpen = false
+    }, 180)
+  }
+  private focusOut = (event: FocusEvent): void => {
+    if (event.relatedTarget instanceof Node && this.shadowRoot?.contains(event.relatedTarget))
+      return
+    this.hideCard()
+  }
+  private handleClick = (): void => {
     if (this.status === 'available') {
       this.status = 'downloading'
       this.percent = 0
       void api()
-        ?.updater?.download?.()
+        ?.updater.download()
         .catch(() => {
           this.status = 'error'
+          this.cardOpen = false
         })
-    } else if (this.status === 'downloaded') {
-      void api()?.updater?.install?.()
-    }
+    } else if (this.status === 'downloaded') void api()?.updater.install()
   }
-
-  /**
-   * Declining writes the version rather than hiding the button, so the startup
-   * check stops offering this one release and the next release prompts again.
-   * Dismissing the hover card is not declining - only the link is.
-   */
-  private handleSkip(): void {
+  private handleSkip = (): void => {
     SettingsStore.getInstance().set('updates.skippedVersion', this.version)
     this.status = 'idle'
     this.cardOpen = false
   }
-
-  private renderCard(): unknown {
-    if (this.status === 'downloading') {
-      return html`
-        <div class="card-title">Downloading update</div>
-        <div class="card-action">${this.percent}% - this cannot be cancelled</div>
-      `
-    }
-
-    if (this.status === 'downloaded') {
-      return html`
-        <div class="card-title">Update ready</div>
-        <div class="card-action">
-          Click to install${this.version ? ` v${this.version}` : ''} and restart
-        </div>
-      `
-    }
-
-    // available
-    const notes = summarizeNotesForVersion(this.version)
-    return html`
-      <div class="card-title">
-        ${this.version ? `Update v${this.version} available` : 'Update available'}
-      </div>
-      <div class="card-action">Click to download</div>
-      ${
-        notes.length > 0
-          ? html`<ul class="card-scroll">
-              ${notes.map((note) => html`<li>${note}</li>`)}
-            </ul>`
-          : ''
-      }
-      <button class="skip" @click=${this.handleSkip}>Skip this version</button>
-    `
+  private notes(): string[] {
+    if (!this.releaseNotes) return summarizeNotesForVersion(this.version, 5)
+    const text = this.releaseNotes
+      .replace(/<(script|style)\b[^>]*>[\s\S]*?<\/\1>/gi, '')
+      .replace(/<li\b[^>]*>/gi, '\n- ')
+      .replace(/<\/(?:p|div|h[1-6]|ul|ol)>|<br\s*\/?\s*>/gi, '\n')
+      .replace(/<[^>]*>/g, '')
+    const document = new DOMParser().parseFromString(text, 'text/html')
+    return summarizeNotes(document.body.textContent ?? text, 5)
   }
-
   render(): unknown {
-    // The button only exists while there is something to act on. Idle, error,
-    // and checking all collapse to nothing so the toolbar stays quiet.
-    if (this.status === 'idle' || this.status === 'error' || this.status === 'checking') {
-      return html``
-    }
-
-    // Hovering is what opens the card, and so is keyboard focus, so the
-    // affordance is not mouse-only.
-    const live =
-      this.status === 'available' || this.status === 'downloading' || this.status === 'downloaded'
-
-    const title =
-      this.status === 'downloading'
-        ? `Downloading ${this.percent}% - please wait`
-        : this.status === 'downloaded'
-          ? 'Ready to install - click to restart'
-          : 'Update available - click to download'
-
-    if (this.sidebar) {
-      const label =
-        this.status === 'downloaded'
-          ? 'Restart to update'
-          : this.status === 'downloading'
-            ? `Downloading ${this.percent}%`
+    if (!['available', 'downloading', 'downloaded'].includes(this.status)) return null
+    const target = this.version ? `v${this.version.replace(/^v/, '')}` : ''
+    const label =
+      this.status === 'downloaded'
+        ? 'Restart to update'
+        : this.status === 'downloading'
+          ? `Downloading ${this.percent}%`
+          : target
+            ? `Update to ${target}`
             : 'Update available'
-      return html`<button
-        class="sidebar-action"
-        title=${`${title}${this.version ? ` (v${this.version})` : ''}`}
+    const title =
+      this.status === 'available'
+        ? `Update to ${target}`.trim()
+        : `${label}${target ? ` to ${target}` : ''}`
+    const notes = this.notes()
+    return html`<div
+      class="wrap"
+      @mouseenter=${this.showCard}
+      @mouseleave=${this.hideCard}
+      @focusin=${this.showCard}
+      @focusout=${this.focusOut}
+    >
+      <button
+        class=${`action ${this.sidebar ? 'sidebar-action' : ''}`}
+        title=${title}
+        aria-label=${title}
+        aria-haspopup="dialog"
+        aria-expanded=${this.cardOpen}
         ?disabled=${this.status === 'downloading'}
         @click=${this.handleClick}
       >
-        ${chromeIcon(this.status === 'downloaded' ? 'refresh' : 'download')}
-        <span role="status">${label}</span>
-      </button>`
-    }
-
-    // The ring's fill proportion mirrors the download progress; the whole
-    // circle keeps spinning so a stalled transfer still reads as "working".
-    const radius = 13
-    const circumference = 2 * Math.PI * radius
-    const filled = circumference * (this.percent / 100)
-
-    return html`
-      <div
-        class="wrap"
-        @mouseenter=${() => {
-          if (live) this.cardOpen = true
-        }}
-        @mouseleave=${() => {
-          this.cardOpen = false
-        }}
-        @focusin=${() => {
-          if (live) this.cardOpen = true
-        }}
-        @focusout=${() => {
-          this.cardOpen = false
-        }}
-      >
-        <writemd-icon-button title=${title} @click=${this.handleClick}>
-          <svg width="17" height="17" viewBox="0 0 20 20" fill="none">
-            <path
-              d="M10 3v8M6.5 8.5L10 12l3.5-3.5"
-              stroke="currentColor"
-              stroke-width="1.4"
-              stroke-linecap="round"
-              stroke-linejoin="round"
-            />
-            <path
-              d="M4 14.5v1a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1v-1"
-              stroke="currentColor"
-              stroke-width="1.4"
-              stroke-linecap="round"
-              stroke-linejoin="round"
-            />
-          </svg>
-        </writemd-icon-button>
-
-        ${this.status === 'available' ? html`<span class="dot"></span>` : ''}
-        ${
-          this.status === 'downloading'
-            ? html`<svg class="ring" width="30" height="30" viewBox="0 0 30 30" fill="none">
-                <circle cx="15" cy="15" r=${radius} stroke="var(--border)" stroke-width="1.5" />
-                <circle
-                  cx="15"
-                  cy="15"
-                  r=${radius}
-                  stroke="var(--success)"
-                  stroke-width="2"
-                  stroke-dasharray="${filled} ${circumference}"
-                  stroke-linecap="round"
-                />
-              </svg>`
-            : ''
-        }
-        ${
-          this.status === 'downloaded'
-            ? html`<span class="check-badge">
-                <svg width="6" height="6" viewBox="0 0 10 10" fill="none">
-                  <path
-                    d="M2 5.5L4.2 7.7L8 3"
-                    stroke="var(--success)"
-                    stroke-width="1.8"
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                  />
-                </svg>
-              </span>`
-            : ''
-        }
-
-        <div class="card ${live && this.cardOpen ? 'open' : ''}" role="tooltip">
-          ${live ? this.renderCard() : ''}
-        </div>
-        ${live ? html`<div class="card-bridge"></div>` : ''}
-      </div>
-    `
+        ${chromeIcon(this.status === 'downloaded' ? 'refresh' : 'download', this.sidebar ? 16 : 18)}
+        ${this.sidebar ? html`<span class="copy" role="status">${label}</span>` : html`<span class=${this.status === 'available' ? 'dot' : this.status === 'downloaded' ? 'check-badge' : 'progress'}></span>`}
+        ${this.status === 'downloading' ? html`<span class="progress" style=${`width:${this.percent}%`}></span>${!this.sidebar ? html`<svg class="ring" viewBox="0 0 32 32"><circle cx="16" cy="16" r="14" fill="none" stroke="currentColor" stroke-width="1.5" pathLength="100" stroke-dasharray="${this.percent} 100" /></svg>` : null}` : null}
+      </button>
+      ${
+        this.cardOpen
+          ? html`<writemd-popover
+              .anchor=${this.shadowRoot?.querySelector<HTMLElement>('.action') ?? null}
+              placement=${this.sidebar ? 'right-end' : 'bottom-end'}
+              .autoFocus=${false}
+              label="Update details"
+              @popover-dismiss=${() => {
+                this.cardOpen = false
+              }}
+            >
+              <section
+                class="m-panel card open"
+                @mouseenter=${this.showCard}
+                @mouseleave=${this.hideCard}
+              >
+                <div class="card-title">
+                  ${this.status === 'downloaded' ? 'Update ready' : this.status === 'downloading' ? 'Downloading update' : `Update ${target} available`}
+                </div>
+                <div class="card-action">
+                  ${this.status === 'downloaded' ? `Click to install ${target} and restart` : this.status === 'downloading' ? `${this.percent}% downloaded` : 'Click to download'}
+                </div>
+                ${
+                  notes.length
+                    ? html`<ul>
+                        ${notes.map((note) => html`<li>${note}</li>`)}
+                      </ul>`
+                    : html`<p class="empty">Release notes were not included with this update.</p>`
+                }
+                ${
+                  this.status === 'available'
+                    ? html`<div class="m-divider"></div>
+                        <button class="skip" @click=${this.handleSkip}>Skip this version</button>`
+                    : null
+                }
+              </section></writemd-popover
+            >`
+          : null
+      }
+    </div>`
   }
 }
 

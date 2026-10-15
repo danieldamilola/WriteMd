@@ -3,6 +3,8 @@
  * The main process persists this to config.json in the userData directory.
  */
 
+import { validModelPreferences, type ModelPreferences } from './ai/model-options'
+
 export interface WriteMdSettings {
   editor: {
     fontSize: number
@@ -95,6 +97,7 @@ export interface WriteMdSettings {
     historyTurns: number
     /** Model ids the last Fetch returned, so the picker survives a restart. */
     cachedModels: string[]
+    modelPreferences: ModelPreferences
   }
   advanced: {
     enableMermaid: boolean
@@ -180,7 +183,8 @@ export const DEFAULT_SETTINGS: WriteMdSettings = {
     model: 'gpt-4o-mini',
     apiKeySet: false,
     historyTurns: 8,
-    cachedModels: []
+    cachedModels: [],
+    modelPreferences: {}
   },
   advanced: {
     enableMermaid: true
@@ -242,6 +246,7 @@ const STRING_UNIONS: Record<string, readonly string[]> = {
   'appearance.windowMaterial': ['none', 'mica', 'acrylic'],
   'ai.providerId': [
     'chatgpt',
+    'opencode',
     'openai',
     'anthropic',
     'gemini',
@@ -308,6 +313,12 @@ export function validatePatch(patch: unknown): {
       }
       if (value === null || value === undefined) continue
       const fallback = (defaults as Record<string, unknown>)[key]
+      if (dotted === 'ai.modelPreferences' && !validModelPreferences(value)) {
+        problems.push(
+          'ai.modelPreferences must contain valid per-model reasoning and service-tier choices'
+        )
+        continue
+      }
       const bounds = NUMBER_BOUNDS[dotted]
       if (
         typeof value === 'number' &&

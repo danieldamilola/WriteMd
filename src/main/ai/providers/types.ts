@@ -1,4 +1,5 @@
 import type { ChatMessage, StreamEvent, ToolSpec } from '../../../shared/ai/types'
+import type { ModelOptions } from '../../../shared/ai/model-options'
 
 /**
  * The provider contract.
@@ -43,6 +44,10 @@ export interface ProviderConfig {
 }
 
 export interface StreamRequest {
+  providerId?: string
+  modelOptions?: ModelOptions
+  gatewayHeaders?: Record<string, string>
+  sessionId?: string
   baseUrl: string
   apiKey?: string
   model: string

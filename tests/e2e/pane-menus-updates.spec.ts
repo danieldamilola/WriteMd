@@ -309,7 +309,7 @@ test.describe('Pane menus and sidebar updates', () => {
     await update('available')
     const control = page.locator('writemd-sidebar writemd-update-button')
     const button = control.locator('.sidebar-action')
-    await expect(button).toHaveText('Update available')
+    await expect(button).toContainText('Update to v1.9.9')
     await expect(page.locator('writemd-top-bar writemd-update-button')).toHaveCount(0)
     // Settings is icon-only in the sidebar footer, so it is found by its
     // accessible name rather than by its text.
@@ -321,10 +321,10 @@ test.describe('Pane menus and sidebar updates', () => {
     expect(bounds!.y + bounds!.height).toBeLessThanOrEqual(settings!.y)
     await button.click()
     await update('downloading', 46)
-    await expect(button).toHaveText('Downloading 46%')
+    await expect(button).toContainText('Downloading 46%')
     await expect(button).toBeDisabled()
     await update('downloaded')
-    await expect(button).toHaveText('Restart to update')
+    await expect(button).toContainText('Restart to update')
     await page.screenshot({ path: 'artifacts/ui-review/sidebar-update-ready.png' })
     await button.click()
     expect(
@@ -345,7 +345,7 @@ test.describe('Pane menus and sidebar updates', () => {
         'vertical'
       )
     )
-    await expect(button).toHaveText('Restart to update')
+    await expect(button).toContainText('Restart to update')
     await update('idle')
     await expect(button).toHaveCount(0)
   })

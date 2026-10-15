@@ -8,6 +8,7 @@ import type { AiSendInput } from '../src/main/ai/service'
 const mocks = vi.hoisted(() => ({
   root: '',
   key: 'test-key',
+  openCodeToken: vi.fn<() => Promise<string>>(),
   settings: {
     enabled: true,
     providerId: 'openai',
@@ -23,6 +24,12 @@ vi.mock('../src/main/settings', () => ({ getSettings: () => ({ ai: mocks.setting
 vi.mock('../src/main/vault', () => ({ getVaultPath: () => mocks.root }))
 vi.mock('../src/main/ai/key-store', () => ({ getApiKey: () => mocks.key }))
 vi.mock('../src/main/ai/turn', () => ({ runTurn: mocks.run }))
+vi.mock('../src/main/ai/opencode-auth', () => ({
+  OPENCODE_ORIGIN: 'https://opencode.ai',
+  OPENCODE_CONSOLE: 'https://opencode.ai/console',
+  OPENCODE_API_BASE: 'https://opencode.ai/inference/openai/v1',
+  openCodeAuth: () => ({ accessToken: mocks.openCodeToken })
+}))
 
 import {
   cancelAll,
@@ -50,6 +57,9 @@ beforeEach(() => {
   mocks.key = 'test-key'
   mocks.root = makeTempRoot('ai-service')
   mocks.settings.model = 'first-model'
+  mocks.settings.providerId = 'openai'
+  mocks.settings.baseUrl = 'https://example.test/v1'
+  mocks.openCodeToken.mockReset().mockResolvedValue('account-only-secret')
   mocks.settings.maxOutputTokens = 0
   mocks.run.mockReset()
 })
@@ -62,6 +72,31 @@ afterEach(() => {
 })
 
 describe('AI conversation persistence', () => {
+  it('uses the official OpenCode route and account connection without a saved API key', async () => {
+    mocks.key = ''
+    mocks.settings.providerId = 'opencode'
+    mocks.settings.baseUrl = 'https://untrusted-custom-endpoint.test/v1'
+    mocks.settings.model = 'workspace/kimi'
+    mocks.run.mockImplementation(async function* () {
+      yield { type: 'done', text: 'Reply' }
+    })
+    await startTurn('opencode', input())
+    expect(mocks.openCodeToken).toHaveBeenCalledOnce()
+    expect(mocks.run.mock.calls[0][0]).toMatchObject({
+      providerId: 'opencode',
+      baseUrl: 'https://opencode.ai/inference/openai/v1',
+      model: 'workspace/kimi',
+      apiKey: undefined
+    })
+    expect(JSON.stringify(mocks.run.mock.calls)).not.toContain('account-only-secret')
+  })
+
+  it('rejects a disconnected OpenCode account even when an unrelated API key is stored', async () => {
+    mocks.settings.providerId = 'opencode'
+    mocks.openCodeToken.mockRejectedValue(new Error('Sign in to OpenCode in AI Settings.'))
+    await expect(startTurn('opencode', input())).rejects.toThrow('Sign in to OpenCode')
+    expect(mocks.run).not.toHaveBeenCalled()
+  })
   it('notifies committed files before forwarding the applied event', async () => {
     const order: string[] = []
     const path = input().document.path

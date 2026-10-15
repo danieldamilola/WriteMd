@@ -178,6 +178,10 @@ export const geminiAdapter: ProviderAdapter = {
   async *stream(request: StreamRequest): AsyncGenerator<StreamEvent> {
     const baseUrl = assertEndpoint(request.baseUrl, request.model, request.apiKey)
     const model = stripModelsPrefix(request.model)
+    const options = supportedModelOptions(
+      request.modelOptions ?? {},
+      modelCapabilities('gemini', model)
+    )
     const body = JSON.stringify({
       contents: toGeminiContents(request.messages),
       ...(request.system.trim()
@@ -185,7 +189,8 @@ export const geminiAdapter: ProviderAdapter = {
         : {}),
       generationConfig: {
         maxOutputTokens: request.maxTokens,
-        temperature: request.temperature
+        temperature: request.temperature,
+        ...(options.reasoning ? { thinkingConfig: { thinkingLevel: options.reasoning } } : {})
       },
       ...(request.tools?.length ? { tools: toGeminiTools(request.tools) } : {})
     })
@@ -200,7 +205,7 @@ export const geminiAdapter: ProviderAdapter = {
       // `alt=sse` is what turns this endpoint from a JSON array into an event
       // stream; without it the response arrives whole and the adapter hangs.
       url: `${joinUrl(baseUrl, `/models/${encodeURIComponent(model)}:streamGenerateContent`)}?alt=sse`,
-      headers: headers(request.apiKey, 'text/event-stream'),
+      headers: { ...headers(request.apiKey, 'text/event-stream'), ...request.gatewayHeaders },
       body,
       signal: request.signal
     })) {
@@ -211,7 +216,7 @@ export const geminiAdapter: ProviderAdapter = {
           type: 'error',
           message: redactSecrets(
             asString(asRecord(frame.error)?.message) ?? 'Gemini could not complete the response.',
-            headers(request.apiKey, 'text/event-stream')
+            { ...headers(request.apiKey, 'text/event-stream'), ...request.gatewayHeaders }
           )
         }
         return
@@ -290,3 +295,4 @@ export const geminiAdapter: ProviderAdapter = {
     }
   }
 }
+import { modelCapabilities, supportedModelOptions } from '../../../shared/ai/model-options'

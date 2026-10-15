@@ -1,3 +1,4 @@
+import type { OpenCodeAuthView } from '../shared/ai/opencode'
 import { contextBridge, ipcRenderer, webUtils, type IpcRendererEvent } from 'electron'
 import type { ChatgptAuthView } from '../shared/ai/chatgpt'
 import type {
@@ -24,6 +25,7 @@ const writemdAPI = {
     materialSupport: () => ipcRenderer.invoke('appearance:material-support')
   },
   app: {
+    getBuildInfo: () => ipcRenderer.invoke('app:get-build-info'),
     getVersion: () => ipcRenderer.invoke('app:get-version'),
     getPath: (name: 'home' | 'documents' | 'downloads' | 'temp') =>
       ipcRenderer.invoke('app:get-path', name),
@@ -105,6 +107,15 @@ const writemdAPI = {
    * renderer, which is exactly the boundary `contextIsolation` exists to hold.
    */
   ai: {
+    opencode: {
+      state: () => ipcRenderer.invoke('ai:opencode-state'),
+      login: () => ipcRenderer.invoke('ai:opencode-login'),
+      cancel: () => ipcRenderer.invoke('ai:opencode-cancel'),
+      logout: () => ipcRenderer.invoke('ai:opencode-logout'),
+      models: () => ipcRenderer.invoke('ai:opencode-models'),
+      onChanged: (callback: (state: OpenCodeAuthView) => void) =>
+        onChannel('ai:opencode-auth', callback as (...args: unknown[]) => void)
+    },
     chatgpt: {
       state: () => ipcRenderer.invoke('ai:chatgpt-state'),
       login: (addAccount = false) => ipcRenderer.invoke('ai:chatgpt-login', addAccount),

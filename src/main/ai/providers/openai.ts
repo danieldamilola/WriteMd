@@ -1,4 +1,6 @@
 import { NativeToolTextGuard, NATIVE_TOOL_MARKUP_ERROR } from './native-tool-markup'
+import { modelCapabilities, supportedModelOptions } from '../../../shared/ai/model-options'
+import { streamResponses } from './responses'
 import type {
   ChatMessage,
   MessageContent,
@@ -263,8 +265,19 @@ export const openaiAdapter: ProviderAdapter = {
 
   async *stream(request: StreamRequest): AsyncGenerator<StreamEvent> {
     const baseUrl = assertEndpoint(request.baseUrl, request.model, request.apiKey)
-    const headers = authHeaders(request.apiKey)
+    const headers = { ...authHeaders(request.apiKey), ...request.gatewayHeaders }
     headers.accept = 'text/event-stream'
+    const provider =
+      request.providerId ?? (new URL(baseUrl).hostname === 'api.openai.com' ? 'openai' : '')
+    const options = supportedModelOptions(
+      request.modelOptions ?? {},
+      modelCapabilities(provider, request.model)
+    )
+    if (provider === 'openai' && /^gpt-6(?:\.|-)/.test(request.model)) {
+      yield* streamResponses(request, headers, 'OpenAI')
+      return
+    }
+    const deepseek = provider === 'deepseek' || new URL(baseUrl).hostname === 'api.deepseek.com'
     const reasoningModel = /^(?:ft:)?(?:o\d+(?:[:-]|$)|gpt-(?:[5-9]|\d{2,})(?:[:.-]|$))/.test(
       request.model
     )
@@ -282,7 +295,14 @@ export const openaiAdapter: ProviderAdapter = {
         ? { max_completion_tokens: request.maxTokens }
         : { max_tokens: request.maxTokens, temperature: request.temperature }),
       ...(request.tools?.length ? { tools: toOpenAiTools(request.tools) } : {}),
-      ...(request.disableThinking && new URL(baseUrl).hostname === 'api.deepseek.com'
+      ...(options.reasoning && (!deepseek || options.reasoning !== 'none')
+        ? { reasoning_effort: options.reasoning }
+        : {}),
+      ...(options.serviceTier ? { service_tier: options.serviceTier } : {}),
+      ...(deepseek && options.reasoning
+        ? { thinking: { type: options.reasoning === 'none' ? 'disabled' : 'enabled' } }
+        : {}),
+      ...(request.disableThinking && deepseek
         ? { thinking: { type: 'disabled' }, tool_choice: 'none' }
         : {})
     })

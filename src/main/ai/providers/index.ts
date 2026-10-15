@@ -1,3 +1,4 @@
+import { openCodeAdapter, openCodeDescriptor } from './opencode'
 import type { ProviderKind } from '../../../shared/ai/types'
 import { anthropicAdapter, anthropicDescriptor } from './anthropic'
 import { geminiAdapter, geminiDescriptor } from './gemini'
@@ -111,11 +112,13 @@ export const PRESETS: ProviderDescriptor[] = [
   },
   ollamaDescriptor,
   lmStudioDescriptor,
-  chatgptDescriptor
+  chatgptDescriptor,
+  openCodeDescriptor
 ]
 
 /** The adapter a preset id routes to, or null for an id nothing claims. */
 export function adapterFor(descriptorId: string): ProviderAdapter | null {
+  if (descriptorId === 'opencode') return openCodeAdapter
   const preset = PRESETS.find((candidate) => candidate.id === descriptorId)
   return preset ? ADAPTERS[preset.kind] : null
 }

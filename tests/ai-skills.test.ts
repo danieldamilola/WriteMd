@@ -109,11 +109,30 @@ describe('personal AI skills', () => {
     add('proofread', '# UPDATED_GUIDANCE')
     expect(requestedSkill(root, '/proofread')).toMatchObject({ instructions: '# UPDATED_GUIDANCE' })
   })
+  it('loads a skill larger than 16 KB in full when listed and invoked', () => {
+    const instructions =
+      '# YouTube\n\n' + 'Keep the complete transcript.\n'.repeat(700) + 'END_MARKER'
+    writeFileSync(join(ensureSkillsFolder(root), 'youtube.md'), instructions)
+    expect(Buffer.byteLength(instructions)).toBeGreaterThan(16_384)
+    expect(ownSkills()).toEqual([{ name: 'youtube', description: 'YouTube' }])
+    expect(requestedSkill(root, '/youtube organize this')).toMatchObject({ instructions })
+    expect(listSkills(root).warnings).toEqual([])
+  })
+
+  it('accepts the byte limit and rejects larger UTF-8 instructions without truncation', () => {
+    const instructions = 'é'.repeat(128 * 1024)
+    add('boundary', instructions)
+    expect(requestedSkill(root, '/boundary')?.instructions).toBe(instructions)
+    add('overflow', instructions + 'x')
+    expect(listSkills(root).warnings.join(' ')).toContain('256 KB')
+    expect(() => requestedSkill(root, '/overflow')).toThrow('could not be read')
+  })
+
   it('rejects missing, empty, and oversized instructions instead of silently ignoring them', () => {
     add('empty', '')
-    add('large', 'x'.repeat(16_385))
+    add('large', 'x'.repeat(256 * 1024 + 1))
     expect(ownSkills()).toEqual([])
-    expect(listSkills(root).warnings.join(' ')).toMatch(/empty.*empty.*large.*16 KB/)
+    expect(listSkills(root).warnings.join(' ')).toMatch(/empty.*empty.*large.*256 KB/)
     expect(() => requestedSkill(root, '/missing test')).toThrow('Check Skills in AI Settings')
   })
 

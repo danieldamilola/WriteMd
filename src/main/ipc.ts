@@ -1,3 +1,5 @@
+import { openCodeAuth, cancelOpenCodeLogin } from './ai/opencode-auth'
+import { openCodeCatalog } from './ai/providers/opencode'
 import { ipcMain, dialog, shell, app, type BrowserWindow } from 'electron'
 import { readFile, writeFile, stat, rename, unlink, open } from 'fs/promises'
 import { existsSync, mkdirSync, type FSWatcher } from 'fs'
@@ -81,6 +83,7 @@ export function registerPersistedPaths(): void {
 /** Close all fs watchers; called on app quit so nothing leaks. */
 export function closeAllWatchers(): void {
   cancelChatgptLogin()
+  cancelOpenCodeLogin()
   for (const watcher of watchedPaths.values()) {
     try {
       watcher.close()
@@ -98,6 +101,14 @@ export function setupIpc(getWindow: () => BrowserWindow | null): void {
   const fileChanged = (path: string, snapshot?: FileChangeSnapshot): void =>
     getWindow()?.webContents.send('file:changed', path, snapshot)
   setFileChangeEmitter(fileChanged)
+  let openCodeConnection = openCodeAuth().state().connectionId
+  openCodeAuth().subscribe((state) => {
+    if (state.connectionId !== openCodeConnection) {
+      openCodeConnection = state.connectionId
+      cancelAll()
+    }
+    getWindow()?.webContents.send('ai:opencode-auth', state)
+  })
   chatgptAuth().subscribe((state) => getWindow()?.webContents.send('ai:chatgpt-auth', state))
   ipcMain.handle('appearance:import-background', () => importBackground(getWindow()))
   ipcMain.handle('appearance:get-background', (_, id: string) => getBackground(id))
@@ -105,6 +116,10 @@ export function setupIpc(getWindow: () => BrowserWindow | null): void {
   ipcMain.handle('appearance:material-support', () => materialSupport())
 
   ipcMain.handle('app:get-version', () => app.getVersion())
+  ipcMain.handle('app:get-build-info', () => ({
+    development: !app.isPackaged,
+    version: app.getVersion()
+  }))
   ipcMain.handle('app:get-path', (_, name: 'home' | 'documents' | 'downloads' | 'temp') =>
     app.getPath(name)
   )
@@ -417,6 +432,19 @@ export function setupIpc(getWindow: () => BrowserWindow | null): void {
   // ---------------------------------------------------------------- AI
 
   ipcMain.handle('ai:presets', () => PRESETS)
+  ipcMain.handle('ai:opencode-state', () => openCodeAuth().state())
+  ipcMain.handle('ai:opencode-login', () => {
+    cancelAll()
+    return openCodeAuth().login()
+  })
+  ipcMain.handle('ai:opencode-cancel', () => openCodeAuth().cancelLogin())
+  ipcMain.handle('ai:opencode-logout', () => {
+    cancelAll()
+    return openCodeAuth().logout()
+  })
+  ipcMain.handle('ai:opencode-models', () =>
+    openCodeCatalog.models(AbortSignal.timeout(MODEL_LIST_TIMEOUT_MS))
+  )
   ipcMain.handle('ai:chatgpt-state', () => chatgptAuth().state())
   ipcMain.handle('ai:chatgpt-login', (_, addAccount: boolean) =>
     chatgptAuth().login(addAccount === true)
@@ -475,6 +503,10 @@ export function setupIpc(getWindow: () => BrowserWindow | null): void {
   ipcMain.handle(
     'ai:fetch-models',
     async (_, providerId: string, baseUrl: string, typedKey: string) => {
+      if (providerId === 'opencode')
+        return (await openCodeCatalog.models(AbortSignal.timeout(MODEL_LIST_TIMEOUT_MS))).map(
+          (model) => model.id
+        )
       if (providerId === 'chatgpt')
         return (
           await chatgptModels(

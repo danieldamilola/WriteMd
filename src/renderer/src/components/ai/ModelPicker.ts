@@ -1,3 +1,4 @@
+import { OpenCodeState } from '../../state/opencode'
 import { css, html, LitElement } from 'lit'
 import { customElement, property, state } from 'lit/decorators.js'
 import { api } from '../../api'
@@ -7,6 +8,8 @@ import { icon } from '../icons'
 import { chromeIcon } from '../../design/icons'
 import { controlStyles } from '../../design/controls'
 import { scrollbarStyles } from '../scrollbars'
+import { providerIcon } from './provider-icons'
+import { emit, on } from '../../events/bus'
 
 @customElement('writemd-ai-model-picker')
 export class AiModelPicker extends LitElement {
@@ -25,25 +28,21 @@ export class AiModelPicker extends LitElement {
   private unsubscribe?: () => void
   private unsubscribeChatgpt?: () => void
   private chatgpt = ChatgptState.getInstance()
+  private opencode = OpenCodeState.getInstance()
+  private unsubscribeOpenCode?: () => void
   private request = 0
   private identity = ''
+  private unsubscribeMenu?: () => void
 
   connectedCallback(): void {
     super.connectedCallback()
-    this.unsubscribeChatgpt = this.chatgpt.subscribe(() => this.requestUpdate())
-    this.identity = this.connectionIdentity()
-    this.unsubscribe = this.settings.subscribe('ai', () => {
-      const identity = this.connectionIdentity()
-      if (identity !== this.identity) {
-        this.identity = identity
-        this.request++
-        this.loading = false
-        this.error = ''
-        this.open = false
-        this.settings.set('ai.cachedModels', [])
-      }
-      this.requestUpdate()
+    this.unsubscribeMenu = on('menu:open', ({ owner }) => {
+      if (owner !== this) this.open = false
     })
+    this.unsubscribeChatgpt = this.chatgpt.subscribe(this.onConnectionChanged)
+    this.unsubscribeOpenCode = this.opencode.subscribe(this.onConnectionChanged)
+    this.identity = this.connectionIdentity()
+    this.unsubscribe = this.settings.subscribe('ai', this.onConnectionChanged)
     document.addEventListener('pointerdown', this.onOutside)
     document.addEventListener('focusin', this.onOutside)
     window.addEventListener('resize', this.onResize)
@@ -51,7 +50,9 @@ export class AiModelPicker extends LitElement {
 
   disconnectedCallback(): void {
     this.unsubscribe?.()
+    this.unsubscribeMenu?.()
     this.unsubscribeChatgpt?.()
+    this.unsubscribeOpenCode?.()
     this.request++
     document.removeEventListener('pointerdown', this.onOutside)
     document.removeEventListener('focusin', this.onOutside)
@@ -59,11 +60,39 @@ export class AiModelPicker extends LitElement {
     super.disconnectedCallback()
   }
 
+  private onConnectionChanged = (): void => {
+    const identity = this.connectionIdentity()
+    if (identity !== this.identity) {
+      this.identity = identity
+      this.request++
+      this.loading = false
+      this.error = ''
+      this.open = false
+      this.settings.set('ai.cachedModels', [])
+    }
+    this.requestUpdate()
+  }
+
+  private modelLabel(model: string): string {
+    const provider = this.settings.get<string>('ai.providerId', '')
+    return provider === 'chatgpt'
+      ? this.chatgpt.label(model)
+      : provider === 'opencode'
+        ? this.opencode.label(model)
+        : model
+  }
+
   private connectionIdentity(): string {
     return JSON.stringify([
       this.settings.get('ai.providerId', ''),
       this.settings.get('ai.baseUrl', ''),
-      this.settings.get('ai.apiKeySet', false)
+      this.settings.get('ai.apiKeySet', false),
+      this.settings.get<string>('ai.providerId', '') === 'opencode'
+        ? [this.opencode.state().connectionId, this.opencode.state().connected]
+        : null,
+      this.settings.get<string>('ai.providerId', '') === 'chatgpt'
+        ? [this.chatgpt.state().activeId, this.chatgpt.state().connected]
+        : null
     ])
   }
 
@@ -101,6 +130,7 @@ export class AiModelPicker extends LitElement {
     this.open = !this.open
     this.search = ''
     if (!this.open) return
+    emit('menu:open', { owner: this })
     this.positionMenu()
     // Keys can change without changing apiKeySet. Refresh on opening so the
     // cached list cannot keep showing another key's available models.
@@ -116,7 +146,7 @@ export class AiModelPicker extends LitElement {
     // The request counter alone cannot spot a sign-out or account switch, which
     // does not call fetchModels. Capturing the account keeps a late reply for the
     // previous account from writing its catalogue into settings.
-    const account = this.chatgpt.state().activeId
+    const identity = this.connectionIdentity()
     this.loading = true
     this.error = ''
     try {
@@ -125,12 +155,14 @@ export class AiModelPicker extends LitElement {
       const chatgpt = this.settings.get<string>('ai.providerId', '') === 'chatgpt'
       const models = chatgpt
         ? (await this.chatgpt.models()).map((model) => model.id)
-        : await fetch(
-            this.settings.get('ai.providerId', 'openai'),
-            this.settings.get('ai.baseUrl', ''),
-            ''
-          )
-      if (token !== this.request || this.chatgpt.state().activeId !== account) return
+        : this.settings.get<string>('ai.providerId', '') === 'opencode'
+          ? (await this.opencode.models()).map((model) => model.id)
+          : await fetch(
+              this.settings.get('ai.providerId', 'openai'),
+              this.settings.get('ai.baseUrl', ''),
+              ''
+            )
+      if (token !== this.request || this.connectionIdentity() !== identity) return
       this.settings.set(
         'ai.cachedModels',
         // A key-based catalogue is an unordered set of ids, so it is trimmed,
@@ -193,7 +225,7 @@ export class AiModelPicker extends LitElement {
     const current = this.settings.get('ai.model', '')
     const cached = this.settings.get<string[]>('ai.cachedModels', [])
     const models = [...new Set([...(current ? [current] : []), ...cached])].filter((model) =>
-      model.toLowerCase().includes(this.search.toLowerCase())
+      `${model} ${this.modelLabel(model)}`.toLowerCase().includes(this.search.toLowerCase())
     )
     return html`
       <button
@@ -205,9 +237,8 @@ export class AiModelPicker extends LitElement {
         ?disabled=${this.disabled}
         @click=${this.toggle}
       >
-        <span
-          >${this.settings.get<string>('ai.providerId', '') === 'chatgpt' ? this.chatgpt.label(current) || 'Choose model' : current || 'Choose model'}</span
-        >${icon('chevron-down', 12)}
+        ${providerIcon(this.settings.get<string>('ai.providerId', ''), 14)}
+        <span>${this.modelLabel(current) || 'Choose model'}</span>${icon('chevron-down', 12)}
       </button>
       ${
         this.open && !this.disabled
@@ -255,9 +286,8 @@ export class AiModelPicker extends LitElement {
                       title=${model}
                       @click=${() => this.choose(model)}
                     >
-                      <span
-                        >${this.settings.get<string>('ai.providerId', '') === 'chatgpt' ? this.chatgpt.label(model) : model}</span
-                      >
+                      ${providerIcon(this.settings.get<string>('ai.providerId', ''), 14)}
+                      <span>${this.modelLabel(model)}</span>
                       ${model === current ? icon('check', 16) : null}
                     </button>`
                 )}
@@ -330,7 +360,7 @@ export class AiModelPicker extends LitElement {
         box-sizing: border-box;
         padding: 4px;
         border: 1px solid var(--border-subtle);
-        border-radius: var(--radius-lg);
+        border-radius: 8px;
         background: var(--menu-bg);
         box-shadow: var(--shadow-3);
         z-index: 20;
@@ -380,6 +410,9 @@ export class AiModelPicker extends LitElement {
       .models span {
         overflow-wrap: anywhere;
         min-width: 0;
+      }
+      .models button > span:not([data-provider-icon]) {
+        flex: 1;
       }
       [aria-selected='true'] {
         background: var(--bg-active);

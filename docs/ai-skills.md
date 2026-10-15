@@ -43,7 +43,7 @@ A single `Skills/SKILL.md` is also supported, with the command `/skill`.
 Skills in the previous `.writemd/skills` folder remain available. When names overlap,
 the visible `Skills` folder takes precedence.
 
-Each skill is a Markdown instruction file, up to 16 KB. Folder names use lowercase
+Each skill is a Markdown instruction file, up to 256 KB. Folder names use lowercase
 letters, numbers, and hyphens, beginning with a letter. WriteMd does not run scripts,
 install dependencies, or follow links to folders outside the skills directory. A missing
 or unreadable skill produces a chat error so the request does not silently run without it.

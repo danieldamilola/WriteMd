@@ -7,11 +7,13 @@ import { icon } from '../icons'
 import { aiActivityStyles, aiThinkingLabel, chromeIcon } from '../../design/icons'
 import { controlStyles } from '../../design/controls'
 import { menuStyles } from '../menu-styles'
-import { emit } from '../../events/bus'
+import { emit, on } from '../../events/bus'
 import type { AiAttachment } from './types'
 import { SettingsStore } from '../../state/settings'
 import { ChatgptState } from '../../state/chatgpt'
+import { OpenCodeState } from '../../state/opencode'
 import './ModelPicker'
+import './ModelOptions'
 
 /**
  * The composer's size and attachment budget.
@@ -272,21 +274,74 @@ export class AiComposer extends LitElement {
   private unsubscribe?: () => void
   private unsubscribeChatgpt?: () => void
   private chatgpt = ChatgptState.getInstance()
+  private opencode = OpenCodeState.getInstance()
+  private unsubscribeOpenCode?: () => void
+  private unsubscribeMenu?: () => void
+  @state() private switchingAccount = false
+  @state() private accountError = ''
+  @state() private accountMenuOpen = false
+  @state() private accountMenuPosition = ''
   private attachmentToken = 0
   private skillsRequest: Promise<SkillEntry[]> | null = null
 
   connectedCallback(): void {
     super.connectedCallback()
+    this.unsubscribeMenu = on('menu:open', ({ owner }) => {
+      if (owner !== this) {
+        this.shadowRoot?.querySelector<HTMLElement>('.account-menu')?.hidePopover?.()
+        this.accountMenuOpen = false
+      }
+    })
     this.unsubscribe = this.settings.subscribe('ai', () => this.requestUpdate())
     this.unsubscribeChatgpt = this.chatgpt.subscribe(() => this.requestUpdate())
+    this.unsubscribeOpenCode = this.opencode.subscribe(() => this.requestUpdate())
   }
 
   disconnectedCallback(): void {
     this.unsubscribe?.()
+    this.unsubscribeMenu?.()
     this.unsubscribeChatgpt?.()
+    this.unsubscribeOpenCode?.()
     this.mentionToken++
     this.attachmentToken++
     super.disconnectedCallback()
+  }
+
+  private async switchChatgptAccount(id: string): Promise<void> {
+    this.closeAccountMenu()
+    if (this.busy || this.disabled || this.switchingAccount || id === this.chatgpt.state().activeId)
+      return
+    this.switchingAccount = true
+    this.accountError = ''
+    try {
+      const state = await api()?.ai?.chatgpt?.select(id)
+      if (!state)
+        throw new Error('Account switching is unavailable. Restart WriteMd after updating.')
+      this.chatgpt.apply(state)
+      if (state.connected) {
+        const models = await this.chatgpt.models()
+        if (
+          this.chatgpt.state().activeId !== id ||
+          this.settings.get<string>('ai.providerId', '') !== 'chatgpt' ||
+          !this.isConnected
+        )
+          return
+        this.settings.set(
+          'ai.cachedModels',
+          models.map((model) => model.id)
+        )
+        if (
+          models.length &&
+          !models.some((model) => model.id === this.settings.get('ai.model', ''))
+        )
+          this.settings.set('ai.model', models[0].id)
+      }
+    } catch (error) {
+      this.accountError =
+        error instanceof Error ? error.message : 'Could not switch ChatGPT accounts.'
+    } finally {
+      this.switchingAccount = false
+    }
   }
 
   private get setupMessage(): string {
@@ -295,8 +350,10 @@ export class AiComposer extends LitElement {
     const provider = this.settings.get<string>('ai.providerId', 'openai')
     if (provider === 'chatgpt' && !this.chatgpt.state().connected)
       return 'Continue with ChatGPT in Settings.'
+    if (provider === 'opencode' && !this.opencode.state().connected)
+      return 'Continue with OpenCode in Settings.'
     if (
-      !['ollama', 'lmstudio', 'chatgpt'].includes(provider) &&
+      !['ollama', 'lmstudio', 'chatgpt', 'opencode'].includes(provider) &&
       !this.settings.get('ai.apiKeySet', false)
     )
       return 'Add your API key in Settings.'
@@ -515,7 +572,15 @@ export class AiComposer extends LitElement {
 
   private submit(): void {
     const text = this.value.trim()
-    if (!text || this.busy || this.disabled || this.setupMessage || this.readingFiles) return
+    if (
+      !text ||
+      this.busy ||
+      this.disabled ||
+      this.switchingAccount ||
+      this.setupMessage ||
+      this.readingFiles
+    )
+      return
     const attachments = this.attachments
     this.value = ''
     this.attachments = []
@@ -630,6 +695,150 @@ export class AiComposer extends LitElement {
 
   private removeAttachment(index: number): void {
     this.attachments = this.attachments.filter((_, i) => i !== index)
+  }
+
+  private closeAccountMenu(): void {
+    this.shadowRoot?.querySelector<HTMLElement>('.account-menu')?.hidePopover?.()
+    this.accountMenuOpen = false
+    this.shadowRoot?.querySelector<HTMLButtonElement>('.account-picker')?.focus()
+  }
+
+  private async toggleAccountMenu(): Promise<void> {
+    if (this.busy || this.disabled || this.switchingAccount) return
+    if (this.accountMenuOpen) return this.closeAccountMenu()
+    emit('menu:open', { owner: this })
+    const bounds = this.shadowRoot?.querySelector('.account-picker')?.getBoundingClientRect()
+    if (!bounds) return
+    const width = Math.min(300, window.innerWidth - 16)
+    const left = Math.max(8, Math.min(bounds.right - width, window.innerWidth - width - 8))
+    const above = bounds.top >= window.innerHeight - bounds.bottom
+    this.accountMenuPosition = `left:${left}px; width:${width}px; ${above ? `bottom:${window.innerHeight - bounds.top + 4}px` : `top:${bounds.bottom + 4}px`}; max-height:${Math.max(40, Math.min(280, (above ? bounds.top : window.innerHeight - bounds.bottom) - 16))}px`
+    this.accountMenuOpen = true
+    await this.updateComplete
+    if (!this.accountMenuOpen) return
+    const menu = this.shadowRoot?.querySelector<HTMLElement>('.account-menu')
+    menu?.showPopover?.()
+    menu?.querySelector<HTMLElement>('[aria-checked="true"]')?.focus()
+  }
+
+  private accountMenuKeyDown(event: KeyboardEvent): void {
+    if (event.key === 'Escape') {
+      this.closeAccountMenu()
+      return
+    }
+    if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return
+    event.preventDefault()
+    const items = [
+      ...(this.shadowRoot?.querySelectorAll<HTMLButtonElement>('[data-account-id]') ?? [])
+    ]
+    const index = items.indexOf(this.shadowRoot?.activeElement as HTMLButtonElement)
+    const next =
+      event.key === 'Home'
+        ? 0
+        : event.key === 'End'
+          ? items.length - 1
+          : (index + (event.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length
+    items[next]?.focus()
+    items[next]?.scrollIntoView?.({ block: 'nearest' })
+  }
+
+  protected updated(): void {
+    if (
+      this.accountMenuOpen &&
+      (this.busy || this.disabled || this.settings.get<string>('ai.providerId', '') !== 'chatgpt')
+    ) {
+      this.shadowRoot?.querySelector<HTMLElement>('.account-menu')?.hidePopover?.()
+      this.accountMenuOpen = false
+    }
+  }
+
+  private renderConnectionControls(): TemplateResult {
+    return html`
+      ${
+        this.modelPicker &&
+        this.settings.get<string>('ai.providerId', '') === 'chatgpt' &&
+        this.chatgpt.state().accounts.length > 1
+          ? html` <button
+                class="account-picker"
+                aria-label="Switch ChatGPT account"
+                aria-haspopup="menu"
+                aria-expanded=${this.accountMenuOpen}
+                title=${this.chatgpt.state().accounts.find((account) => account.id === this.chatgpt.state().activeId)?.label ?? 'Switch ChatGPT account'}
+                ?disabled=${this.busy || this.disabled || this.switchingAccount}
+                @click=${this.toggleAccountMenu}
+              >
+                <span
+                  >${this.chatgpt.state().accounts.find((account) => account.id === this.chatgpt.state().activeId)?.label ?? 'Account'}</span
+                >${icon('chevron-down', 12)}
+              </button>
+              <div
+                class="account-menu m-panel"
+                popover="auto"
+                role="menu"
+                aria-label="ChatGPT accounts"
+                style=${this.accountMenuPosition}
+                @toggle=${(event: ToggleEvent) => {
+                  this.accountMenuOpen = event.newState === 'open'
+                }}
+                @keydown=${this.accountMenuKeyDown}
+              >
+                ${this.chatgpt
+                  .state()
+                  .accounts.map(
+                    (account) =>
+                      html`<button
+                        class="m-item"
+                        data-account-id=${account.id}
+                        role="menuitemradio"
+                        aria-checked=${account.id === this.chatgpt.state().activeId}
+                        ?disabled=${this.busy || this.disabled || this.switchingAccount}
+                        @click=${() => void this.switchChatgptAccount(account.id)}
+                      >
+                        <span class="account-label">${account.label}</span
+                        >${account.id === this.chatgpt.state().activeId ? icon('check', 14) : null}
+                      </button>`
+                  )}
+              </div>`
+          : null
+      }
+      ${
+        this.modelPicker
+          ? html`<writemd-ai-model-picker
+              .disabled=${this.busy || this.disabled || this.switchingAccount}
+            ></writemd-ai-model-picker>`
+          : null
+      }
+      ${this.modelPicker ? html`<writemd-ai-model-options .disabled=${this.busy || this.disabled || this.switchingAccount}></writemd-ai-model-options>` : null}
+    `
+  }
+
+  private renderSend(canSend: boolean): TemplateResult {
+    return html`
+      ${
+        this.busy
+          ? html`
+              <button
+                class="send stop"
+                aria-label="Stop response"
+                title="Stop response"
+                @click=${this.onStop}
+              >
+                <span class="stop-symbol"></span>
+              </button>
+            `
+          : html`
+              <button
+                class="send"
+                aria-label="Send message"
+                title="Send message (Enter)"
+                ?disabled=${!canSend || this.switchingAccount}
+                @click=${this.submit}
+              >
+                ${icon('arrow-up', 18)}
+              </button>
+            `
+      }
+    `
   }
 
   render(): unknown {
@@ -756,7 +965,8 @@ export class AiComposer extends LitElement {
           <textarea
             class="input"
             rows="1"
-            placeholder=${this.placeholder || (api()?.ai?.listSkills ? (this.hasSelection ? 'Ask about your selection, / for skills, @ for notes…' : 'Ask, write, / for skills, @ for notes…') : this.hasSelection ? 'Ask about your selection, or @ for notes…' : 'Ask, write, or @ for notes…')}
+            placeholder=${this.placeholder || (this.hasSelection ? 'Ask about your selection…' : 'Ask WriteMd…')}
+            title="/ for skills, @ for notes"
             aria-label="Message"
             ?hidden=${this.thinking}
             aria-controls="file-suggestions"
@@ -784,41 +994,9 @@ export class AiComposer extends LitElement {
               }
             }}
           ></textarea>
-          <div class="actions">
-            ${
-              this.modelPicker
-                ? html`<writemd-ai-model-picker
-                    .disabled=${this.busy || this.disabled}
-                  ></writemd-ai-model-picker>`
-                : null
-            }
-            ${this.compact ? null : this.renderAttach()}
-            ${
-              this.busy
-                ? html`
-                    <button
-                      class="send stop"
-                      aria-label="Stop response"
-                      title="Stop response"
-                      @click=${this.onStop}
-                    >
-                      <span class="stop-symbol"></span>
-                    </button>
-                  `
-                : html`
-                    <button
-                      class="send"
-                      aria-label="Send message"
-                      title="Send message (Enter)"
-                      ?disabled=${!canSend}
-                      @click=${this.submit}
-                    >
-                      ${icon('arrow-up', 18)}
-                    </button>
-                  `
-            }
-          </div>
+          ${this.compact ? html`<div class="actions">${this.renderConnectionControls()}${this.renderSend(canSend)}</div>` : this.renderSend(canSend)}
         </div>
+        ${this.compact ? null : html`<div class="actions">${this.renderAttach()}<span class="actions-spacer"></span>${this.renderConnectionControls()}</div>`}
         ${this.readingFiles ? html`<div class="reading" role="status">Reading attachments…</div>` : null}
         ${
           !this.started &&
@@ -835,6 +1013,7 @@ export class AiComposer extends LitElement {
             : null
         }
         ${this.setupMessage ? html`<div class="setup" role="status">${this.setupMessage}<button @click=${() => emit('settings:open', { tab: 'ai' })}>Settings</button></div>` : null}
+        ${this.accountError ? html`<div class="warn" role="alert">${this.accountError}</div>` : null}
         ${this.attachmentError ? html`<div class="warn" role="alert">${this.attachmentError}</div>` : null}
       </div>
     `
@@ -1052,8 +1231,9 @@ export class AiComposer extends LitElement {
 
       .field {
         display: flex;
-        flex-direction: column;
-        gap: 4px;
+        flex-direction: row;
+        align-items: flex-end;
+        gap: 8px;
         /*
          * One prompt field look for both surfaces. The chat panel and the
          * floating bar are the same input in two places, so they share a fill,
@@ -1073,8 +1253,9 @@ export class AiComposer extends LitElement {
 
       .input {
         box-sizing: border-box;
+        flex: 1;
         width: 100%;
-        min-height: 36px;
+        min-height: 26px;
         min-width: 0;
         border: none;
         outline: none;
@@ -1086,7 +1267,7 @@ export class AiComposer extends LitElement {
         line-height: 1.5;
         max-height: 160px;
         overflow-y: auto;
-        padding: 0 4px;
+        padding: 4px;
       }
 
       .input::placeholder {
@@ -1101,8 +1282,65 @@ export class AiComposer extends LitElement {
         width: 100%;
       }
 
-      writemd-ai-model-picker {
+      .account-picker {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        width: 120px;
+        max-width: 40%;
+        flex: 0 1 120px;
+        height: 28px;
+        border: 0;
+        padding: 0 8px;
+        border-radius: var(--radius-full);
+        background: transparent;
+        color: var(--text-secondary);
+        font-size: 12px;
+      }
+      .account-picker span {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .account-picker:hover:not(:disabled) {
+        background: var(--bg-hover);
+      }
+      .account-menu {
+        position: fixed;
+        inset: auto;
+        margin: 0;
+        box-sizing: border-box;
+        min-width: 0;
+        overflow-y: auto;
+      }
+      .account-menu .m-item {
+        box-sizing: border-box;
+        width: 100%;
+        border: 0;
+        background: transparent;
+        text-align: left;
+        white-space: normal;
+      }
+      .account-menu .m-item:hover,
+      .account-menu .m-item:focus-visible {
+        background: var(--bg-active);
+      }
+      .account-label {
         flex: 1;
+        min-width: 0;
+        overflow-wrap: anywhere;
+      }
+      .actions-spacer {
+        flex: 1;
+        min-width: 0;
+      }
+      :host(:not([compact])) .field .send {
+        border-radius: var(--radius-sm);
+      }
+      writemd-ai-model-picker {
+        flex: 0 1 auto;
+        max-width: 50%;
         min-width: 0;
       }
       .reading {
@@ -1110,7 +1348,7 @@ export class AiComposer extends LitElement {
         line-height: 16px;
         color: var(--text-muted);
         text-align: left;
-        padding: 0 4px;
+        padding: 4px;
       }
       .setup {
         display: flex;

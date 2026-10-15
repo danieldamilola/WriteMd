@@ -59,7 +59,7 @@ export class ChatgptState {
   async models(): Promise<ChatgptModelView[]> {
     const id = this.value.activeId
     const catalog = await this.bridge?.models()
-    if (!catalog || this.value.activeId !== id) return []
+    if (!catalog || this.value.activeId !== id || !this.value.connected) return []
     this.catalog = catalog
     this.notify()
     return catalog

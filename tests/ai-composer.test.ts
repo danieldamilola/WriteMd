@@ -195,12 +195,13 @@ describe('writemd-ai-composer', () => {
 
   it('shows guidance inside the prompt and changes it for selected text', async () => {
     const el = await mount()
-    expect(input(el).placeholder).toBe('Ask, write, or @ for notes…')
+    expect(input(el).placeholder).toBe('Ask WriteMd…')
+    expect(input(el).title).toContain('@ for notes')
     expect(el.shadowRoot!.querySelector('.hint')).toBeNull()
     expect(el.shadowRoot!.textContent).not.toContain('Shift+Enter for a new line')
     el.hasSelection = true
     await settle(el)
-    expect(input(el).placeholder).toBe('Ask about your selection, or @ for notes…')
+    expect(input(el).placeholder).toBe('Ask about your selection…')
   })
 
   it('opens the AI settings section through the app navigation bus', async () => {
@@ -479,7 +480,7 @@ describe('AI skill autocomplete', () => {
 
   it('opens a leading slash skill menu and inserts a chosen skill without replacing it with a file', async () => {
     const el = await mount()
-    expect(input(el).placeholder).toContain('/ for skills')
+    expect(input(el).title).toContain('/ for skills')
     type(el, '/')
     await settle(el)
     expect(el.shadowRoot!.querySelector('[role="listbox"]')?.getAttribute('aria-label')).toBe(

@@ -21,6 +21,7 @@ export class Sidebar extends LitElement {
   @property({ type: Boolean }) collapsed = false
   @property({ type: Boolean }) aiEnabled = false
   @property({ type: Boolean }) aiOpen = false
+  @property() activeGroupId = ''
   /** Draws one icon per group in the collapsed strip. */
   @property({ type: Array }) tabGroups: TabGroup[] = []
   static styles = [
@@ -204,10 +205,12 @@ export class Sidebar extends LitElement {
                   data-group-id=${group.id}
                   title=${group.label}
                   aria-label=${group.label}
-                  @click=${() =>
+                  aria-haspopup="dialog"
+                  aria-expanded=${this.activeGroupId === group.id}
+                  @click=${(event: MouseEvent) =>
                     this.dispatchEvent(
                       new CustomEvent('open-group', {
-                        detail: { groupId: group.id },
+                        detail: { groupId: group.id, anchor: event.currentTarget },
                         bubbles: true,
                         composed: true
                       })
@@ -219,6 +222,7 @@ export class Sidebar extends LitElement {
             )}
           </div>
           <div class="slim-bottom">
+            <writemd-update-button></writemd-update-button>
             ${this.renderAssistantButton()}
             <writemd-icon-button
               size="md"

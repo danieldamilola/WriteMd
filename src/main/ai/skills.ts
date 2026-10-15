@@ -11,7 +11,7 @@ import {
 import { dirname, isAbsolute, join, relative } from 'path'
 import type { AiSkillsView, AiSkillView } from '../../shared/ai/skills'
 
-const MAX_SKILL_BYTES = 16_384
+const MAX_SKILL_BYTES = 256 * 1024
 const MAX_SKILLS = 64
 const SKILL_NAME = /^[a-z][a-z0-9-]{0,63}$/
 
@@ -164,7 +164,7 @@ function readSkillFile(path: string, name: string, root: string): LoadedSkill {
       if (!count) break
       size += count
     }
-    if (size > MAX_SKILL_BYTES) throw new Error('SKILL.md must be 16 KB or smaller.')
+    if (size > MAX_SKILL_BYTES) throw new Error('Skill instructions must be 256 KB or smaller.')
     instructions = buffer.subarray(0, size).toString('utf8').trim()
   } finally {
     closeSync(fd)

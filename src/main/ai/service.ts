@@ -1,3 +1,5 @@
+import { openCodeAuth, OPENCODE_API_BASE } from './opencode-auth'
+import { modelPreference, preferenceOptions } from '../../shared/ai/model-options'
 import { app } from 'electron'
 import { chatgptAuth, CHATGPT_API_BASE } from './chatgpt-auth'
 import { readFileSync, writeFileSync, renameSync, mkdirSync, rmSync } from 'fs'
@@ -269,8 +271,16 @@ export async function startTurn(requestId: string, input: AiSendInput): Promise<
   if (!settings.enabled) throw new Error('The AI assistant is turned off in Settings.')
   if (!settings.model) throw new Error('No model selected. Open Settings and press Fetch.')
   const apiKey =
-    settings.providerId === 'chatgpt' ? await chatgptAuth().accessToken() : getApiKey() || undefined
+    settings.providerId === 'chatgpt'
+      ? await chatgptAuth().accessToken()
+      : settings.providerId === 'opencode'
+        ? undefined
+        : getApiKey() || undefined
   if (settings.providerId === 'chatgpt') settings.baseUrl = CHATGPT_API_BASE
+  if (settings.providerId === 'opencode') {
+    await openCodeAuth().accessToken()
+    settings.baseUrl = OPENCODE_API_BASE
+  }
   if (PRESETS.find((preset) => preset.id === settings.providerId)?.keyRequired && !apiKey) {
     throw new Error('Add your API key in Settings before starting a chat.')
   }
@@ -322,6 +332,9 @@ export async function startTurn(requestId: string, input: AiSendInput): Promise<
     for await (const event of runTurn({
       sessionId: input.sessionId,
       providerId: settings.providerId,
+      modelOptions: preferenceOptions(
+        modelPreference(settings.modelPreferences, settings.providerId, settings.model)
+      ),
       baseUrl: settings.baseUrl,
       model: settings.model,
       apiKey,

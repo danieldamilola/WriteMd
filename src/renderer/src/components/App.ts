@@ -12,6 +12,7 @@ import type { VerticalTabBar } from './VerticalTabBar'
 import './RailFrame'
 import './Shell'
 import './Sidebar'
+import './GroupCard'
 import './Background'
 import './DocBar'
 import './Editor'
@@ -305,6 +306,7 @@ export class WriteMdApp extends LitElement {
   @state() private secondaryDirty = false
   @state() private conflict: ConflictInfo | null = null
   @state() private hContextMenu: HorizontalContextMenuState | null = null
+  @state() private groupCard: { id: string; anchor: HTMLElement } | null = null
   @state() private renamingGroupId: string | null = null
   private tabDrag = new TabDragController(this, 'x')
   private settingsStore = SettingsStore.getInstance()
@@ -469,6 +471,16 @@ export class WriteMdApp extends LitElement {
         <div
           class="h-group-pill"
           data-group-id=${g.id}
+          role="button"
+          tabindex="0"
+          aria-label=${g.label}
+          aria-expanded=${!g.collapsed}
+          @keydown=${(event: KeyboardEvent) => {
+            if (event.key !== 'Enter' && event.key !== ' ') return
+            if ((event.target as HTMLElement).tagName === 'INPUT') return
+            event.preventDefault()
+            this.fileState.toggleTabGroupCollapse(g.id)
+          }}
           @click=${() => {
             if (this.tabDrag.suppressClick) return
             if (this.renamingGroupId === g.id) return
@@ -521,11 +533,15 @@ export class WriteMdApp extends LitElement {
         </div>
         ${
           !g.collapsed
-            ? repeat(
+            ? html`${repeat(
+                this.tabGroups.filter((child) => child.parentId === g.id),
+                (child) => child.id,
+                (child) => this.renderHorizontalGroup(child)
+              )}${repeat(
                 memberTabs,
                 ({ t }) => t.id,
                 ({ t, i }) => this.renderHorizontalTabItem(t, i)
-              )
+              )}`
             : ''
         }
       </div>
@@ -652,6 +668,19 @@ export class WriteMdApp extends LitElement {
                     this.hContextMenu = null
                   })}
                   <div class="m-divider"></div>
+                  ${
+                    openGroup?.parentId
+                      ? html`<div
+                          class="m-item"
+                          @click=${() => {
+                            this.fileState.moveTabGroup(groupId, null)
+                            this.hContextMenu = null
+                          }}
+                        >
+                          ${menuIcon('external')}<span>Move to Space</span>
+                        </div>`
+                      : ''
+                  }
                   <div
                     class="m-item"
                     @click=${() => {
@@ -780,6 +809,11 @@ export class WriteMdApp extends LitElement {
   }
 
   protected updated(changed: PropertyValues): void {
+    if (
+      this.groupCard &&
+      (!this.verticalPanelCollapsed || this.showSettings || this.panelOrientation !== 'vertical')
+    )
+      this.groupCard = null
     this.classList.toggle('settings-open', this.showSettings)
     const strip = this.tabStrip
     if (strip) {
@@ -1182,18 +1216,12 @@ export class WriteMdApp extends LitElement {
     }
   }
 
-  /**
-   * A group icon in the collapsed strip opens the panel on that folder.
-   *
-   * The panel has to expand first, or the click lands on chrome that is not
-   * there yet, and a group saved shut is reopened so the folder you chose is
-   * actually the thing you see. The open document is left alone: the click
-   * asked for a folder, not for an edit to steal focus.
-   */
-  private handleOpenGroup = (e: CustomEvent<{ groupId: string }>): void => {
-    this.verticalPanelCollapsed = false
-    const group = (this.tabGroups ?? []).find((g) => g.id === e.detail.groupId)
-    if (group?.collapsed) this.fileState.toggleTabGroupCollapse(group.id)
+  /** Open a folder card beside its icon while the sidebar stays collapsed. */
+  private handleOpenGroup = (e: CustomEvent<{ groupId: string; anchor: HTMLElement }>): void => {
+    this.groupCard =
+      this.groupCard?.id === e.detail.groupId
+        ? null
+        : { id: e.detail.groupId, anchor: e.detail.anchor }
   }
 
   private async openFileDialog(): Promise<void> {
@@ -1262,7 +1290,7 @@ export class WriteMdApp extends LitElement {
                         )}
                         ${pinnedTabs.length > 0 ? html`<div class="h-pinned-divider"></div>` : ''}
                         ${repeat(
-                          this.tabGroups,
+                          this.tabGroups.filter((group) => !group.parentId),
                           (g) => g.id,
                           (g) => this.renderHorizontalGroup(g)
                         )}
@@ -1351,6 +1379,7 @@ export class WriteMdApp extends LitElement {
                   .collapsed=${this.verticalPanelCollapsed}
                   .welcome=${this.showWelcome}
                   .tabGroups=${this.tabGroups}
+                  .activeGroupId=${this.groupCard?.id ?? ''}
                   @new-file=${() => void this.fileState.newFile()}
                   @open-file=${() => void this.openFileDialog()}
                   @new-group=${this.handleCreateGroupVertical}
@@ -1461,6 +1490,19 @@ export class WriteMdApp extends LitElement {
             : ''
         }
         ${this.renderHorizontalContextMenu()}
+        ${
+          this.groupCard &&
+          this.verticalPanelCollapsed &&
+          !this.showSettings &&
+          this.panelOrientation === 'vertical'
+            ? html`<writemd-group-card
+                slot="overlay"
+                .groupId=${this.groupCard.id}
+                .anchor=${this.groupCard.anchor}
+                @group-card-dismiss=${() => (this.groupCard = null)}
+              ></writemd-group-card>`
+            : null
+        }
       </writemd-shell>
     `
   }

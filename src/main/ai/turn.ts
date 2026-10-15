@@ -1,4 +1,5 @@
 import { adapterFor } from './providers'
+import type { ModelOptions } from '../../shared/ai/model-options'
 import { NATIVE_TOOL_MARKUP_ERROR } from './providers/native-tool-markup'
 import {
   applyEdits,
@@ -37,6 +38,7 @@ import {
  */
 
 export interface RunTurnRequest {
+  modelOptions?: ModelOptions
   previewOnly?: boolean
   sessionId: string
   providerId: string
@@ -205,6 +207,9 @@ export async function* runTurn(request: RunTurnRequest): AsyncGenerator<TurnEven
         toolCount < MAX_TOOL_CALLS
       try {
         for await (const event of adapter.stream({
+          providerId: request.providerId,
+          modelOptions: request.modelOptions,
+          sessionId: request.sessionId,
           baseUrl: request.baseUrl,
           apiKey: request.apiKey,
           model: request.model,

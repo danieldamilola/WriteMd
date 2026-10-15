@@ -1,39 +1,46 @@
-# Privacy Policy
+# Privacy policy
 
-**Effective Date:** September 20, 2026
+**Last updated:** October 15, 2026
 
 WriteMd is built with a privacy-first, local-first architecture. This Privacy
 Policy explains how your data is handled when you use the WriteMd application.
-Everything is local unless you deliberately turn on the AI assistant, and then
-only what you send it leaves your machine.
+Writing and file management are local. AI requests, provider sign-in, model discovery,
+web search, and update checks use the network as described below.
 
-## 1. Local Data Storage
+## 1. Local data storage
 
-WriteMd is a local application. All of your notes, documents, and vault settings are stored exclusively on your local device (by default in `~/Documents/WriteMd Vault/`).
-We do not have access to your documents, and we do not synchronize, collect, or upload your personal data to any external servers.
+WriteMd stores notes, settings, and conversation history on your device. New notes use
+`~/Documents/WriteMd Vault/` by default; existing files save in their original locations.
+WriteMd does not provide cloud storage or synchronization. Content used in AI requests
+can leave your device as described below.
 
-## 2. Telemetry and Tracking
+## 2. Telemetry and tracking
 
-WriteMd does **not** include any telemetry, analytics tracking, or advertising trackers. What you write is completely private.
+WriteMd does **not** include telemetry, analytics tracking, or advertising trackers.
 
-## 3. The Optional AI Assistant
+## 3. The optional AI assistant
 
-WriteMd has an AI assistant you can turn on. It is **off by default** and does
-nothing until you turn it on and enter your own API key. We do not provide the
-model and do not proxy your requests.
+The assistant interface is enabled for new profiles and can be disabled in Settings.
+AI generation requires a configured provider and a request from you. You can use an
+API key, connect a ChatGPT or OpenCode account through browser sign-in, or use a local
+model server. WriteMd sends requests directly to the selected provider or local server.
 
 **What leaves your machine.** When you send a message, WriteMd sends to the
 endpoint you configured: your message, the document you have open, your current
-selection if there is one, and any files you explicitly referenced with `@` or
-attached. Your other open tabs are sent as file names only, never their contents.
-Chat history you configured to replay is included.
+selection as appropriate, referenced or attached files, and chat history configured for
+replay. A skill you select adds its Markdown instructions. Other open tabs can be listed
+by filename as context. Assistant tools can read additional files for your request, and
+those results can also be sent to the model. Choosing a local model does not prevent
+web search or update checks from using the network.
 
-**What does not leave your machine.** Your API key is stored encrypted with your
-operating system's keychain (Windows Credential Manager, macOS Keychain, or
-Linux Secret Service) in its own file, never in `config.json` and never readable
-by the app's interface. Files the assistant changes are written to your disk
-like any other save, and every change it makes can be undone from the assistant
-panel.
+**Credentials.** Saved API keys and account tokens use Electron's operating-system
+encryption support and are stored separately from `config.json`. Stored secrets are
+handled in the main process and are not returned to the interface. Credentials are sent
+to the provider when needed for authentication. When secure storage is unavailable,
+credentials work for the current app session without being saved in plaintext.
+
+Files the assistant changes are written to your disk. Recorded changes have undo
+controls in the assistant panel.
 
 **Who sees it.** Whoever operates the endpoint you chose. If you want your notes
 to stay on your machine, point the endpoint at a local provider such as Ollama or
@@ -45,11 +52,22 @@ work.
 user account can, when you ask it to. It works on files outside the vault too.
 Every file it changes is listed in the panel with its own undo button.
 
-## 4. Updates
+## 4. Provider sign-in and web search
 
-The application occasionally checks GitHub for software updates. This request only sends basic information required to check for new releases (such as your current application version and OS) and does not transmit any personal data. It can be disabled in Settings.
+Browser sign-in, token refresh, and model discovery contact the selected provider.
+Account information and authentication are handled by that provider under its own policies.
 
-## 5. Changes to this Policy
+The assistant's web search tool sends a query to DuckDuckGo and can return result titles,
+links, and snippets to the model. Queries can include information from your request.
+The search tool does not fetch the linked result pages.
+
+## 5. Updates
+
+Update checks request release metadata from GitHub, and update downloads fetch the
+release files. These requests do not upload your notes. Automatic checks can be
+disabled in Settings.
+
+## 6. Changes to this policy
 
 If we add new features that affect how data is handled, we will update this Privacy Policy.
 

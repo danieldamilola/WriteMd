@@ -351,7 +351,20 @@ export class VerticalTabBar extends LitElement {
       <div class="tab-group-container" data-group-id=${group.id}>
         <div
           class="group-header"
+          role="button"
+          tabindex="0"
+          aria-label=${group.label}
+          aria-expanded=${!group.collapsed}
           data-group-id=${group.id}
+          @keydown=${(event: KeyboardEvent) => {
+            if (
+              event.target === event.currentTarget &&
+              (event.key === 'Enter' || event.key === ' ')
+            ) {
+              event.preventDefault()
+              this.fileState.toggleTabGroupCollapse(group.id)
+            }
+          }}
           @click=${() => {
             if (this.tabDrag.suppressClick) return
             if (this.renamingGroupId === group.id) return
@@ -403,6 +416,15 @@ export class VerticalTabBar extends LitElement {
           }
         </div>
         <div class="group-tabs ${group.collapsed ? 'collapsed' : ''}">
+          ${
+            !group.collapsed
+              ? repeat(
+                  this.tabGroups.filter((child) => child.parentId === group.id),
+                  (child) => child.id,
+                  (child) => this.renderGroup(child)
+                )
+              : ''
+          }
           ${repeat(
             groupTabs,
             ({ tab }) => tab.id,
@@ -535,6 +557,19 @@ export class VerticalTabBar extends LitElement {
                     this.closeContextMenu()
                   })}
                   <div class="m-divider"></div>
+                  ${
+                    openGroup?.parentId
+                      ? html`<div
+                          class="m-item"
+                          @click=${() => {
+                            this.fileState.moveTabGroup(groupId, null)
+                            this.closeContextMenu()
+                          }}
+                        >
+                          ${menuIcon('external')}<span>Move to Space</span>
+                        </div>`
+                      : ''
+                  }
                   <div
                     class="m-item"
                     @click=${() => {
@@ -589,7 +624,7 @@ export class VerticalTabBar extends LitElement {
             ? html`
                 <div class="section-label"><span>Space</span></div>
                 ${repeat(
-                  currentGroups,
+                  currentGroups.filter((group) => !group.parentId),
                   (group) => group.id,
                   (group) => this.renderGroup(group)
                 )}
