@@ -1,9 +1,10 @@
 # WriteMd implementation roadmap
 
-The current release baseline is v0.1.0. Release numbering restarted on 2026-10-13 without removing existing features or user data. [CHANGELOG.md](../CHANGELOG.md) contains the active release notes. [The archived roadmap](legacy-phases.md) preserves earlier implementation and verification records.
+The current release baseline is v0.2.0. Release numbering restarted at v0.1.0 on 2026-10-13 without removing existing features or user data. [CHANGELOG.md](../CHANGELOG.md) contains the active release notes. [The archived roadmap](legacy-phases.md) preserves earlier implementation and verification records.
 
 ## Current work
 
+- [x] Review and integrate dependency PRs #24 through #28 with workspace PR #30. Resolve the TypeScript 7 tooling compatibility issue, retain jsdom 30.1.1 after focus regressions, release account listeners when Settings closes, restore editor focus, and prepare the v0.2.0 package and dated changelog.
 - [x] Reserve `/` suggestions for installed personal skills and `@` for vault files in both composers. Accept leading whitespace for skill commands, explain empty or unavailable discovery without listing notes, and discard stale results when changing triggers.
 - [x] Rewrite the README around current editor, workspace, AI, privacy, and source-build behavior. Remove obsolete screenshots pending the user's replacements, correct linked skill and privacy guidance, and validate local links and commands against the repository.
 - [x] Open folder cards from collapsed Space icons with nested navigation, search, keyboard support, and New note/New folder actions. Keep the sidebar collapsed and choose unused note filenames.
@@ -25,9 +26,11 @@ The current release baseline is v0.1.0. Release numbering restarted on 2026-10-1
 - [x] Committed side-panel edits, accepted external proposals, and undo notify open documents directly. Watch parent directories so successive atomic replacements remain visible. Refresh clean tabs and split panes without stealing focus; preserve dirty buffers and conflict review.
 - [x] Reset package metadata, active release notes, About/What's new checks, README, and product documentation to v0.1.0. Preserve old development records as archives. Packaging must derive its version from package.json.
 
-Acceptance requires `pnpm typecheck`, related regression tests, and Electron verification. No commit, push, installer publication, or remote release deletion is part of this change.
+Acceptance requires `pnpm typecheck`, related regression tests, and Electron verification. Publishing releases requires an explicit request.
 
 ## Verification
+
+Release preparation verified on 2026-10-16: all 94 unit-test files passed locally and in Windows/Linux CI, together with typecheck, lint, formatting, and a production build. CI passed 212 Electron checks with four opt-in live-provider checks skipped. This includes the generated temporary stress vault, Settings focus restoration, account subscriptions, both AI composers, nested groups, folder cards, export, updates, and document operations. All six PRs merged into main through PR #30. TypeScript 7 uses Microsoft's documented TypeScript 6 API alias for ESLint; jsdom 30.1.2 remains deferred because it breaks the shadow-DOM focus checks. Screenshot: [focus restored after Settings closes](../artifacts/ui-review/settings-return-focus.png).
 
 Slash and file suggestions verified on 2026-10-15: all 72 focused unit tests and three Electron checks passed. Both the chat panel and floating bar list only installed skills after `/`, including after leading whitespace, and only files after `@`. Empty lists, failed discovery, unmatched queries, and ordinary slash paths stay out of the file picker. The existing skill delivery check also passed. Typecheck, production build, related lint, formatting, and whitespace checks passed. The empty message reuses the existing menu surface and theme tokens; the Figma reference has no AI picker design. Screenshots: [panel skills](../artifacts/ui-review/ai-panel-slash-skills.png), [panel files](../artifacts/ui-review/ai-panel-at-files.png), [floating skills](../artifacts/ui-review/ai-floating-slash-skills.png), and [empty skills](../artifacts/ui-review/ai-floating-slash-empty.png).
 
