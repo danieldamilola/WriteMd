@@ -181,12 +181,16 @@ describe('statOrNull', () => {
 })
 
 describe('pathKey', () => {
-  it('folds case on Windows so two spellings are one file', () => {
-    const lower = pathKey('C:\\Dev\\Notes\\Idea.md')
-    const upper = pathKey('C:\\DEV\\NOTES\\IDEA.MD')
-    expect(lower).toBe(upper)
-    expect(pathKeyEqual('C:\\Dev\\a.md', 'C:\\dev\\A.MD')).toBe(true)
-  })
+  it(
+    'folds case on Windows so two spellings are one file',
+    { skip: process.platform !== 'win32' },
+    () => {
+      const lower = pathKey('C:\\Dev\\Notes\\Idea.md')
+      const upper = pathKey('C:\\DEV\\NOTES\\IDEA.MD')
+      expect(lower).toBe(upper)
+      expect(pathKeyEqual('C:\\Dev\\a.md', 'C:\\dev\\A.MD')).toBe(true)
+    }
+  )
 
   it('keeps case on POSIX, where it is meaningful', { skip: process.platform === 'win32' }, () => {
     expect(pathKey('/home/me/Idea.md')).not.toBe(pathKey('/home/me/idea.md'))

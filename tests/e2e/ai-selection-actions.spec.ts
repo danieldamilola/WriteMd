@@ -176,14 +176,16 @@ test('the text menu explains a word and summarizes a split selection through the
     const summary = JSON.stringify(requests[1].messages)
     expect(summary).toContain(paragraph)
     expect(summary.toLowerCase()).toContain('summar')
-    for (const excluded of [
-      'SECRET_PRIMARY_UNSELECTED',
-      'SECRET_SECONDARY_UNSELECTED',
-      'MOCK_ANSWER_ONLY'
-    ]) {
+    for (const excluded of ['SECRET_PRIMARY_UNSELECTED', 'SECRET_SECONDARY_UNSELECTED']) {
       expect(summary).not.toContain(excluded)
     }
-    expect(requests[1].messages.filter((message) => message.role === 'user')).toHaveLength(1)
+    // Both surfaces preserve the conversation. Only the current selection is
+    // attached to the new user message; the earlier answer remains history.
+    const userMessages = requests[1].messages.filter((message) => message.role === 'user')
+    expect(userMessages).toHaveLength(2)
+    expect(JSON.stringify(userMessages.at(-1))).toContain(paragraph)
+    expect(JSON.stringify(userMessages.at(-1))).not.toContain('MOCK_ANSWER_ONLY')
+    expect(requests[1].messages).toContainEqual({ role: 'assistant', content: 'MOCK_ANSWER_ONLY' })
   } finally {
     await app.close()
     server.closeAllConnections()

@@ -46,7 +46,9 @@ test.describe('Pane menus and sidebar updates', () => {
       },
       join(fixture.vault, 'PRD.md')
     )
-    await expect(page.locator('writemd-doc-bar[secondary]')).toBeVisible()
+    await expect(
+      page.locator('writemd-doc-bar[secondary] [aria-label="More Options"]')
+    ).toBeVisible()
   }
   async function secondaryAction(id: string): Promise<void> {
     const bar = page.locator('writemd-doc-bar[secondary]')

@@ -32,6 +32,7 @@ import { COMMANDS, bindingFromEvent, bindingsEqual, effectiveBindings } from '..
 import { initAutoHideScrollbars } from '../utils/auto-hide-scrollbars'
 import { showSecondaryDocument } from '../utils/secondary-document'
 import { sameFilePath } from '../utils/paths'
+import { deepActiveElement } from '../utils/links'
 import type { QuickAiContext } from './ai/quick-context'
 import { quickAiReplacement } from './ai/quick-context'
 import type { PreviewChangeView } from './ai/types'
@@ -272,6 +273,7 @@ export class WriteMdApp extends LitElement {
 
   @state() private showWelcome = true
   @state() private showSettings = false
+  private settingsFocusReturn: HTMLElement | null = null
   // Which Settings tab to land on, so a deep link can open the exact section
   // it wants rather than leaving the user to find it.
   @state() private settingsTab = 'general'
@@ -722,7 +724,7 @@ export class WriteMdApp extends LitElement {
     this.unsubscribeSettingsOpen = on('settings:open', ({ tab }) => {
       this.settingsTab = tab ?? 'general'
       this.closeQuickAiForDialog()
-      this.showSettings = true
+      this.openSettings()
     })
     this.unsubscribeFileOpen =
       api()?.onFileOpenExternal?.((path: string) => {
@@ -977,7 +979,7 @@ export class WriteMdApp extends LitElement {
         break
       case 'open-settings':
         this.closeQuickAiForDialog()
-        this.showSettings = true
+        this.openSettings()
         break
       case 'find':
         emit('find:open', { mode: 'find' })
@@ -1035,6 +1037,24 @@ export class WriteMdApp extends LitElement {
    */
   private toggleVerticalPanel = (): void => {
     this.verticalPanelCollapsed = !this.verticalPanelCollapsed
+  }
+
+  private openSettings = (): void => {
+    if (!this.showSettings) this.settingsFocusReturn = deepActiveElement() as HTMLElement | null
+    this.showSettings = true
+  }
+
+  private closeSettings = (): void => {
+    const target = this.settingsFocusReturn
+    this.settingsFocusReturn = null
+    this.showSettings = false
+    // The editor is inert and hidden while Settings is open. Restore focus
+    // after the shell has removed those states, rather than during teardown.
+    void this.updateComplete.then(() => {
+      requestAnimationFrame(() => {
+        if (!this.showSettings && this.isConnected && target?.isConnected) target.focus()
+      })
+    })
   }
 
   private toggleQuickAi = (): void => {
@@ -1387,7 +1407,7 @@ export class WriteMdApp extends LitElement {
                   @toggle-panel=${this.toggleVerticalPanel}
                   @toggle-ai=${this.toggleQuickAi}
                   @open-group=${this.handleOpenGroup}
-                  @open-settings=${() => (this.showSettings = true)}
+                  @open-settings=${this.openSettings}
                   >${
                     this.showWelcome
                       ? ''
@@ -1418,7 +1438,7 @@ export class WriteMdApp extends LitElement {
                     .vertical=${this.panelOrientation === 'vertical'}
                     @new-file=${() => void this.fileState.newFile()}
                     @open-file=${() => void this.openFileDialog()}
-                    @open-settings=${() => (this.showSettings = true)}
+                    @open-settings=${this.openSettings}
                     @open-recent=${(e: CustomEvent<{ path: string }>) =>
                       void this.fileState.openFile(e.detail.path)}
                   ></writemd-welcome-screen>`
@@ -1468,7 +1488,7 @@ export class WriteMdApp extends LitElement {
                 .embedded=${true}
                 @settings-section-change=${(event: CustomEvent<{ tab: string }>) => (this.settingsTab = event.detail.tab)}
                 .initialTab=${this.settingsTab}
-                @close=${() => (this.showSettings = false)}
+                @close=${this.closeSettings}
               ></writemd-settings-modal>`
             : ''
         }

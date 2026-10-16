@@ -189,7 +189,7 @@ export function chromeIcon(name: string, size = DEFAULT_ICON_SIZE): TemplateResu
     // Only bundled, trusted catalog data reaches unsafeSVG; no user content.
     const rendered = glyphs[name as keyof typeof glyphs]
       .map(
-        ([tag, attributes]) =>
+        ([tag, attributes]: readonly [string, Readonly<Record<string, string | number>>]) =>
           `<${tag} ${Object.entries(attributes)
             .filter(([key]) => key !== 'key')
             .map(([key, value]) => `${key}="${escape(String(value))}"`)

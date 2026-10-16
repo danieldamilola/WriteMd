@@ -995,20 +995,7 @@ export class SettingsModal extends LitElement {
     this.aiModelRequest++
     this.aiSkillsRequest++
     this.settingsSubscriptions.forEach((unsubscribe) => unsubscribe())
-    this.settingsSubscriptions = [
-      this.openCodeState.subscribe(() => {
-        const before = this.aiOpenCodeState
-        this.aiOpenCodeState = this.openCodeState.state()
-        if (
-          this.aiProviderId === 'opencode' &&
-          (before.connectionId !== this.aiOpenCodeState.connectionId ||
-            before.connected !== this.aiOpenCodeState.connected)
-        ) {
-          this.invalidateAiModels()
-          if (this.aiOpenCodeState.connected) void this.fetchAiModels()
-        }
-      })
-    ]
+    this.settingsSubscriptions = []
     window.removeEventListener('keydown', this.handleKeyDown, true)
     this.updaterUnsubs.forEach((fn) => fn())
     this.updaterUnsubs = []

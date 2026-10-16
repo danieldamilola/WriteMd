@@ -108,7 +108,7 @@ test('chat switches provider models, restores history, and fits workspace themes
     const sendControl = dock.getByLabel('Send message')
     expect(
       await sendControl.evaluate((element) => parseFloat(getComputedStyle(element).borderRadius))
-    ).toBeGreaterThanOrEqual(14)
+    ).toBe(4)
     await composer.fill(Array.from({ length: 12 }, (_, index) => `Draft line ${index}`).join('\n'))
     const grownPrompt = await composer.boundingBox()
     expect(grownPrompt!.height).toBeGreaterThan(initialPrompt!.height)

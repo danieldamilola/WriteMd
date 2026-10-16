@@ -25,11 +25,11 @@ test('whats new reads the changelog', async () => {
   // The host has no box of its own, so the dialog is asserted from inside it.
   const dialog = page.locator('writemd-whats-new .dialog')
   await expect(dialog).toBeVisible()
-  await expect(dialog.locator('h2')).toContainText('v0.1.0')
+  await expect(dialog.locator('h2')).toContainText('v0.2.0')
   const notes = dialog.locator('.notes')
   await expect(notes.locator('h3').first()).toHaveText('Added')
-  await expect(notes).toContainText('Open in floating bar')
-  await expect(notes).toContainText('atomic save immediately')
+  await expect(notes).toContainText('OpenCode browser sign-in')
+  await expect(notes).toContainText('Slash suggestions show only installed personal skills')
   // The heading is stripped, and no other version leaks in.
   await expect(notes).not.toContainText('1.3.0')
   await expect(notes.locator('h2')).toHaveCount(0)

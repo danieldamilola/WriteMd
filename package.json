@@ -1,6 +1,6 @@
 {
   "name": "writemd",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "A frictionless Markdown editor. Files stay on your machine.",
   "main": "./out/main/index.js",
   "author": "danieldamilola",
@@ -76,14 +76,15 @@
     "@types/katex": "^0.16.7",
     "@types/markdown-it": "^14.2.0",
     "@types/node": "^26.6.5",
+    "@typescript/native": "npm:typescript@~7.0.2",
     "electron": "^44.7.0",
     "electron-builder": "^26.0.12",
     "electron-vite": "^5.0.0",
     "eslint": "^10.12.0",
-    "jsdom": "^30.1.2",
+    "jsdom": "30.1.1",
     "playwright": "^1.64.0",
     "prettier": "^3.9.9",
-    "typescript": "~7.0.2",
+    "typescript": "npm:@typescript/typescript6@^6.0.2",
     "vite": "^7.2.6",
     "vitest": "^5.0.3"
   }

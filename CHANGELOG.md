@@ -6,6 +6,8 @@ Release numbering restarts at v0.1.0. Earlier development notes remain in [the a
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-10-16
+
 ### Added
 
 - Collapsed Space icons open searchable folder cards with nested folders, notes, New note, and New folder while the sidebar stays collapsed.
@@ -18,6 +20,8 @@ Release numbering restarts at v0.1.0. Earlier development notes remain in [the a
 
 ### Fixed
 
+- Closing AI Settings releases account listeners, preventing closed settings pages from fetching models after account changes.
+- Closing Settings restores keyboard focus to the editor or control that opened it, after the workspace becomes active again.
 - Slash suggestions show only installed personal skills, including after leading spaces or newlines. Empty, unavailable, and failed skill discovery no longer fall back to vault files; file references use `@`.
 - New notes choose an unused filename instead of selecting another open untitled note or replacing an existing default-named file.
 - Escape closes a model-options drawer in Settings before closing the Settings page.
@@ -28,6 +32,7 @@ Release numbering restarts at v0.1.0. Earlier development notes remain in [the a
 
 ### Changed
 
+- Updated Electron, CodeMirror, Mermaid, Hugeicons, TypeScript, and test tooling. Icon rendering accepts the updated catalogue's readonly data.
 - Rewrote the README for the current editor, workspace, AI connections, skills, privacy, and source-build workflow. Removed obsolete screenshots while replacements are prepared, and corrected the linked privacy and skill-size documentation.
 - The compact, single-row sidebar update card follows MonoCode's wording: Update to the target version, Downloading with progress, or Restart to update. Upcoming release fixes open on hover or keyboard focus, and the details and Skip action remain accessible while moving into the card.
 - Folder cards, update details, and AI option drawers share the existing menu spacing, surfaces, borders, and dismissal behavior.

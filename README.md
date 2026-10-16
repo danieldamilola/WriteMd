@@ -17,7 +17,7 @@ Writing and file management work offline without a WriteMd account. There is no 
 
 ## Project status
 
-WriteMd is in active development. No installer is currently published; run it from source using the instructions below. Future downloads will appear on the [Releases page](https://github.com/danieldamilola/WriteMd/releases).
+Download the [Windows installer](https://github.com/danieldamilola/WriteMd/releases/latest) from Releases. WriteMd is in active development. Android is not available yet; other platforms can be built from source using the instructions below.
 
 Desktop packaging is configured for Windows, macOS, and Linux. An Android version is not available yet.
 

@@ -778,8 +778,17 @@ describe('findLatestEntry', () => {
     expect(findLatestEntry([], path)).toBeUndefined()
   })
 
-  it('matches one file across case on Windows', () => {
+  it('matches one file across case on Windows', { skip: process.platform !== 'win32' }, () => {
     const entries = [entry('live', path, T0, null)]
     expect(findLatestEntry(entries, path.toUpperCase())?.id).toBe('live')
   })
+
+  it(
+    'keeps differently cased files separate on POSIX',
+    { skip: process.platform === 'win32' },
+    () => {
+      const entries = [entry('live', path, T0, null)]
+      expect(findLatestEntry(entries, path.toUpperCase())).toBeUndefined()
+    }
+  )
 })

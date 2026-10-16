@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { SettingsModal } from '../src/renderer/src/components/SettingsModal'
 import '../src/renderer/src/components/SettingsModal'
 import { SettingsStore } from '../src/renderer/src/state/settings'
+import { OpenCodeState } from '../src/renderer/src/state/opencode'
 
 // Provider and endpoint races do not depend on the dropdown implementation.
 // Its native form internals are exercised in the Electron tests.
@@ -89,6 +90,26 @@ describe('AI model discovery in Settings', () => {
     expect(
       element.shadowRoot!.querySelector<HTMLButtonElement>('[aria-label="Fetch models"]')!.disabled
     ).toBe(false)
+  })
+
+  it('releases account subscriptions when closed and subscribes once when reopened', async () => {
+    const unsubscribe = vi.fn()
+    const subscribe = vi
+      .spyOn(OpenCodeState.getInstance(), 'subscribe')
+      .mockReturnValue(unsubscribe)
+    const element = await mount()
+    const initial = subscribe.mock.calls.length
+    expect(initial).toBeGreaterThan(0)
+    element.remove()
+    expect(unsubscribe).toHaveBeenCalledTimes(initial)
+    expect(subscribe).toHaveBeenCalledTimes(initial)
+    document.body.append(element)
+    await settle(element)
+    const reopened = subscribe.mock.calls.length
+    expect(reopened).toBeGreaterThan(initial)
+    element.remove()
+    expect(unsubscribe).toHaveBeenCalledTimes(reopened)
+    expect(subscribe).toHaveBeenCalledTimes(reopened)
   })
 
   it('toggles automatic acceptance and reflects saved changes', async () => {

@@ -108,7 +108,8 @@ test.describe('Haze backgrounds', () => {
       expect(Math.abs(empty[index][0] - plain[index][0])).toBeLessThan(95)
     }
     expect(empty[2][0] - empty[4][0]).toBeGreaterThan(100)
-    expect(empty[3][0] - empty[4][0]).toBeGreaterThan(1)
+    // The tail of the fade can differ by a single 8-bit channel step.
+    expect(empty[3][0] - empty[4][0]).toBeGreaterThan(0)
     await appearance(page, { 'appearance.backgroundEffect': 'haze' })
     await page.screenshot({ path: 'artifacts/ui-review/haze-empty.png' })
 

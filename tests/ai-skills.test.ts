@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { existsSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from 'fs'
+import { existsSync, mkdirSync, readFileSync, symlinkSync, unlinkSync, writeFileSync } from 'fs'
 import { join } from 'path'
 import { cleanupTempRoot, makeTempRoot } from './helpers/temp-root'
 import { ensureSkillsFolder, listSkills, requestedSkill, skillsFolder } from '../src/main/ai/skills'
@@ -66,6 +66,7 @@ describe('personal AI skills', () => {
   })
   it('finds newly added capitalized skill files by their frontmatter name', () => {
     const folder = ensureSkillsFolder(root)
+    unlinkSync(join(folder, 'Unslop.md'))
     writeFileSync(
       join(folder, 'Unslop.MD'),
       '---\nname: unslop\ndescription: Keep writing direct.\n---\nAvoid filler.'

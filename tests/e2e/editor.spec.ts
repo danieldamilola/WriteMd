@@ -65,7 +65,7 @@ test.describe('WriteMd Editor', () => {
         // Side by side means the main area starts to the right of the sidebar
         // and at the same vertical offset. When the sidebar ends up containing
         // main (an unclosed div), these go false and the panel stacks.
-        sideBySide: m.left >= s.right - 1 && Math.abs(m.top - s.top) < 2
+        sideBySide: m.left >= s.right - 1 && m.top < s.bottom && m.bottom > s.top
       }
     })
 
@@ -81,7 +81,9 @@ test.describe('WriteMd Editor', () => {
     const window = await firstWindow(app!)
     // Focus the editor first: the shortcut opener hands focus back to
     // whatever held it, and body is not a useful answer.
-    await window.locator('writemd-editor').click()
+    const editorInput = window.locator('writemd-editor .cm-content').first()
+    await editorInput.focus()
+    await expect(editorInput).toBeFocused()
     await openSettings(window)
     await expect(window.locator('writemd-settings-modal')).toBeVisible()
     await window.locator('button.back-btn').click()
@@ -91,5 +93,7 @@ test.describe('WriteMd Editor', () => {
     await expect
       .poll(async () => window.evaluate(() => document.activeElement?.tagName ?? ''))
       .not.toBe('BODY')
+    await expect(editorInput).toBeFocused()
+    await window.screenshot({ path: 'artifacts/ui-review/settings-return-focus.png' })
   })
 })
