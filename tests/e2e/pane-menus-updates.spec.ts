@@ -46,7 +46,9 @@ test.describe('Pane menus and sidebar updates', () => {
       },
       join(fixture.vault, 'PRD.md')
     )
-    await expect(page.locator('writemd-doc-bar[secondary]')).toBeVisible()
+    await expect(
+      page.locator('writemd-doc-bar[secondary] [aria-label="More Options"]')
+    ).toBeVisible()
   }
   async function secondaryAction(id: string): Promise<void> {
     const bar = page.locator('writemd-doc-bar[secondary]')
@@ -132,9 +134,13 @@ test.describe('Pane menus and sidebar updates', () => {
     await page.locator('writemd-doc-bar[secondary] [aria-label="More Options"]').click()
     await page.screenshot({ path: 'artifacts/ui-review/secondary-document-menu.png' })
     await page.keyboard.press('Escape')
-    await page.locator('writemd-doc-bar[secondary] [aria-label="Close split pane"]').click()
+    // The close button lives in the surface tab strip now, not in the document
+    // bar: the strip owns the pane's chrome and the bar only its own controls,
+    // so the pane has one header row instead of two stacked ones and two ✕.
+    await page.locator('.surface-tabs [aria-label="Close split pane"]').click()
     await expect(page.locator('writemd-doc-bar[secondary]')).toHaveCount(0)
-    await expect(page.locator('writemd-doc-bar input[aria-label="Document title"]')).toHaveValue(
+    // Closing the split pane hands the title back to the primary document.
+    await expect(page.locator('writemd-panel[slot="primary"] .cm-inline-title')).toHaveValue(
       'README'
     )
   })
@@ -142,20 +148,24 @@ test.describe('Pane menus and sidebar updates', () => {
   test('secondary Rename and Find target the pane while primary stays unchanged', async () => {
     await openSecondary()
     await secondaryAction('rename')
-    const input = page.locator('writemd-doc-bar[secondary] input.title-input')
+    // The title moved into the editor, so Rename focuses it there.
+    const input = page.locator('writemd-panel[slot="auxiliary"] .cm-inline-title')
     await expect(input).toBeFocused()
     await input.fill('Renamed pane')
     await input.press('Enter')
     await expect(input).toHaveValue('Renamed pane')
-    await expect(page.locator('writemd-doc-bar[secondary] .sub-header-left')).toContainText(
-      'Renamed pane.md'
-    )
+    // The path lives in the pane's footer now, so the rename has to retarget
+    // the secondary pane's footer rather than the header.
+    await expect(
+      page.locator('writemd-panel[slot="auxiliary"] writemd-info-pill .path')
+    ).toContainText('Renamed pane.md')
     await secondaryAction('find')
     const find = page.locator('writemd-find-panel')
     await find.locator('.find-input').fill('pane-only-target')
     await expect(find.locator('.match-count')).toContainText('of 1')
     await page.keyboard.press('Escape')
-    await expect(page.locator('writemd-doc-bar input[aria-label="Document title"]')).toHaveValue(
+    // Renaming the secondary pane must leave the primary title alone.
+    await expect(page.locator('writemd-panel[slot="primary"] .cm-inline-title')).toHaveValue(
       'README'
     )
   })
@@ -246,7 +256,7 @@ test.describe('Pane menus and sidebar updates', () => {
     await expect(page.locator('writemd-doc-bar[secondary] .note-menu')).toBeVisible()
   })
 
-  test('pinned separator is short and thin, and disappears after unpinning', async () => {
+  test('no rule separates pinned from unpinned documents', async () => {
     await page.evaluate(
       (path) => (document.querySelector('writemd-app') as unknown as Host).fileState.openFile(path),
       join(fixture.vault, 'PRD.md')
@@ -254,19 +264,37 @@ test.describe('Pane menus and sidebar updates', () => {
     await page.evaluate(() =>
       (document.querySelector('writemd-app') as unknown as Host).fileState.pinTab(0)
     )
+    // Pinned notes are set apart by their own row order, not by a drawn line.
     const separator = page.locator('writemd-vertical-tab-bar .pinned-divider')
-    await expect(separator).toBeVisible()
-    const bounds = await separator.boundingBox()
-    expect(bounds!.height).toBe(1)
-    expect(bounds!.width).toBe(48)
-    await page.screenshot({ path: 'artifacts/ui-review/pinned-tab-separator.png' })
-    await page.evaluate(() =>
-      (document.querySelector('writemd-app') as unknown as Host).fileState.unpinTab(0)
-    )
     await expect(separator).toHaveCount(0)
+    await expect(page.locator('writemd-vertical-tab-bar .pinned-section')).toBeVisible()
+    await page.screenshot({ path: 'artifacts/ui-review/pinned-tab-separator.png' })
   })
 
-  test('sidebar update progresses above AI Assistant and moves back to the toolbar in horizontal mode', async () => {
+  test('the sidebar New group button creates a group and names it in one click', async () => {
+    const tabs = page.locator('writemd-vertical-tab-bar writemd-tab')
+    await expect(tabs).toHaveCount(1)
+    await page.screenshot({ path: 'artifacts/ui-review/sidebar-actions.png' })
+
+    await page.locator('writemd-sidebar writemd-icon-button[title="New group"]').click()
+    await expect(page.locator('writemd-vertical-tab-bar .tab-group-container')).toHaveCount(1)
+    // The label is focused and pre-selected, so typing replaces the default.
+    const input = page.locator('writemd-vertical-tab-bar .group-rename-input')
+    await expect(input).toBeFocused()
+    await page.keyboard.type('Reading')
+    await page.keyboard.press('Enter')
+    await expect(page.locator('writemd-vertical-tab-bar .group-label')).toHaveText('Reading')
+    // The tab stays where it is until it is dragged in.
+    await expect(tabs).toHaveCount(1)
+    const groups = await page.evaluate(
+      () =>
+        (document.querySelector('writemd-app') as unknown as Host).fileState.getState().tabGroups
+    )
+    expect(groups?.map((g) => g.label)).toEqual(['Reading'])
+    await page.screenshot({ path: 'artifacts/ui-review/sidebar-new-group.png' })
+  })
+
+  test('sidebar update progresses above Settings and moves back to the toolbar in horizontal mode', async () => {
     await app.evaluate(({ BrowserWindow, ipcMain }) => {
       const window = BrowserWindow.getAllWindows()[0] as unknown as TestWindow
       window.calls = { download: 0, install: 0 }
@@ -283,19 +311,22 @@ test.describe('Pane menus and sidebar updates', () => {
     await update('available')
     const control = page.locator('writemd-sidebar writemd-update-button')
     const button = control.locator('.sidebar-action')
-    await expect(button).toHaveText('Update available')
+    await expect(button).toContainText('Update to v1.9.9')
     await expect(page.locator('writemd-top-bar writemd-update-button')).toHaveCount(0)
-    const ai = await page
-      .locator('writemd-sidebar .footer button', { hasText: 'AI Assistant' })
+    // Settings is icon-only in the sidebar footer, so it is found by its
+    // accessible name rather than by its text.
+    const settings = await page
+      .locator('writemd-sidebar')
+      .getByRole('button', { name: 'Settings', exact: true })
       .boundingBox()
     const bounds = await button.boundingBox()
-    expect(bounds!.y + bounds!.height).toBeLessThanOrEqual(ai!.y)
+    expect(bounds!.y + bounds!.height).toBeLessThanOrEqual(settings!.y)
     await button.click()
     await update('downloading', 46)
-    await expect(button).toHaveText('Downloading 46%')
+    await expect(button).toContainText('Downloading 46%')
     await expect(button).toBeDisabled()
     await update('downloaded')
-    await expect(button).toHaveText('Restart to update')
+    await expect(button).toContainText('Restart to update')
     await page.screenshot({ path: 'artifacts/ui-review/sidebar-update-ready.png' })
     await button.click()
     expect(
@@ -316,7 +347,7 @@ test.describe('Pane menus and sidebar updates', () => {
         'vertical'
       )
     )
-    await expect(button).toHaveText('Restart to update')
+    await expect(button).toContainText('Restart to update')
     await update('idle')
     await expect(button).toHaveCount(0)
   })

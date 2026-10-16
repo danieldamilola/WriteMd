@@ -22,6 +22,7 @@ export function applySettingsToDOM(store: SettingsStore): void {
       typeof window.matchMedia === 'function' &&
       window.matchMedia('(prefers-color-scheme: light)').matches)
   root.dataset.colorScheme = light ? 'light' : 'dark'
+  root.style.colorScheme = light ? 'light' : 'dark'
   root.style.setProperty('--theme-hue', String(store.get('appearance.themeHue', 240)))
   root.style.setProperty('--theme-saturation', `${store.get('appearance.themeSaturation', 0)}%`)
   root.style.setProperty(
@@ -148,8 +149,11 @@ export class SettingsStore {
       target = target[k] as Record<string, unknown>
     }
     target[keys[keys.length - 1]] = value
-    this.notify(key, value)
+    // Apply to the DOM before notifying, the same order setMany uses. A
+    // subscriber that reads a resolved value such as data-colorScheme would
+    // otherwise see the previous theme.
     applySettingsToDOM(this)
+    this.notify(key, value)
     this.persist()
   }
 

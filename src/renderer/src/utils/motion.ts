@@ -104,6 +104,12 @@ export const EASING = {
   inOut: 'cubic-bezier(0.4, 0, 0.2, 1)'
 } as const
 
+/** Shared sidebar and split allocation timing. Motion uses seconds. */
+export const PANEL_RESIZE_MOTION = {
+  duration: 0.18,
+  ease: [0.22, 1, 0.36, 1] as [number, number, number, number]
+}
+
 export interface MotionOptions {
   duration?: number
   easing?: string
@@ -131,7 +137,10 @@ export function animate(
   if (!el) return Promise.resolve()
   activeAnimations.get(el)?.cancel()
   const { duration = DURATION.base, easing = EASING.out, delay = 0, fill = false } = options
-  if (reducedMotionNow()) {
+  // jsdom has no Web Animations, and a component that closes itself through this
+  // engine would then throw where it used to work. One frame, and the caller's
+  // state change still happens.
+  if (reducedMotionNow() || typeof el.animate !== 'function') {
     return new Promise((resolve) => requestAnimationFrame(() => resolve()))
   }
   const animation = el.animate(keyframes, {

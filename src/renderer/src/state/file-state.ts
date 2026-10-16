@@ -2,9 +2,72 @@ import { SettingsStore } from './settings'
 import { applyConflictReview, applyConflictReload, applyConflictDismiss } from './conflict'
 import { api } from '../api'
 import { showConfirm } from '../services/confirm'
-import { sameFilePath } from '../utils/paths'
+import { sameFilePath, filePathKey, isInsideDir } from '../utils/paths'
 import { placeTab, type TabDestination } from './tab-order'
-import type { FileWriteResult } from '../../../shared/electron-api'
+import { isGroupIcon } from './group-icons'
+import type {
+  FileChangeSnapshot,
+  FileWriteResult,
+  VaultTreeNode
+} from '../../../shared/electron-api'
+
+/**
+ * Drop anything a group no longer understands.
+ *
+ * Groups persisted before icon presets carry a `color`, and a profile could
+ * carry any string at all if a preset was removed later. Both are discarded
+ * here rather than at render, so the row only ever sees an icon it can draw.
+ */
+export function normalizeTabGroups(groups: unknown): TabGroup[] {
+  if (!Array.isArray(groups)) return []
+  const ids = new Set<string>()
+  const normalized = groups
+    .filter(
+      (group): group is TabGroup & { color?: string } =>
+        !!group && typeof group === 'object' && typeof (group as TabGroup).id === 'string'
+    )
+    .filter((group) => {
+      if (ids.has(group.id)) return false
+      ids.add(group.id)
+      return true
+    })
+    .map((group) => {
+      // Built field by field rather than spread, so a `color` left over from
+      // an older profile cannot ride along as an untyped extra key.
+      const next: TabGroup = {
+        id: group.id,
+        label: group.label,
+        collapsed: !!group.collapsed
+      }
+      if (isGroupIcon(group.icon)) next.icon = group.icon
+      if (typeof group.parentId === 'string' && group.parentId) next.parentId = group.parentId
+      return next
+    })
+  for (const group of normalized) {
+    if (
+      group.parentId &&
+      (!ids.has(group.parentId) || isGroupWithin(normalized, group.parentId, group.id))
+    )
+      delete group.parentId
+  }
+  return normalized
+}
+
+/** Includes the group itself; also terminates safely for corrupt saved cycles. */
+export function isGroupWithin(
+  groups: readonly TabGroup[],
+  id: string,
+  ancestorId: string
+): boolean {
+  const seen = new Set<string>()
+  let current: string | undefined = id
+  while (current && !seen.has(current)) {
+    if (current === ancestorId) return true
+    seen.add(current)
+    current = groups.find((group) => group.id === current)?.parentId
+  }
+  return false
+}
 
 /**
  * Modes the primary pane can render.
@@ -16,7 +79,15 @@ import type { FileWriteResult } from '../../../shared/electron-api'
  */
 export type ViewMode = 'live' | 'reading' | 'source' | 'wysiwyg'
 
-export type SplitSurface = 'launcher' | 'file' | 'files' | 'backlinks' | 'ai'
+/**
+ * What the second pane shows.
+ *
+ * There is no `'launcher'` here. Surfaces used to be reached through a picker
+ * in the pane, so changing one meant going back through the picker first. They
+ * are tabs now, each one click away from every other, and `'files'` is what the
+ * pane opens on.
+ */
+export type SplitSurface = 'files' | 'backlinks' | 'file' | 'preview'
 
 /**
  * Whether the secondary pane's CodeMirror view should exist.
@@ -42,6 +113,7 @@ export interface SecondaryDocState {
   originalContent: string
   mtime: number
   dirty: boolean
+  pendingWrite?: string | null
   viewMode: ViewMode
   isDiff?: boolean
   /**
@@ -62,8 +134,11 @@ export interface ConflictInfo {
 export interface TabGroup {
   id: string
   label: string
-  color?: string
+  /** Name of a group icon preset. Absent means the folder pair. */
+  icon?: string
   collapsed: boolean
+  /** Absent for a top-level Space group. This never moves files on disk. */
+  parentId?: string
 }
 
 export interface TabDoc {
@@ -86,7 +161,7 @@ export interface TabDoc {
  * True when the disk content came from our own save, not another app.
  *
  * Structural rather than `TabDoc` so the split pane, which is watched and
- * written like a tab but carries no write-tracking fields, can use it too.
+ * written like a tab, can use it too.
  */
 export function isOwnEcho(
   doc: { originalContent: string; lastWritten?: string | null; pendingWrite?: string | null },
@@ -94,8 +169,8 @@ export function isOwnEcho(
 ): boolean {
   const normDisk = diskContent.replace(/\r\n/g, '\n')
   const normOriginal = doc.originalContent.replace(/\r\n/g, '\n')
-  const normLastWritten = doc.lastWritten ? doc.lastWritten.replace(/\r\n/g, '\n') : null
-  const normPending = doc.pendingWrite ? doc.pendingWrite.replace(/\r\n/g, '\n') : null
+  const normLastWritten = doc.lastWritten?.replace(/\r\n/g, '\n') ?? null
+  const normPending = doc.pendingWrite?.replace(/\r\n/g, '\n') ?? null
 
   return (
     normDisk === normOriginal ||
@@ -115,6 +190,8 @@ export interface FileStateData {
   quickTogglePair: [ViewMode, ViewMode]
   splitActive: boolean
   splitSurface: SplitSurface
+  /** Right-hand assistant dock. Openable only while `ai.enabled` is set. */
+  aiDockOpen: boolean
   secondaryDoc: SecondaryDocState | null
   conflict: ConflictInfo | null
   tabs: TabDoc[]
@@ -134,7 +211,8 @@ export class FileState {
     isVaultFile: false,
     quickTogglePair: ['live', 'reading'],
     splitActive: false,
-    splitSurface: 'launcher',
+    splitSurface: 'files',
+    aiDockOpen: false,
     secondaryDoc: null,
     conflict: null,
     tabs: [],
@@ -145,7 +223,8 @@ export class FileState {
   private autoSaveTimer: ReturnType<typeof setTimeout> | null = null
   private secondaryAutoSaveTimer: ReturnType<typeof setTimeout> | null = null
   private deletingPaths = new Set<string>()
-  private pendingWrites = new Map<Promise<FileWriteResult>, string>()
+  private pendingWrites = new Map<Promise<FileWriteResult>, { path: string; content: string }>()
+  private refreshes = new Map<string, symbol>()
   private settingsStore = SettingsStore.getInstance()
 
   private constructor() {
@@ -214,7 +293,13 @@ export class FileState {
 
   private notify(): void {
     const snapshot = this.getState()
-    this.listeners.forEach((cb) => cb(snapshot))
+    for (const listener of this.listeners) {
+      try {
+        listener(snapshot)
+      } catch (error) {
+        console.error('File state listener failed:', error)
+      }
+    }
   }
 
   private activeTabDoc(): TabDoc | null {
@@ -287,7 +372,15 @@ export class FileState {
     if (!api()) return false
     const paths = this.settingsStore.get<string[]>('files.openTabs', [])
     const activePath = this.settingsStore.get<string | null>('files.activeTabPath', null)
-    const pinnedPaths = new Set(this.settingsStore.get<string[]>('files.pinnedTabs', []))
+    // Persisted tab paths can hold slash aliases of the same file. Key every
+    // lookup by file identity so one physical file restores as one tab, with
+    // the group and pin it had under either alias.
+    const pinnedPaths = new Set(
+      this.settingsStore
+        .get<string[]>('files.pinnedTabs', [])
+        .map((p) => filePathKey(p))
+        .filter((key): key is string => key !== null)
+    )
     let restoredGroups: TabGroup[] = []
     const groupAssignments = new Map<string, string>()
     try {
@@ -300,7 +393,11 @@ export class FileState {
           restoredGroups = parsed.groups
           if (Array.isArray(parsed.assignments)) {
             for (const item of parsed.assignments) {
-              groupAssignments.set(item.path, item.groupId)
+              const key = filePathKey(item.path)
+              // Later aliases do not overwrite an earlier assignment.
+              if (key !== null && !groupAssignments.has(key)) {
+                groupAssignments.set(key, item.groupId)
+              }
             }
           }
         }
@@ -308,20 +405,24 @@ export class FileState {
     } catch {
       // Fallback on corrupt group metadata
     }
+    restoredGroups = normalizeTabGroups(restoredGroups)
     const vaultPath = await api()
       ?.vault?.getPath?.()
       .catch(() => undefined)
     const restored: TabDoc[] = []
-    const seen = new Set(this.state.tabs.map((t) => t.path))
+    const seen = new Set(
+      this.state.tabs.map((t) => filePathKey(t.path)).filter((k): k is string => k !== null)
+    )
     for (const p of paths) {
       if (typeof p !== 'string') continue
-      if (seen.has(p)) continue
+      const key = filePathKey(p)
+      if (key === null || seen.has(key)) continue
       try {
         const exists = await api()?.file?.exists?.(p)
         if (!exists) continue
         const result = await api()?.file?.read?.(p)
         if (!result) continue
-        seen.add(p)
+        seen.add(key)
         restored.push({
           id:
             typeof crypto !== 'undefined' && crypto.randomUUID
@@ -332,9 +433,9 @@ export class FileState {
           originalContent: result.content,
           mtime: result.mtime,
           dirty: false,
-          isVaultFile: Boolean(vaultPath && p.startsWith(vaultPath)),
-          isPinned: pinnedPaths.has(p),
-          groupId: groupAssignments.get(p) ?? null,
+          isVaultFile: isInsideDir(p, vaultPath),
+          isPinned: pinnedPaths.has(key),
+          groupId: groupAssignments.get(key) ?? null,
           lastWritten: null,
           pendingWrite: null
         })
@@ -350,7 +451,7 @@ export class FileState {
     }
     if (restored.length === 0) return false
     const tabs = [...this.state.tabs, ...restored]
-    const idx = tabs.findIndex((t) => t.path === activePath)
+    const idx = tabs.findIndex((t) => sameFilePath(t.path, activePath))
     this.state = {
       ...this.state,
       tabs,
@@ -467,26 +568,20 @@ export class FileState {
 
   /**
    * Create a new tab group and optionally assign tabs to it.
+   *
+   * New groups start on the folder icon rather than cycling presets. A preset
+   * the user never chose is noise, and every group sharing one glyph made the
+   * icons pointless; the picker in the group menu is how anyone changes it.
    */
-  createTabGroup(label: string, color?: string, tabIndices: number[] = []): string {
+  createTabGroup(label: string, icon?: string, tabIndices: number[] = []): string {
     const currentGroups = this.state.tabGroups ?? []
     const id = `group-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`
-    const groupColors = [
-      '#f24e1e',
-      '#3b82f6',
-      '#10b981',
-      '#f59e0b',
-      '#8b5cf6',
-      '#ec4899',
-      '#06b6d4'
-    ]
-    const assignedColor = color ?? groupColors[currentGroups.length % groupColors.length]
     const newGroup: TabGroup = {
       id,
       label: label.trim() || 'New Group',
-      color: assignedColor,
       collapsed: false
     }
+    if (icon) newGroup.icon = icon
 
     const indicesSet = new Set(tabIndices)
     const tabs = this.state.tabs.map((tab, idx) => {
@@ -511,7 +606,9 @@ export class FileState {
    */
   updateTabGroup(groupId: string, patch: Partial<TabGroup>): void {
     const currentGroups = this.state.tabGroups ?? []
-    const tabGroups = currentGroups.map((g) => (g.id === groupId ? { ...g, ...patch } : g))
+    const tabGroups = normalizeTabGroups(
+      currentGroups.map((g) => (g.id === groupId ? { ...g, ...patch, id: g.id } : g))
+    )
     this.state = { ...this.state, tabGroups }
     this.persistTabs()
     this.notify()
@@ -521,23 +618,30 @@ export class FileState {
    * Delete a tab group. If closeTabs is true, member tabs are closed; otherwise ungrouped.
    */
   async deleteTabGroup(groupId: string, closeTabs = false): Promise<void> {
+    const groups = this.state.tabGroups ?? []
+    const group = groups.find((entry) => entry.id === groupId)
+    if (!group) return
+    const subtree = new Set(
+      groups.filter((entry) => isGroupWithin(groups, entry.id, groupId)).map((entry) => entry.id)
+    )
+    const belongs = (tab: TabDoc): boolean => !!tab.groupId && subtree.has(tab.groupId)
     if (closeTabs) {
       const active = this.activeTabDoc()
-      if (this.state.tabs.some((tab) => tab.groupId === groupId && tab.dirty)) {
-        if (active?.groupId === groupId) this.clearAutoSaveTimer()
+      if (this.state.tabs.some((tab) => belongs(tab) && tab.dirty)) {
+        if (active && belongs(active)) this.clearAutoSaveTimer()
         const confirmed = await showConfirm(
           'This group has unsaved changes. Close all tabs in the group anyway?'
         )
         if (!confirmed) {
-          if (active?.groupId === groupId && this.activeTabDoc()?.id === active.id)
+          if (active && belongs(active) && this.activeTabDoc()?.id === active.id)
             this.scheduleAutoSave()
           return
         }
       }
       const currentActive = this.activeTabDoc()
-      if (currentActive?.groupId === groupId) this.clearAutoSaveTimer()
-      const closedTabs = this.state.tabs.filter((tab) => tab.groupId === groupId)
-      const remainingTabs = this.state.tabs.filter((t) => t.groupId !== groupId)
+      if (currentActive && belongs(currentActive)) this.clearAutoSaveTimer()
+      const closedTabs = this.state.tabs.filter(belongs)
+      const remainingTabs = this.state.tabs.filter((tab) => !belongs(tab))
       const remainingActive = remainingTabs.findIndex((tab) => tab.id === currentActive?.id)
       const activeTab = Math.max(
         0,
@@ -549,7 +653,7 @@ export class FileState {
         ...this.state,
         tabs: remainingTabs,
         activeTab,
-        tabGroups: this.state.tabGroups?.filter((g) => g.id !== groupId)
+        tabGroups: this.state.tabGroups?.filter((g) => !subtree.has(g.id))
       }
       this.syncMirror()
       if (remainingActive >= 0) this.scheduleAutoSave()
@@ -564,11 +668,21 @@ export class FileState {
             .catch(() => undefined)
       }
     } else {
-      const tabs = this.state.tabs.map((t) => (t.groupId === groupId ? { ...t, groupId: null } : t))
+      const tabs = this.state.tabs.map((t) =>
+        t.groupId === groupId ? { ...t, groupId: group.parentId ?? null } : t
+      )
       this.state = {
         ...this.state,
         tabs,
-        tabGroups: this.state.tabGroups?.filter((g) => g.id !== groupId)
+        tabGroups: this.state.tabGroups
+          ?.filter((g) => g.id !== groupId)
+          .map((entry) => {
+            if (entry.parentId !== groupId) return entry
+            const promoted = { ...entry }
+            if (group.parentId) promoted.parentId = group.parentId
+            else delete promoted.parentId
+            return promoted
+          })
       }
     }
     this.persistTabs()
@@ -614,6 +728,43 @@ export class FileState {
     const [moved] = tabGroups.splice(fromIndex, 1)
     tabGroups.splice(toIndex, 0, moved)
 
+    this.state = { ...this.state, tabGroups }
+    this.persistTabs()
+    this.notify()
+  }
+
+  /** Move a group with its descendants, preserving tabs, selections, and edits. */
+  moveTabGroup(groupId: string, parentId: string | null, beforeId?: string): void {
+    const groups = this.state.tabGroups ?? []
+    const source = groups.find((group) => group.id === groupId)
+    if (!source || beforeId === groupId) return
+    if (
+      parentId &&
+      (!groups.some((group) => group.id === parentId) || isGroupWithin(groups, parentId, groupId))
+    )
+      return
+    const moved = { ...source }
+    if (parentId) moved.parentId = parentId
+    else delete moved.parentId
+    const remaining = groups.filter((group) => group.id !== groupId)
+    let index = beforeId
+      ? remaining.findIndex(
+          (group) => group.id === beforeId && (group.parentId ?? null) === parentId
+        )
+      : -1
+    if (beforeId && index < 0) return
+    if (index < 0) {
+      index = remaining.reduce(
+        (last, group, i) => ((group.parentId ?? null) === parentId ? i + 1 : last),
+        remaining.length
+      )
+    }
+    remaining.splice(index, 0, moved)
+    const tabGroups = remaining.map((group) =>
+      parentId && isGroupWithin(remaining, parentId, group.id)
+        ? { ...group, collapsed: false }
+        : group
+    )
     this.state = { ...this.state, tabGroups }
     this.persistTabs()
     this.notify()
@@ -684,7 +835,7 @@ export class FileState {
     try {
       await Promise.allSettled(
         [...this.pendingWrites]
-          .filter(([, target]) => sameFilePath(target, path))
+          .filter(([, target]) => sameFilePath(target.path, path))
           .map(([write]) => write)
       )
       deleted = Boolean(await api()?.file?.delete?.(path))
@@ -711,7 +862,7 @@ export class FileState {
         remainingActive >= 0 ? remainingActive : Math.min(this.state.activeTab, tabs.length - 1)
       ),
       ...(secondaryMatches
-        ? { splitActive: false, splitSurface: 'launcher', secondaryDoc: null }
+        ? { splitActive: false, splitSurface: 'files', secondaryDoc: null }
         : {}),
       conflict: sameFilePath(this.state.conflict?.path, path) ? null : this.state.conflict
     }
@@ -732,14 +883,30 @@ export class FileState {
 
   private async writeDocument(path: string, content: string): Promise<FileWriteResult | undefined> {
     if (this.isDeleting(path)) return undefined
-    const write = api()?.file?.write?.(path, content)
-    if (!write) return undefined
-    this.pendingWrites.set(write, path)
+    const writeFile = api()?.file?.write
+    if (!writeFile) return undefined
+    const pending = [...this.pendingWrites].filter(([, target]) => sameFilePath(target.path, path))
+    const latest = pending.at(-1)
+    if (latest?.[1].content === content) return latest[0]
+    // A later save must finish after the earlier one, or atomic renames can
+    // overwrite newer typing with the older AI snapshot.
+    const write = latest
+      ? latest[0].catch(() => undefined).then(() => writeFile(path, content))
+      : writeFile(path, content)
+    this.pendingWrites.set(write, { path, content })
     try {
       return await write
     } finally {
       this.pendingWrites.delete(write)
     }
+  }
+
+  private isPendingEcho(path: string, content: string): boolean {
+    return [...this.pendingWrites.values()].some(
+      (pending) =>
+        sameFilePath(pending.path, path) &&
+        pending.content.replace(/\r\n/g, '\n') === content.replace(/\r\n/g, '\n')
+    )
   }
 
   async newFile(): Promise<void> {
@@ -753,8 +920,22 @@ export class FileState {
       .catch(() => undefined)
     const defaultName = this.settingsStore.get('files.defaultNewFileName', 'Untitled.md')
     const defaultContent = this.settingsStore.get('files.defaultNewFileContent', '')
+    const occupied = new Set(this.state.tabs.map((tab) => filePathKey(tab.path)))
+    const tree = vaultPath ? await api()?.vault?.getTree?.() : undefined
+    const collect = (node: VaultTreeNode): void => {
+      occupied.add(filePathKey(node.path))
+      for (const child of node.children ?? []) collect(child)
+    }
+    if (tree) collect(tree)
+    const pathFor = (name: string): string => (vaultPath ? `${vaultPath}/${name}` : name)
+    const dot = defaultName.lastIndexOf('.')
+    const stem = dot > 0 ? defaultName.slice(0, dot) : defaultName
+    const extension = dot > 0 ? defaultName.slice(dot) : ''
+    let name = defaultName
+    for (let number = 2; occupied.has(filePathKey(pathFor(name))); number++)
+      name = `${stem} ${number}${extension}`
     this.openTab({
-      path: vaultPath ? `${vaultPath}/${defaultName}` : defaultName,
+      path: pathFor(name),
       content: defaultContent,
       originalContent: defaultContent,
       mtime: Date.now(),
@@ -772,32 +953,52 @@ export class FileState {
   }
 
   private setupWatcherListener(): void {
-    api()?.file?.onChanged?.(async (changedPath: string) => {
-      if (!this.state.tabs.some((t) => t.path === changedPath)) {
-        await this.handleSecondaryChanged(changedPath)
+    api()?.file?.onChanged?.((changedPath: string, snapshot?: FileChangeSnapshot) => {
+      void this.refreshFile(changedPath, snapshot)
+    })
+  }
+
+  /** Read committed changes without a debounce or changing the selected tab. */
+  async refreshFile(changedPath: string, snapshot?: FileChangeSnapshot): Promise<void> {
+    const path =
+      this.state.tabs.find((tab) => sameFilePath(tab.path, changedPath))?.path ??
+      (sameFilePath(this.state.secondaryDoc?.path, changedPath)
+        ? this.state.secondaryDoc?.path
+        : null)
+    if (!path) return
+    const refresh = Symbol()
+    this.refreshes.set(path, refresh)
+    try {
+      const result = snapshot ?? (await api()?.file?.read?.(path))
+      if (!result || this.refreshes.get(path) !== refresh) return
+      if (!this.state.tabs.some((t) => sameFilePath(t.path, changedPath))) {
+        await this.handleSecondaryChanged(changedPath, result)
         return
       }
-      const result = await api()?.file?.read?.(changedPath)
-      if (!result) return
       // Re-resolve after the read. The tab could have been closed, reordered, or
       // renamed while it was in flight, and a stale index would write this
-      // file's disk content onto an unrelated tab.
-      const tabIndex = this.state.tabs.findIndex((t) => t.path === changedPath)
-      if (tabIndex < 0) return
+      // file's disk content onto an unrelated tab. Every alias counts: a second
+      // copy of the file must not keep rendering content the disk no longer has.
+      const matching: number[] = []
+      this.state.tabs.forEach((t, i) => {
+        if (sameFilePath(t.path, changedPath)) matching.push(i)
+      })
+      const tabIndex = matching[0]
+      if (tabIndex === undefined) return
       const tab = this.state.tabs[tabIndex]
 
-      if (isOwnEcho(tab, result.content)) {
+      if (isOwnEcho(tab, result.content) || this.isPendingEcho(path, result.content)) {
         // Echo of our own save
         const tabs = this.state.tabs.map((t, i) =>
-          i === tabIndex ? { ...t, mtime: result.mtime } : t
+          matching.includes(i) ? { ...t, mtime: result.mtime } : t
         )
         this.state = { ...this.state, tabs }
         this.syncMirror()
         return
       }
 
-      if (tab.dirty) {
-        if (tabIndex === this.state.activeTab) {
+      if (tab.dirty && (!snapshot || tab.content !== snapshot.before)) {
+        if (matching.includes(this.state.activeTab)) {
           this.raiseConflict({
             path: changedPath,
             diskContent: result.content,
@@ -806,7 +1007,9 @@ export class FileState {
         } else {
           // Background tab with unsaved work: rebase without touching the buffer
           const tabs = this.state.tabs.map((t, i) =>
-            i === tabIndex ? { ...t, originalContent: result.content, mtime: result.mtime } : t
+            matching.includes(i)
+              ? { ...t, originalContent: result.content, mtime: result.mtime, lastWritten: null }
+              : t
           )
           this.state = { ...this.state, tabs }
           this.syncMirror()
@@ -816,24 +1019,110 @@ export class FileState {
       }
 
       const tabs = this.state.tabs.map((t, i) =>
-        i === tabIndex
+        matching.includes(i)
           ? {
               ...t,
               content: result.content,
               originalContent: result.content,
               mtime: result.mtime,
-              dirty: false
+              dirty: false,
+              lastWritten: null,
+              pendingWrite: null
             }
           : t
       )
       this.state = { ...this.state, tabs }
       this.syncMirror()
+      const secondary = this.state.secondaryDoc
+      if (secondary && !secondary.isDiff && sameFilePath(secondary.path, changedPath)) {
+        await this.handleSecondaryChanged(changedPath, result)
+      }
       this.notify()
+    } catch (error) {
+      // A delete or rename can briefly leave no file to read. Keep the buffer.
+      console.warn('Could not refresh changed file:', changedPath, error)
+    } finally {
+      if (this.refreshes.get(path) === refresh) this.refreshes.delete(path)
+    }
+  }
+
+  /** Accepted edits notify the editor now and start saving in the same turn. */
+  async applyAiEdit(path: string, expected: string, content: string): Promise<boolean> {
+    // A slash alias can already sit in memory from a session restored before
+    // restoreTabs deduplicated. Update every copy, or the editor keeps showing
+    // a stale buffer for whichever alias the user actually has selected.
+    const indices: number[] = []
+    this.state.tabs.forEach((tab, i) => {
+      if (sameFilePath(tab.path, path)) indices.push(i)
     })
+    const index = indices[0] ?? -1
+    const secondary = this.state.secondaryDoc
+    const secondaryMatches = !!secondary && !secondary.isDiff && sameFilePath(secondary.path, path)
+    if (index >= 0) {
+      // Every copy must still hold the content the model edited. One alias that
+      // moved on means the write is stale, so refuse rather than overwrite.
+      if (
+        indices.some((i) => this.state.tabs[i].content !== expected) ||
+        (secondaryMatches && secondary.content !== expected)
+      )
+        return false
+      if (indices.includes(this.state.activeTab)) this.clearAutoSaveTimer()
+      if (secondaryMatches) this.clearSecondaryAutoSaveTimer()
+      this.state = {
+        ...this.state,
+        tabs: this.state.tabs.map((tab, i) =>
+          indices.includes(i)
+            ? {
+                ...tab,
+                content,
+                dirty: content !== tab.originalContent
+              }
+            : tab
+        ),
+        secondaryDoc: secondaryMatches
+          ? {
+              ...secondary,
+              content,
+              dirty: content !== secondary.originalContent,
+              pendingWrite: content
+            }
+          : secondary
+      }
+      this.syncMirror()
+      this.notify()
+      const saved = await this.save(index, false)
+      const current = this.state.secondaryDoc
+      if (current && sameFilePath(current.path, path) && current.pendingWrite === content) {
+        const tab = this.state.tabs.find((tab) => sameFilePath(tab.path, path))
+        this.state = {
+          ...this.state,
+          secondaryDoc: {
+            ...current,
+            originalContent: saved ? content : current.originalContent,
+            dirty: current.content !== (saved ? content : current.originalContent),
+            pendingWrite: null,
+            mtime: tab?.mtime ?? current.mtime
+          }
+        }
+        this.notify()
+      }
+      return saved
+    }
+    if (!secondaryMatches || secondary.content !== expected) return false
+    this.clearSecondaryAutoSaveTimer()
+    this.state = {
+      ...this.state,
+      secondaryDoc: { ...secondary, content, dirty: content !== secondary.originalContent }
+    }
+    this.notify()
+    return this.saveSecondary()
   }
 
   async openFile(path: string): Promise<void> {
-    const existing = this.state.tabs.findIndex((t) => t.path === path)
+    // Identity, not string equality. A slash alias of an open tab is the same
+    // file, and opening a second tab for it leaves an AI write landing on the
+    // inactive copy while the editor keeps showing the stale buffer.
+    const existing = this.state.tabs.findIndex((t) => sameFilePath(t.path, path))
     if (existing >= 0) {
       this.switchTab(existing)
       return
@@ -855,7 +1144,7 @@ export class FileState {
         originalContent: result.content,
         mtime: result.mtime,
         dirty: false,
-        isVaultFile: Boolean(vaultPath && path.startsWith(vaultPath))
+        isVaultFile: isInsideDir(path, vaultPath)
       })
       this.addRecentFile(path)
       await api()
@@ -872,7 +1161,7 @@ export class FileState {
    *   already resolved a tab across an await pass it explicitly rather than
    *   mutating activeTab, so the visible selection never flickers.
    */
-  async save(targetIndex?: number): Promise<boolean> {
+  async save(targetIndex?: number, includeSecondary = true): Promise<boolean> {
     const index = targetIndex ?? this.state.activeTab
     const tab = this.state.tabs[index] ?? null
     if (!tab) return false
@@ -894,8 +1183,11 @@ export class FileState {
       // actually written, which permanently disarmed the own-echo guard.
       const writeIdx = this.state.tabs.findIndex((t) => t.path === tab.path)
       if (result && writeIdx >= 0) {
-        const tabs = this.state.tabs.map((t, i) =>
-          i === writeIdx
+        // Settle every alias of the written file. All of them now hold the same
+        // bytes on disk, so leaving one dirty would keep its own-echo guard
+        // armed and let the next watcher event overwrite the fresh write.
+        const tabs = this.state.tabs.map((t) =>
+          sameFilePath(t.path, tab.path)
             ? {
                 ...t,
                 originalContent: contentToSave,
@@ -914,7 +1206,7 @@ export class FileState {
         this.notify()
         // Manual save also flushes a dirty split-pane document; with autosave
         // off it would otherwise never reach disk (save is tab-scoped).
-        void this.saveSecondary()
+        if (includeSecondary) void this.saveSecondary()
         return true
       }
     } catch (e) {
@@ -925,7 +1217,9 @@ export class FileState {
       if (idx >= 0) {
         this.state = {
           ...this.state,
-          tabs: this.state.tabs.map((t, i) => (i === idx ? { ...t, pendingWrite: null } : t))
+          tabs: this.state.tabs.map((t) =>
+            sameFilePath(t.path, tab.path) ? { ...t, pendingWrite: null } : t
+          )
         }
       }
     }
@@ -1091,7 +1385,7 @@ export class FileState {
       this.state = {
         ...this.state,
         splitActive: false,
-        splitSurface: 'launcher',
+        splitSurface: 'files',
         secondaryDoc: null
       }
     } else {
@@ -1106,6 +1400,20 @@ export class FileState {
   }
 
   /**
+   * Show or hide the assistant dock.
+   *
+   * Lives here rather than in the Editor because the command that toggles it is
+   * dispatched from the app shell, and the split pane's visibility works the
+   * same way - a view concern the command layer has to be able to reach.
+   */
+  toggleAiDock(open?: boolean): void {
+    const next = open ?? !this.state.aiDockOpen
+    if (next === this.state.aiDockOpen) return
+    this.state = { ...this.state, aiDockOpen: next }
+    this.notify()
+  }
+
+  /**
    * External change to the split pane's file.
    *
    * The pane has no tab of its own, so the tab branch above never looked at it.
@@ -1114,19 +1422,22 @@ export class FileState {
    * prevent. Re-resolved after the read: the pane can close or switch files while
    * it is in flight.
    */
-  private async handleSecondaryChanged(changedPath: string): Promise<void> {
+  private async handleSecondaryChanged(
+    changedPath: string,
+    snapshot?: { content: string; mtime: number; before?: string | null }
+  ): Promise<void> {
     const before = this.state.secondaryDoc
     if (!before || before.isDiff || !sameFilePath(before.path, changedPath)) return
-    const result = await api()?.file?.read?.(changedPath)
+    const result = snapshot ?? (await api()?.file?.read?.(changedPath))
     const current = this.state.secondaryDoc
     if (!result || !current || !sameFilePath(current.path, changedPath)) return
 
-    if (isOwnEcho(current, result.content)) {
+    if (isOwnEcho(current, result.content) || this.isPendingEcho(changedPath, result.content)) {
       this.state = { ...this.state, secondaryDoc: { ...current, mtime: result.mtime } }
       this.notify()
       return
     }
-    if (current.dirty) {
+    if (current.dirty && (!snapshot || current.content !== snapshot.before)) {
       this.clearSecondaryAutoSaveTimer()
       this.raiseConflict({
         path: changedPath,
@@ -1227,7 +1538,7 @@ export class FileState {
     this.state = {
       ...this.state,
       splitActive: false,
-      splitSurface: 'launcher',
+      splitSurface: 'files',
       secondaryDoc: null
     }
     this.notify()
@@ -1321,18 +1632,19 @@ export class FileState {
     const secondary = this.state.secondaryDoc
     if (!secondary || secondary.isDiff || !secondary.dirty || !secondary.path) return false
     if (this.isDeleting(secondary.path)) return false
+    this.state = { ...this.state, secondaryDoc: { ...secondary, pendingWrite: secondary.content } }
     try {
       const result = await this.writeDocument(secondary.path, secondary.content)
       if (!result) return false
       const current = this.state.secondaryDoc
-      if (current && current.path === secondary.path && current.content === secondary.content) {
+      if (current && current.path === secondary.path) {
         this.state = {
           ...this.state,
           secondaryDoc: {
             ...current,
             originalContent: secondary.content,
             mtime: result.mtime,
-            dirty: false
+            dirty: current.content !== secondary.content
           }
         }
         this.notify()
@@ -1341,6 +1653,15 @@ export class FileState {
     } catch (e) {
       console.error('Failed to save secondary file:', e)
       return false
+    } finally {
+      const current = this.state.secondaryDoc
+      if (
+        current &&
+        current.path === secondary.path &&
+        current.pendingWrite === secondary.content
+      ) {
+        this.state = { ...this.state, secondaryDoc: { ...current, pendingWrite: null } }
+      }
     }
   }
 

@@ -3,13 +3,14 @@ import { customElement, query, state } from 'lit/decorators.js'
 import katexCss from 'katex/dist/katex.min.css?inline'
 import { findNext, findPrevious, getSearchQuery } from '@codemirror/search'
 import { scrollbarStyles } from './scrollbars'
+import { resizeHandleStyles } from '../design/controls'
+import { WorkspaceState, aiDockGeometry } from '../state/workspace'
 import { SettingsStore } from '../state/settings'
-import { type AiMessage } from './AiPanel'
-import type { AttachedFile, ChatSessionSummary } from '../../../shared/electron-api'
+import { documentChanges } from '../utils/document-changes'
 import { icon } from './icons'
 import './FindPanel'
-import './AiPanel'
 import './BacklinksPanel'
+import './ai/AiDock'
 import type { FindPanel } from './FindPanel'
 import {
   EditorView,
@@ -27,7 +28,6 @@ import { defaultKeymap, history, historyKeymap } from '@codemirror/commands'
 import { search } from '@codemirror/search'
 import { writeMDTheme } from './EditorTheme'
 import { installFocusReportingFix } from '../utils/focus-reporting'
-import { conceal } from '../utils/motion'
 import { vscodeHighlight } from './CodeHighlight'
 import {
   livePreviewPlugin,
@@ -39,6 +39,7 @@ import {
 import { makeLinkClickHandler } from './extensions/link-click'
 import { mermaidEnabledFacet } from './extensions/mermaid-toggle'
 import { on } from '../events/bus'
+import { DURATION, reducedMotionNow } from '../utils/motion'
 import { mathPlugin } from './extensions/math-plugin'
 import { frontmatterPlugin } from './extensions/frontmatter-plugin'
 import { wikiLinkPlugin } from './extensions/wiki-link-plugin'
@@ -56,16 +57,19 @@ import { hasOriginalDocUpdate } from '../state/conflict'
 import './Panel'
 import './Workspace'
 import './InfoPill'
+import { inlineTitle, renameTitleFacet, showInlineTitleFacet } from './extensions/inline-title'
 import './DocBar'
-import './SurfaceLauncher'
+import './PreviewPanel'
 import './TextMenu'
+import type { AiSelectionAction, TextMenuSelection } from './TextMenu'
+import type { QuickAiContext } from './ai/quick-context'
 import './VaultExplorer'
 import { api } from '../api'
-import { AiSessionController } from '../controllers/ai-session'
-export { AI_DOC_CONTEXT_LIMIT, documentContextFor } from '../controllers/ai-session'
 import type { VaultTreeNode } from '../../../shared/electron-api'
 import { basenameNoExt, cleanWikiTarget, displayPath, shortPath } from '../utils/links'
 import { navigateLink, resolveOrCreateLink, type NavigateDeps } from '../utils/navigate'
+import { showSecondaryDocument } from '../utils/secondary-document'
+import { sameFilePath } from '../utils/paths'
 
 /**
  * Does a line's text declare the given anchor? GitHub slugifies headings by
@@ -88,31 +92,12 @@ function headingMatches(lineText: string, anchor: string): boolean {
   )
 }
 
-/**
- * Unwrap Electron's ipcRenderer wrapper.
- *
- * `net.chat` runs in main, so a throw there arrives as
- * "Error invoking remote method 'net:chat': Error: <the real message>". Showing
- * that verbatim in the chat log told the user nothing about which call failed.
- */
-/** Relative for anything recent, absolute beyond a week. */
-function formatWhen(ts: number): string {
-  const diff = Date.now() - ts
-  const mins = Math.floor(diff / 60000)
-  if (mins < 1) return 'just now'
-  if (mins < 60) return `${mins}m ago`
-  const hours = Math.floor(mins / 60)
-  if (hours < 24) return `${hours}h ago`
-  const days = Math.floor(hours / 24)
-  if (days < 7) return `${days}d ago`
-  return new Date(ts).toLocaleDateString()
-}
-
 @customElement('writemd-editor')
 export class Editor extends LitElement {
   static styles = [
     unsafeCSS(katexCss),
     scrollbarStyles,
+    resizeHandleStyles,
     css`
       :host {
         display: flex;
@@ -123,6 +108,8 @@ export class Editor extends LitElement {
         background: transparent;
         box-sizing: border-box;
         padding: 0;
+        container-type: inline-size;
+        container-name: editor;
       }
 
       .workspace {
@@ -133,6 +120,88 @@ export class Editor extends LitElement {
         gap: 0;
         position: relative;
         height: 100%;
+      }
+
+      /*
+       * The dock is a flex child rather than an overlay so the editor narrows
+       * beside it instead of hiding underneath. The workspace already has
+       * flex 1, so a fixed-basis sibling lands at the right edge with no change
+       * to the existing layout - which is why it is here and not positioned.
+       */
+      /*
+       * The panel slides its own box in from the right while the space it takes
+       * opens beside it, which is the sidebar's behaviour rather than a fade.
+       * A panel that simply appears looks like a different app opening over
+       * this one; one that slides reads as part of the same window rearranging
+       * itself, and the document takes its space as the panel goes rather than
+       * after it.
+       *
+       * Keyed on the transition attribute so it runs once per open and once per
+       * close, not on every resize the geometry store publishes.
+       */
+      .ai-column {
+        position: relative;
+        display: flex;
+        flex: 0 0 var(--ai-dock-width);
+        min-width: 0;
+        min-height: 0;
+        height: 100%;
+      }
+      .ai-column.entering {
+        animation: ai-column-in var(--motion-base) var(--motion-out);
+      }
+      .ai-column.leaving {
+        animation: ai-column-out var(--motion-fast) var(--motion-in);
+      }
+      @keyframes ai-column-in {
+        from {
+          opacity: 0;
+          transform: translateX(24px);
+        }
+        to {
+          opacity: 1;
+          transform: translateX(0);
+        }
+      }
+      @keyframes ai-column-out {
+        from {
+          opacity: 1;
+          transform: translateX(0);
+        }
+        to {
+          opacity: 0;
+          transform: translateX(16px);
+        }
+      }
+      :host-context([data-motion='reduced']) .ai-column {
+        animation: none;
+      }
+      .ai-dock {
+        flex: 1;
+        min-width: 0;
+        height: 100%;
+        background: var(--editor-surface);
+      }
+      .ai-divider {
+        position: absolute;
+        inset: 0 auto 0 -4px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 8px;
+        cursor: col-resize;
+        touch-action: none;
+        z-index: 4;
+      }
+      .ai-divider:focus-visible {
+        outline: none;
+      }
+      .ai-divider:hover .resize-handle {
+        color: var(--text);
+      }
+      .ai-divider:focus-visible .resize-handle {
+        outline: 2px solid var(--border-focus);
+        border-radius: var(--radius-sm);
       }
 
       .panes {
@@ -189,23 +258,69 @@ export class Editor extends LitElement {
         position: relative;
         height: 100%;
         overflow: hidden;
-        /*
-         * The left pane's inline style goes from flex:1 to
-         * flex:0 0 calc(50% - 2.5px) when the split opens. The shorthand
-         * expands to grow/shrink/basis and all three interpolate, so this
-         * carries the pane from full width to its share. This used to be a
-         * WAAPI animation on flexBasis alongside this transition: two
-         * mechanisms on one property, and the left pane jumped back out to full
-         * width on the first frame before easing down, which is what read as a
-         * bounce. The incoming pane has its own pane-in for the reveal.
-         */
-        transition: flex var(--motion-base) var(--motion-ease);
       }
 
-      :host-context([data-motion='reduced']) {
-        .pane {
-          transition: none;
-        }
+      /*
+       * Surface tabs. These replaced a picker: every surface the pane can hold
+       * sits one click away from every other, so switching no longer means
+       * going back to a launcher first and then choosing again.
+       *
+       * No rule under the strip and no underline under the active tab. Weight
+       * and colour carry the selection instead, which is how the panel
+       * sub-headers below already do it, and a row with two drawn lines in it
+       * read as heavier than the controls either side of it.
+       */
+      .surface-tabs {
+        display: flex;
+        align-items: center;
+        gap: 2px;
+        height: 32px;
+        padding: 0 8px;
+        flex-shrink: 0;
+        user-select: none;
+        font-family: var(--font-ui);
+      }
+
+      .surface-tab {
+        display: flex;
+        align-items: center;
+        padding: 0 10px;
+        height: 24px;
+        border: 0;
+        border-radius: 5px;
+        background: transparent;
+        color: var(--text-muted);
+        font-family: inherit;
+        font-size: 13px;
+        font-weight: 400;
+        cursor: pointer;
+        white-space: nowrap;
+        transition: color var(--motion-fast) var(--motion-ease);
+      }
+
+      .surface-tab:hover {
+        background: var(--bg-hover);
+        color: var(--text);
+      }
+
+      .surface-tab[aria-selected='true'] {
+        color: var(--text);
+        font-weight: 500;
+      }
+
+      .surface-tab:focus-visible {
+        outline: 2px solid var(--border-focus);
+        outline-offset: -2px;
+      }
+
+      /* Held the tab row left so the close button sits at the far right. */
+      .surface-tabs-spacer {
+        flex: 1;
+        min-width: 8px;
+      }
+
+      .surface-tabs .icon-action {
+        align-self: center;
       }
 
       /* Sub-header inside editor panel (49px) */
@@ -282,30 +397,10 @@ export class Editor extends LitElement {
         outline: none;
       }
 
-      .pane-in {
-        animation: pane-in var(--motion-base) var(--motion-ease);
-      }
-
-      @keyframes pane-in {
-        from {
-          opacity: 0;
-          transform: translateX(24px) scale(0.99);
-        }
-      }
-
-      :host-context([data-motion='reduced']) {
-        .pane-in {
-          animation: none;
-        }
-      }
-
       /* Swapping surfaces inside the split pane is a content change, not an
          instant patch: fade the incoming surface. */
-      writemd-ai-panel,
       writemd-backlinks-panel,
-      writemd-vault-explorer,
-      writemd-surface-launcher,
-      writemd-panel .sub-header + * {
+      writemd-vault-explorer {
         animation: surface-in var(--motion-base) var(--motion-ease-out);
       }
 
@@ -316,11 +411,8 @@ export class Editor extends LitElement {
       }
 
       :host-context([data-motion='reduced']) {
-        writemd-ai-panel,
         writemd-backlinks-panel,
-        writemd-vault-explorer,
-        writemd-surface-launcher,
-        writemd-panel .sub-header + * {
+        writemd-vault-explorer {
           animation: none;
         }
       }
@@ -358,93 +450,12 @@ export class Editor extends LitElement {
       }
 
       .icon-action svg {
-        width: 14px;
-        height: 14px;
+        width: var(--icon-size, 18px);
+        height: var(--icon-size, 18px);
       }
 
       .icon-action.faint {
         opacity: 0.35;
-      }
-
-      /* The history list hangs off the clock button in the AI panel header. */
-      .ai-history-anchor {
-        position: relative;
-        display: flex;
-      }
-
-      .ai-history {
-        position: absolute;
-        top: 30px;
-        right: 0;
-        z-index: 30;
-        width: 250px;
-        max-height: 300px;
-        overflow-y: auto;
-        background: var(--bg-elevated);
-        border: 1px solid var(--border);
-        border-radius: 8px;
-        box-shadow: var(--shadow-3);
-        padding: 4px;
-        transform-origin: top right;
-        animation: ai-history-in var(--motion-fast) var(--motion-ease);
-      }
-
-      @keyframes ai-history-in {
-        from {
-          opacity: 0;
-          transform: translateY(-4px) scale(0.97);
-        }
-      }
-
-      :host-context([data-motion='reduced']) {
-        .ai-history {
-          animation: none;
-        }
-      }
-
-      .ai-history-empty {
-        padding: 12px 10px;
-        text-align: center;
-        font-family: var(--font-mono);
-        font-size: 11px;
-        color: var(--text-muted);
-      }
-
-      .ai-history-item {
-        display: block;
-        width: 100%;
-        text-align: left;
-        border-radius: 5px;
-        padding: 7px 9px;
-        cursor: pointer;
-        color: var(--text-secondary);
-        font-family: var(--font-mono);
-        font-size: 12px;
-        line-height: 1.4;
-      }
-
-      .ai-history-item:hover {
-        background: var(--bg-hover);
-        color: var(--text);
-      }
-
-      .ai-history-item.current {
-        color: var(--text);
-        background: var(--bg-hover);
-      }
-
-      .ai-history-title {
-        display: block;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-      }
-
-      .ai-history-meta {
-        display: block;
-        margin-top: 2px;
-        font-size: 10px;
-        color: var(--text-muted);
       }
 
       .icon-action.faint:hover {
@@ -501,6 +512,48 @@ export class Editor extends LitElement {
   private editorView: EditorView | null = null
   private secondaryEditorView: EditorView | null = null
 
+  /**
+   * The pane the quick AI bar belongs to.
+   *
+   * The bar floats over the bottom of the note being written in, so it follows
+   * the pane rather than the window: opening the chat panel, a split pane or the
+   * tab rail narrows the writing, and a bar that stayed window-wide would sit
+   * across the panel it is meant to sit over.
+   */
+  get quickAiPane(): HTMLElement | null {
+    return this.renderRoot.querySelector<HTMLElement>('writemd-panel[slot="primary"]')
+  }
+
+  /** Capture text from the currently focused pane before the quick AI popup takes focus. */
+  getQuickAiContext(preferredPath?: string | null): QuickAiContext {
+    const secondary =
+      this.secondaryEditorView &&
+      (preferredPath
+        ? !sameFilePath(this.fileState.getState().path, preferredPath) &&
+          sameFilePath(this.fileState.getState().secondaryDoc?.path, preferredPath)
+        : this.secondaryEditorView.hasFocus)
+        ? this.secondaryEditorView
+        : null
+    const view = secondary ?? this.editorView
+    const state = this.fileState.getState()
+    const path = secondary ? (state.secondaryDoc?.path ?? null) : state.path
+    if (!view) return { path: null, content: '', selection: null }
+    const content = view.state.doc.toString()
+    const selected = view.state.selection.main
+    if (selected.empty || selected.to - selected.from > 20_000) {
+      return { path, content, selection: null }
+    }
+    return {
+      path,
+      content,
+      selection: {
+        from: selected.from,
+        to: selected.to,
+        text: view.state.sliceDoc(selected.from, selected.to)
+      }
+    }
+  }
+
   private primaryModeCompartment = new Compartment()
   private secondaryModeCompartment = new Compartment()
   private primaryPathCompartment = new Compartment()
@@ -508,12 +561,24 @@ export class Editor extends LitElement {
   private primaryChromeCompartment = new Compartment()
   private secondaryChromeCompartment = new Compartment()
 
-  /** Settings keys that require reconfiguring an editor view when they change. */
+  /**
+   * Settings keys that require reconfiguring an editor view when they change.
+   *
+   * `fontSize` and `lineHeight` are here because both are CSS custom properties
+   * on `:root`. Changing one resizes the text without the view ever hearing
+   * about it, so CodeMirror keeps its cached line heights and the gutter keeps
+   * the offset it measured from its first gutter element. The numbers stay on
+   * the old line pitch and walk away from their lines: measured at 12px/1.2 the
+   * worst gap was 54px, and at 20px/2.0 it was 91px. A cold start at the same
+   * settings is fine, which is why this only showed up after a live change.
+   */
   private static readonly CHROME_SETTINGS = [
     'editor.showLineNumbers',
     'editor.highlightActiveLine',
     'editor.wordWrap',
     'editor.tabSize',
+    'editor.fontSize',
+    'editor.lineHeight',
     'advanced.enableMermaid'
   ] as const
 
@@ -527,6 +592,9 @@ export class Editor extends LitElement {
       if (!view) continue
       try {
         view.dispatch({ effects: comp.reconfigure(chrome) })
+        // Re-read the line boxes now the metrics changed, so the gutter keeps
+        // tracking the text it labels.
+        view.requestMeasure()
       } catch {
         // view torn down between the settings notification and this dispatch
       }
@@ -547,14 +615,27 @@ export class Editor extends LitElement {
   @state() private viewMode: ViewMode = 'live'
   @state() private splitActive = false
   /**
-   * True while the split is playing its exit. The pane stays mounted until the
-   * animation ends, and the left pane keeps its width for the same moment, so
-   * the space is claimed once rather than twice.
+   * Keep the closing surface mounted while the workspace releases its width.
    */
   @state() private splitLeaving = false
-  @state() private splitSurface: SplitSurface = 'launcher'
+  @state() private splitSurface: SplitSurface = 'files'
+  /** The assistant dock, a right-hand column beside the workspace. */
+  @state() private aiEnabled = false
+  @state() private aiDockOpen = false
+  @state() private aiDockWidth = WorkspaceState.getInstance().aiDockWidth
+  @state() private aiAvailable = 0
+  private aiResizeObserver: ResizeObserver | null = null
+  private aiResizePointer: number | null = null
+  private aiResizeStart = 0
+  private aiResizeInitial = 0
+  private aiResizePreference = 0
   @state() private secondaryDoc: SecondaryDocState | null = null
-  @state() private textMenu: { x: number; y: number; secondary: boolean } | null = null
+  @state() private textMenu: {
+    x: number
+    y: number
+    secondary: boolean
+    selection: TextMenuSelection | null
+  } | null = null
   @state() private findPane: 'primary' | 'secondary' = 'primary'
   @state() private findOpen = false
   @state() private findMode: 'find' | 'replace' = 'find'
@@ -564,179 +645,80 @@ export class Editor extends LitElement {
   @state() private findRegex = false
   @state() private notice = ''
   private noticeTimer: number | null = null
+  /**
+   * The panel's exit, held for its length.
+   *
+   * Closing unmounts the panel the instant the preference flips, so there is
+   * nothing left to animate and the whole column blinks out of existence. This
+   * keeps it mounted for the length of the exit and then lets it go, the same
+   * shape the sidebar uses when it collapses.
+   */
+  @state() private aiClosing = false
+  private aiCloseTimer: number | null = null
 
   @state() private panelOrientation: 'horizontal' | 'vertical' = 'horizontal'
-  private readonly ai = new AiSessionController(this, {
-    path: () => this.filePath,
-    content: () => this.content,
-    closeHistory: () => {
-      this.aiHistoryOpen = false
-    },
-    replace: (content, path) => this.applyAiReplacement(content, path)
-  })
-  @state() private aiHistoryOpen = false
-  private get isAiConfigured(): boolean {
-    return this.ai.isAiConfigured
-  }
-  private set isAiConfigured(value: boolean) {
-    this.ai.isAiConfigured = value
-  }
-  private get aiMessages(): AiMessage[] {
-    return this.ai.aiMessages
-  }
-  private set aiMessages(value: AiMessage[]) {
-    this.ai.aiMessages = value
-  }
-  private get aiIsLoading(): boolean {
-    return this.ai.aiIsLoading
-  }
-  private set aiIsLoading(value: boolean) {
-    this.ai.aiIsLoading = value
-  }
-  private get aiSessionId(): string | null {
-    return this.ai.aiSessionId
-  }
-  private set aiSessionId(value: string | null) {
-    this.ai.aiSessionId = value
-  }
-  private get aiSessions(): ChatSessionSummary[] {
-    return this.ai.aiSessions
-  }
-  private set aiSessions(value: ChatSessionSummary[]) {
-    this.ai.aiSessions = value
-  }
-  private get aiAttachments(): AttachedFile[] {
-    return this.ai.aiAttachments
-  }
-  private set aiAttachments(value: AttachedFile[]) {
-    this.ai.aiAttachments = value
-  }
-  private get aiAttaching(): boolean {
-    return this.ai.aiAttaching
-  }
-  private set aiAttaching(value: boolean) {
-    this.ai.aiAttaching = value
-  }
-  private get aiModels(): string[] {
-    return this.ai.aiModels
-  }
-  private set aiModels(value: string[]) {
-    this.ai.aiModels = value
-  }
-  private get aiModelsLoading(): boolean {
-    return this.ai.aiModelsLoading
-  }
-  private set aiModelsLoading(value: boolean) {
-    this.ai.aiModelsLoading = value
-  }
-  /**
-   * Model the composer names on its chip, so the target of a send is visible.
-   *
-   * A getter rather than a field, so there is one source of truth for it. That
-   * means a change to `ai.model` does not by itself re-render anything, hence the
-   * subscription below: without it the chip keeps naming the previous model after
-   * the user picks a different one.
-   */
-  private get aiModel(): string {
-    return this.settingsStore?.get('ai.model', '') ?? ''
-  }
-
-  /** Click outside closes the history list. */ private readonly onAiHistoryPointerDown = (
-    e: Event
-  ): void => {
-    if (!this.aiHistoryOpen) return
-    const anchor = this.shadowRoot?.querySelector('.ai-history-anchor')
-    if (anchor && !e.composedPath().includes(anchor)) this.aiHistoryOpen = false
-  }
-
-  private toggleAiHistory = (): void => {
-    const next = !this.aiHistoryOpen
-    this.aiHistoryOpen = next
-    if (next) void this.refreshAiSessions()
-  }
-
-  /**
-   * Ask the provider which models this key can reach.
-   *
-   * Settings already does this for the AI tab, but the composer's chip needs the
-   * list too, and the key never crosses into renderer memory: the request goes
-   * out with an empty key and main substitutes the stored one.
-   */
-  private refreshAiModels = this.ai.refreshAiModels.bind(this.ai)
-  private handleAiModelChange = this.ai.handleAiModelChange.bind(this.ai)
-  private handleAiAttachRequest = this.ai.handleAiAttachRequest.bind(this.ai)
-  private handleAiAttachFiles = this.ai.handleAiAttachFiles.bind(this.ai)
-  private handleAiAttachRemove = this.ai.handleAiAttachRemove.bind(this.ai)
-  private handleAiCancel = this.ai.handleAiCancel.bind(this.ai)
-  private handleAiClear = this.ai.handleAiClear.bind(this.ai)
-  private checkAiConfigured = this.ai.checkAiConfigured.bind(this.ai)
-  private handleAiWebSearchToggle = this.ai.handleAiWebSearchToggle.bind(this.ai)
-  private stashAiSessionForPath = this.ai.stashAiSessionForPath.bind(this.ai)
-  private loadAiSession = this.ai.loadAiSession.bind(this.ai)
-  private refreshAiSessions = this.ai.refreshAiSessions.bind(this.ai)
-  private handleAiNewSession = this.ai.handleAiNewSession.bind(this.ai)
-  private handleAiSelectSession = this.ai.handleAiSelectSession.bind(this.ai)
-  private handleAiSubmit = this.ai.handleAiSubmit.bind(this.ai)
-  private handleThoughtSettle = this.ai.handleThoughtSettle.bind(this.ai)
+  /** Whether the footer shows the document path on its left. */
+  @state() private showFilePath = true
   private settingsStore: SettingsStore | null = null
   private settingsUnsubs: Array<() => void> = []
   private busUnsubs: Array<() => void> = []
 
   connectedCallback(): void {
     super.connectedCallback()
-    document.addEventListener('pointerdown', this.onAiHistoryPointerDown, true)
+    if (typeof ResizeObserver !== 'undefined') {
+      this.aiResizeObserver = new ResizeObserver(([entry]) => {
+        if (entry) this.aiAvailable = entry.contentRect.width
+      })
+      this.aiResizeObserver.observe(this)
+    }
     this.busUnsubs.push(on('find:open', this.handleGlobalFind))
+    this.busUnsubs.push(on('editor:focus-inline-title', this.handleFocusInlineTitle))
     this.busUnsubs.push(on('wiki:open', this.handleOpenWikiLink))
-    this.busUnsubs.push(
-      on('ai:models-updated', ({ models }) => {
-        this.aiModels = models
+    this.settingsStore = SettingsStore.getInstance()
+    this.aiDockWidth = WorkspaceState.getInstance().aiDockWidth
+    this.settingsUnsubs.push(
+      this.settingsStore.subscribe('appearance.aiDockWidth', () => {
+        if (this.aiResizePointer === null)
+          this.aiDockWidth = WorkspaceState.getInstance().aiDockWidth
       })
     )
-    this.settingsStore = SettingsStore.getInstance()
     this.panelOrientation = this.settingsStore.get('appearance.panelOrientation', 'vertical') as
       'horizontal' | 'vertical'
-    this.checkAiConfigured()
+    this.aiEnabled = this.settingsStore.get('ai.enabled', false) ?? false
+    // Subscribed rather than read once: turning AI on in Settings should make
+    // the dock reachable immediately, not after a restart.
     this.settingsUnsubs.push(
-      this.settingsStore.subscribe('ai.apiKeySet', () => this.checkAiConfigured())
-    )
-    this.settingsUnsubs.push(
-      this.settingsStore.subscribe('ai.provider', () => {
-        this.checkAiConfigured()
-        // The old provider's model list is meaningless against the new one.
-        void this.refreshAiModels()
+      this.settingsStore.subscribe('ai', (v) => {
+        this.aiEnabled = Boolean((v as { enabled?: boolean } | undefined)?.enabled)
+        if (!this.aiEnabled) this.fileState.toggleAiDock(false)
       })
     )
-    this.settingsUnsubs.push(
-      this.settingsStore.subscribe('ai.apiKeySet', () => void this.refreshAiModels())
-    )
-    // The chip reads the model through a getter, so nothing re-renders when it
-    // changes unless this asks for one.
-    this.settingsUnsubs.push(this.settingsStore.subscribe('ai.model', () => this.requestUpdate()))
-    this.settingsUnsubs.push(
-      this.settingsStore.subscribe('ai.webSearchEnabled', () => this.requestUpdate())
-    )
-    void this.refreshAiModels()
     this.settingsUnsubs.push(
       this.settingsStore.subscribe('appearance.panelOrientation', (v) => {
         this.panelOrientation = (v as 'horizontal' | 'vertical') ?? 'horizontal'
       })
     )
+    this.settingsUnsubs.push(
+      this.settingsStore.subscribe('editor.showFilePath', (v) => {
+        this.showFilePath = (v as boolean) ?? true
+      })
+    )
     for (const key of Editor.CHROME_SETTINGS) {
       this.settingsUnsubs.push(this.settingsStore.subscribe(key, () => this.syncChrome()))
     }
+    // Subscriptions only fire on a change, so seed the current value here or a
+    // saved "hidden" would not apply until the user toggled it twice.
+    this.showFilePath = this.settingsStore.get<boolean>('editor.showFilePath', true)
     const current = this.fileState.getState()
     this.content = current.content
     this.filePath = current.path
     this.viewMode = current.viewMode === 'wysiwyg' ? 'live' : current.viewMode
     this.splitActive = current.splitActive
     this.splitSurface = current.splitSurface
+    this.aiDockOpen = current.aiDockOpen
     this.secondaryDoc = current.secondaryDoc
-    // Restores the chat for the document restored at launch. The subscription
-    // below only fires on a *change*, and filePath is already assigned here, so
-    // without this the first session is never loaded.
-    void this.loadAiSession()
-
     this.unsubscribe = this.fileState.subscribe((s) => {
+      this.syncAiDockClose(s.aiDockOpen)
       const normalizedMode = s.viewMode === 'wysiwyg' ? 'live' : s.viewMode
       const modeChanged = this.viewMode !== normalizedMode
       const docChanged = this.content !== s.content
@@ -751,24 +733,15 @@ export class Editor extends LitElement {
       this.content = s.content
       this.viewMode = normalizedMode
       this.splitActive = s.splitActive
-      this.splitSurface = s.splitSurface
-      this.secondaryDoc = s.secondaryDoc
-
-      // Closing the split has to keep the pane on screen long enough to leave,
-      // so every path that closes it (the toolbar toggle, the pane's own close
-      // button, Escape) goes through this one place instead of each animating
-      // its own teardown.
-      if (wasSplitActive && !s.splitActive) this.startSplitExit()
-
-      // Chat is per document, so switching tabs swaps the transcript. The
-      // initial document is handled at setup, above; this is the change case.
-      if (pathChanged) {
-        this.stashAiSessionForPath(oldPath)
-        this.filePath = newPath
-        void this.loadAiSession(newPath)
-      } else {
-        this.filePath = newPath
+      this.aiDockOpen = s.aiDockOpen
+      if (wasSplitActive && !s.splitActive) this.splitLeaving = true
+      else if (s.splitActive) this.splitLeaving = false
+      if (!this.splitLeaving) {
+        this.splitSurface = s.splitSurface
+        this.secondaryDoc = s.secondaryDoc
       }
+
+      this.filePath = newPath
 
       // While a conflict merge is open the secondary view owns the document
       // text. `setSecondaryContent` writes the merged result into top-level
@@ -784,7 +757,7 @@ export class Editor extends LitElement {
         } else {
           this.viewContent = s.content
           this.editorView.dispatch({
-            changes: { from: 0, to: this.editorView.state.doc.length, insert: s.content }
+            changes: documentChanges(this.editorView.state.doc.toString(), s.content)
           })
         }
       }
@@ -806,11 +779,10 @@ export class Editor extends LitElement {
         } else {
           this.secondaryViewContent = s.secondaryDoc.content
           this.secondaryEditorView.dispatch({
-            changes: {
-              from: 0,
-              to: this.secondaryEditorView.state.doc.length,
-              insert: s.secondaryDoc.content
-            }
+            changes: documentChanges(
+              this.secondaryEditorView.state.doc.toString(),
+              s.secondaryDoc.content
+            )
           })
         }
       }
@@ -849,42 +821,6 @@ export class Editor extends LitElement {
     })
   }
 
-  private async applyAiReplacement(
-    newContent: string,
-    targetPath: string | null
-  ): Promise<boolean> {
-    // setContent and save() both act on whatever is active now. If the user
-    // switched documents while the model was thinking, the reply belongs to the
-    // file it was asked about, not to the one on screen. Bail out rather than
-    // overwrite a document the user never asked the model to touch.
-    if (this.fileState.getState().path !== targetPath) {
-      return false
-    }
-    if (this.editorView) {
-      this.editorView.dispatch({
-        changes: { from: 0, to: this.editorView.state.doc.length, insert: newContent }
-      })
-    }
-    this.content = newContent
-    this.viewContent = newContent
-    this.fileState.setContent(newContent)
-    // Force an immediate save to disk so the 'dirty' flag is cleared.
-    // This prevents the OS file watcher from firing while dirty=true and popping the conflict modal.
-    await this.fileState.save()
-    return true
-  }
-
-  private handleAiSubmitEvent(e: Event): void {
-    const { text, attachments } = (e as CustomEvent<{ text: string; attachments?: AttachedFile[] }>)
-      .detail
-    void this.handleAiSubmit(text, attachments ?? [])
-  }
-
-  /**
-   * The live thought line froze. Keep it as a transcript entry, otherwise the
-   * elapsed time only exists while the bubble is mounted and is lost the moment
-   * the reply lands.
-   */
   /**
    * Whether the split pane shows a document editor. The lifecycle code and the
    * template must agree on this exactly, so both read this one getter rather
@@ -892,17 +828,21 @@ export class Editor extends LitElement {
    */
   private get mountsSecondaryView(): boolean {
     return shouldMountSecondaryView({
-      splitActive: this.splitActive,
+      splitActive: this.splitActive || this.splitLeaving,
       secondaryDoc: this.secondaryDoc,
       splitSurface: this.splitSurface
     })
   }
 
   disconnectedCallback(): void {
-    document.removeEventListener('pointerdown', this.onAiHistoryPointerDown, true)
+    this.aiResizeObserver?.disconnect()
+    this.aiResizeObserver = null
+    this.aiResizePointer = null
     for (const unsub of this.busUnsubs) unsub()
     this.busUnsubs = []
     if (this.noticeTimer !== null) window.clearTimeout(this.noticeTimer)
+    if (this.aiCloseTimer !== null) window.clearTimeout(this.aiCloseTimer)
+    this.aiCloseTimer = null
     this.unsubscribe?.()
     // Before destroying the views: stopResize re-measures them, and it must not
     // run against an already-destroyed view. A teardown mid-drag would otherwise
@@ -944,22 +884,12 @@ export class Editor extends LitElement {
     }
   }
 
-  /**
-   * Close the split with motion: the pane leaves first, then the left pane
-   * takes the space. The left pane keeps its width while the exit plays, so the
-   * two never overlap, and its own `transition: flex` carries the expansion
-   * afterwards.
-   */
-  private startSplitExit(): void {
-    if (this.splitLeaving) return
-    this.splitLeaving = true
-    const pane = this.shadowRoot?.querySelector<HTMLElement>('writemd-panel.pane-in') ?? null
-    void conceal(pane).then(() => {
-      this.splitLeaving = false
-      if (this.splitActive) return
-      this.secondaryEditorView?.destroy()
-      this.secondaryEditorView = null
-    })
+  private finishSplitExit = (): void => {
+    if (this.splitActive) return
+    this.splitLeaving = false
+    const current = this.fileState.getState()
+    this.splitSurface = current.splitSurface
+    this.secondaryDoc = current.secondaryDoc
   }
 
   /**
@@ -1093,6 +1023,9 @@ export class Editor extends LitElement {
       comp.of(this.getModeExtensions(mode)),
       chromeComp.of(this.getChromeExtensions()),
       pathComp.of(documentPathFacet.of(currentPath)),
+      renameTitleFacet.of((name) => void this.fileState.renameFile(name, isSecondary)),
+      showInlineTitleFacet.of(mode !== 'source'),
+      inlineTitle(),
       EditorView.updateListener.of((update) => {
         if (update.docChanged) {
           const newDoc = update.state.doc.toString()
@@ -1300,7 +1233,40 @@ export class Editor extends LitElement {
 
   private handleTextMenu = (e: MouseEvent, secondary = false): void => {
     e.preventDefault()
-    this.textMenu = { x: e.clientX, y: e.clientY, secondary }
+    const view = secondary ? this.secondaryEditorView : this.editorView
+    const range = view?.state.selection.main
+    const selection =
+      view && range && !range.empty
+        ? {
+            text: view.state.sliceDoc(range.from, range.to),
+            from: range.from,
+            to: range.to,
+            path: (secondary ? this.secondaryDoc?.path : this.filePath) ?? undefined
+          }
+        : null
+    this.textMenu = { x: e.clientX, y: e.clientY, secondary, selection }
+  }
+
+  /**
+   * Explain and Summarize ask the floating bar, not the panel.
+   *
+   * Both were panel-only actions, so a one-word question cost the width of a
+   * docked panel and buried the document. The bar captures the selection itself,
+   * so all this has to say is which question to ask.
+   */
+  private handleAiSelectionAction = (e: CustomEvent<AiSelectionAction>): void => {
+    if (!this.aiEnabled || !e.detail.text.trim()) return
+    const secondary = this.textMenu?.selection?.path === this.secondaryDoc?.path
+    const view = secondary ? this.secondaryEditorView : this.editorView
+    if (!view) return
+    this.openAiBar({
+      prompt:
+        e.detail.intent === 'explain'
+          ? 'Explain only the highlighted text.'
+          : 'Summarize only the highlighted text.',
+      view,
+      path: e.detail.path ?? null
+    })
   }
 
   /** View the find panel currently targets (secondary pane when focused). */
@@ -1323,6 +1289,23 @@ export class Editor extends LitElement {
     pane?: 'primary' | 'secondary'
   }): void => {
     this.openFind(detail.mode, detail.pane)
+  }
+
+  /**
+   * Focus the inline title for Rename.
+   *
+   * The title is a widget inside CodeMirror's shadow DOM, so the menu in the
+   * document header cannot reach it directly and asks here instead.
+   */
+  private handleFocusInlineTitle = (detail: { pane?: 'primary' | 'secondary' }): void => {
+    const wrapper =
+      detail.pane === 'secondary'
+        ? this.shadowRoot?.querySelector('#secondary-cm-wrapper')
+        : this.shadowRoot?.querySelector('#primary-cm-wrapper')
+    const input = wrapper?.querySelector<HTMLInputElement>('.cm-inline-title')
+    if (!input) return
+    input.focus()
+    input.select()
   }
 
   /**
@@ -1536,24 +1519,117 @@ export class Editor extends LitElement {
     this.findPanelEl?.doReplaceAll()
   }
 
-  private handleSurfaceSelection = async (
-    e: CustomEvent<{ surface: SplitSurface }>
-  ): Promise<void> => {
-    const surface = e.detail.surface
-    if (surface === 'file') {
-      const result = await api()?.file?.openDialog?.({
-        properties: ['openFile'],
-        filters: [{ name: 'Markdown', extensions: ['md', 'markdown', 'mdown', 'mkd'] }]
+  /**
+   * Open the assistant with the editor's exact selection as context.
+   *
+   * The floating bar, not the panel: this is a question about a few words, and
+   * the bar answers it without taking half the window. The panel is one step
+   * further, through Open full chat.
+   */
+  openSelectionMenu(): void {
+    const view = this.secondaryEditorView?.hasFocus ? this.secondaryEditorView : this.editorView
+    if (!view || !this.aiEnabled) return
+    this.openAiBar({
+      prompt: 'Ask about your selection.',
+      view,
+      path: this.secondaryEditorView?.hasFocus ? (this.secondaryDoc?.path ?? null) : this.filePath
+    })
+  }
+
+  /**
+   * Open the floating bar for a selection action.
+   *
+   * The captured context travels with the request rather than being re-read from
+   * the focused pane. The bar is going to take focus, and a right-click in the
+   * split pane does not move CodeMirror's focus, so reading the selection after
+   * the fact returned the primary pane's text: Explain on a phrase in the
+   * secondary note asked about a word in the primary one.
+   */
+  openAiBar(action: { prompt: string; view: EditorView; path: string | null }): void {
+    this.dispatchEvent(
+      new CustomEvent<{ prompt: string; context: QuickAiContext }>('open-ai-bar', {
+        detail: { prompt: action.prompt, context: this.contextFor(action.view, action.path) },
+        bubbles: true,
+        composed: true
       })
-      if (result && !result.canceled && result.filePaths[0]) {
-        const fileContent = await api()?.file?.read?.(result.filePaths[0])
-        if (fileContent) {
-          await this.fileState.openSecondaryFile(result.filePaths[0], fileContent.content)
-        }
+    )
+  }
+
+  /** Frozen text and selection for one pane, as the bar captures it. */
+  private contextFor(view: EditorView, path: string | null): QuickAiContext {
+    const content = view.state.doc.toString()
+    const selected = view.state.selection.main
+    if (selected.empty || selected.to - selected.from > 20_000)
+      return { path, content, selection: null }
+    return {
+      path,
+      content,
+      selection: {
+        from: selected.from,
+        to: selected.to,
+        text: view.state.sliceDoc(selected.from, selected.to)
       }
-    } else {
-      this.fileState.setSplitSurface(surface)
     }
+  }
+
+  /**
+   * Pick a surface from the tab strip.
+   *
+   * Document is a tab like the others, but with nothing open it has no content
+   * to show. Rather than hide it and reflow the strip every time a second
+   * document closes, it opens the picker, which is what the launcher row it
+   * replaces used to do.
+   */
+  private selectSurface = async (surface: SplitSurface): Promise<void> => {
+    if (surface === 'file') {
+      await showSecondaryDocument(this.fileState)
+      return
+    }
+    this.fileState.setSplitSurface(surface)
+  }
+
+  private renderSurfaceTabs(): unknown {
+    const labels: Record<SplitSurface, string> = {
+      files: 'Files',
+      backlinks: 'Backlinks',
+      file: 'Document',
+      preview: 'Preview'
+    }
+    const order: SplitSurface[] = ['files', 'backlinks', 'file', 'preview']
+    // The reading toggle and the document menu act on the second document, so
+    // they belong on the Document tab only. They ride in this row rather than
+    // in a header of their own, which is what left the pane with two stacked
+    // bars and two close buttons for one surface.
+    const docControls = this.mountsSecondaryView && this.secondaryDoc && !this.secondaryDoc.isDiff
+    return html`
+      <div class="surface-tabs" role="tablist" aria-label="Pane surfaces">
+        ${order.map(
+          (id) => html`
+            <button
+              class="surface-tab"
+              role="tab"
+              aria-selected=${this.splitSurface === id ? 'true' : 'false'}
+              @click=${() => void this.selectSurface(id)}
+            >
+              ${labels[id]}
+            </button>
+          `
+        )}
+        <div class="surface-tabs-spacer"></div>
+        ${docControls ? html`<writemd-doc-bar secondary bare></writemd-doc-bar>` : ''}
+        <div
+          class="icon-action"
+          role="button"
+          tabindex="0"
+          aria-label="Close split pane"
+          title="Close split pane"
+          @keydown=${this.handleIconActionKey}
+          @click=${() => this.fileState.toggleSplitView(false)}
+        >
+          ${icon('x')}
+        </div>
+      </div>
+    `
   }
 
   /** Enter/Space on an icon-action div, so it is reachable by keyboard. */
@@ -1563,18 +1639,129 @@ export class Editor extends LitElement {
     ;(e.currentTarget as HTMLElement).click()
   }
 
+  private get aiGeometry(): ReturnType<typeof aiDockGeometry> {
+    return aiDockGeometry(
+      this.aiAvailable || this.getBoundingClientRect().width || 1000,
+      this.aiDockWidth
+    )
+  }
+
+  private beginAiResize = (event: PointerEvent): void => {
+    if (event.button !== 0) return
+    event.preventDefault()
+    this.aiResizePointer = event.pointerId
+    this.aiResizeStart = event.clientX
+    this.aiResizeInitial = this.aiGeometry.width
+    this.aiResizePreference = this.aiDockWidth
+    ;(event.currentTarget as HTMLElement).setPointerCapture(event.pointerId)
+  }
+
+  private moveAiResize = (event: PointerEvent): void => {
+    if (event.pointerId !== this.aiResizePointer) return
+    const geometry = this.aiGeometry
+    this.aiDockWidth = Math.max(
+      geometry.min,
+      Math.min(geometry.max, this.aiResizeInitial + this.aiResizeStart - event.clientX)
+    )
+  }
+
+  private finishAiResize = (event: PointerEvent): void => {
+    if (event.pointerId !== this.aiResizePointer) return
+    if (event.type === 'pointerup') this.moveAiResize(event)
+    this.aiResizePointer = null
+    if (event.type !== 'pointerup') this.aiDockWidth = this.aiResizePreference
+    else WorkspaceState.getInstance().resizeAiDock(this.aiDockWidth)
+  }
+
+  private keyAiResize = (event: KeyboardEvent): void => {
+    const geometry = this.aiGeometry
+    let width: number
+    if (event.key === 'ArrowLeft') width = geometry.width + 16
+    else if (event.key === 'ArrowRight') width = geometry.width - 16
+    else if (event.key === 'Home') width = geometry.min
+    else if (event.key === 'End') width = geometry.max
+    else return
+    event.preventDefault()
+    this.aiDockWidth = Math.max(geometry.min, Math.min(geometry.max, width))
+    WorkspaceState.getInstance().resizeAiDock(this.aiDockWidth)
+  }
+
+  /**
+   * Hold the panel mounted for its exit, then let it go.
+   *
+   * Reduced motion resolves on the next frame rather than after the animation's
+   * length, so a user who has asked for no motion is not made to wait out a
+   * transition they cannot see.
+   */
+  private syncAiDockClose(open: boolean): void {
+    if (this.aiCloseTimer !== null) {
+      clearTimeout(this.aiCloseTimer)
+      this.aiCloseTimer = null
+    }
+    if (open) {
+      this.aiClosing = false
+      return
+    }
+    if (!this.aiDockOpen) return
+    this.aiClosing = true
+    const done = (): void => {
+      this.aiCloseTimer = null
+      if (!this.aiDockOpen) this.aiClosing = false
+    }
+    this.aiCloseTimer = reducedMotionNow()
+      ? window.setTimeout(done, 0)
+      : window.setTimeout(done, DURATION.fast)
+  }
+
+  private renderAiDock(): unknown {
+    if ((!this.aiDockOpen && !this.aiClosing) || !this.aiEnabled) return null
+    const geometry = this.aiGeometry
+    /*
+     * One class for the direction, set once per open and once per close. Putting
+     * it on the element means the browser owns the timing and the reduced-motion
+     * guard is one rule rather than a branch in every caller.
+     */
+    const transition = this.aiClosing ? 'leaving' : 'entering'
+    return html`<div class="ai-column ${transition}" style=${`--ai-dock-width:${geometry.width}px`}>
+      <div
+        class="ai-divider"
+        role="separator"
+        tabindex="0"
+        aria-label="Resize AI assistant"
+        aria-orientation="vertical"
+        aria-valuemin=${Math.round(geometry.min)}
+        aria-valuemax=${Math.round(geometry.max)}
+        aria-valuenow=${Math.round(geometry.width)}
+        @pointerdown=${this.beginAiResize}
+        @pointermove=${this.moveAiResize}
+        @pointerup=${this.finishAiResize}
+        @pointercancel=${this.finishAiResize}
+        @lostpointercapture=${this.finishAiResize}
+        @keydown=${this.keyAiResize}
+      >
+        <span class="resize-handle" aria-hidden="true"><i></i><i></i><i></i></span>
+      </div>
+      <writemd-ai-dock
+        class="ai-dock"
+        @ai-close=${() => this.fileState.toggleAiDock(false)}
+      ></writemd-ai-dock>
+    </div>`
+  }
+
   render(): unknown {
     if (!this.filePath && !this.content) {
       return html`
-        <writemd-panel empty>
-          <div class="empty-state">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-              <polyline points="14 2 14 8 20 8" />
-            </svg>
-            <p>No document open</p>
-          </div>
-        </writemd-panel>
+        <div class="workspace">
+          <writemd-panel empty>
+            <div class="empty-state">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                <polyline points="14 2 14 8 20 8" />
+              </svg>
+              <p>No document open</p>
+            </div> </writemd-panel
+          >${this.renderAiDock()}
+        </div>
       `
     }
 
@@ -1606,8 +1793,9 @@ export class Editor extends LitElement {
         <!-- split view - 1 (Responsive Left Pane) -->
         <writemd-workspace
           class="panes"
-          .active=${this.splitActive || this.splitLeaving}
+          .active=${this.splitActive}
           .surface=${this.splitSurface}
+          @workspace-split-closed=${this.finishSplitExit}
           @workspace-measure=${() => {
             this.editorView?.requestMeasure()
             this.secondaryEditorView?.requestMeasure()
@@ -1626,10 +1814,11 @@ export class Editor extends LitElement {
             >
               <div id="primary-cm-wrapper" class="cm-wrapper"></div>
 
-              <!-- Bottom-right Info Pill -->
+              <!-- Footer: path, counts and mode control, in flow beneath the editor -->
               <writemd-info-pill
                 .content=${this.content}
                 .mode=${this.viewMode}
+                .path=${this.showFilePath ? displayPath(this.filePath) : ''}
                 @mode-change=${this.handleExplicitModeChange}
               ></writemd-info-pill>
             </div>
@@ -1642,14 +1831,14 @@ export class Editor extends LitElement {
                   <writemd-panel
                     slot="auxiliary"
                     class="pane pane-in ${this.splitLeaving ? ' pane-leaving' : ''}"
+                    ?inert=${this.splitLeaving}
                     .empty=${
                       this.mountsSecondaryView && secondaryDoc
                         ? !secondaryDoc.content.trim()
-                        : this.splitSurface === 'ai'
-                          ? this.aiMessages.length === 0
-                          : this.splitSurface === 'launcher'
+                        : false
                     }
                   >
+                    ${this.renderSurfaceTabs()}
                     ${
                       this.mountsSecondaryView && secondaryDoc
                         ? html`
@@ -1678,7 +1867,7 @@ export class Editor extends LitElement {
                                       </div>
                                     </div>
                                   </div>`
-                                : html`<writemd-doc-bar secondary></writemd-doc-bar>`
+                                : ''
                             }
 
                             <div
@@ -1692,6 +1881,7 @@ export class Editor extends LitElement {
                               <writemd-info-pill
                                 .content=${secondaryDoc.content}
                                 .mode=${secondaryDoc.viewMode}
+                                .path=${this.showFilePath ? displayPath(secondaryDoc.path) : ''}
                                 @mode-change=${(e: CustomEvent<{ mode: ViewMode }>) => {
                                   // Go through FileState, not local state: a local
                                   // mutation is overwritten by the next notify()
@@ -1703,292 +1893,22 @@ export class Editor extends LitElement {
                             </div>
                           `
                         : this.splitSurface === 'files'
-                          ? html`
-                              <!-- Vault Files Tree Panel -->
-                              <div class="sub-header">
-                                <div class="sub-header-left">
-                                  <div
-                                    class="icon-action"
-                                    role="button"
-                                    tabindex="0"
-                                    aria-label="Back to surfaces"
-                                    title="Back to surfaces"
-                                    @keydown=${this.handleIconActionKey}
-                                    @click=${() => this.fileState.setSplitSurface('launcher')}
-                                  >
-                                    ${icon('arrow-left')}
-                                  </div>
-                                  <span>Vault Files</span>
-                                </div>
-                                <div class="sub-header-center"></div>
-                                <div class="sub-header-right">
-                                  <div
-                                    class="icon-action"
-                                    role="button"
-                                    tabindex="0"
-                                    aria-label="Close split pane"
-                                    title="Close split pane"
-                                    @keydown=${this.handleIconActionKey}
-                                    @click=${() => this.fileState.toggleSplitView(false)}
-                                  >
-                                    <svg
-                                      viewBox="0 0 12 12"
-                                      fill="none"
-                                      stroke="currentColor"
-                                      stroke-width="1.5"
-                                    >
-                                      <line x1="2" y1="2" x2="10" y2="10" />
-                                      <line x1="10" y1="2" x2="2" y2="10" />
-                                    </svg>
-                                  </div>
-                                </div>
-                              </div>
-                              <writemd-vault-explorer></writemd-vault-explorer>
-                            `
-                          : this.splitSurface === 'backlinks'
-                            ? html`
-                                <!-- Backlinks Panel -->
-                                <div class="sub-header">
-                                  <div class="sub-header-left">
-                                    <div
-                                      class="icon-action"
-                                      role="button"
-                                      tabindex="0"
-                                      aria-label="Back to surfaces"
-                                      title="Back to surfaces"
-                                      @keydown=${this.handleIconActionKey}
-                                      @click=${() => this.fileState.setSplitSurface('launcher')}
-                                    >
-                                      ${icon('arrow-left')}
-                                    </div>
-                                    <span>Backlinks</span>
-                                  </div>
-                                  <div class="sub-header-center"></div>
-                                  <div class="sub-header-right">
-                                    <div
-                                      class="icon-action"
-                                      role="button"
-                                      tabindex="0"
-                                      aria-label="Close split pane"
-                                      title="Close split pane"
-                                      @keydown=${this.handleIconActionKey}
-                                      @click=${() => this.fileState.toggleSplitView(false)}
-                                    >
-                                      <svg
-                                        viewBox="0 0 12 12"
-                                        fill="none"
-                                        stroke="currentColor"
-                                        stroke-width="1.5"
-                                      >
-                                        <line x1="2" y1="2" x2="10" y2="10" />
-                                        <line x1="10" y1="2" x2="2" y2="10" />
-                                      </svg>
-                                    </div>
-                                  </div>
-                                </div>
-                                <writemd-backlinks-panel
-                                  .currentPath=${this.filePath}
-                                ></writemd-backlinks-panel>
-                              `
-                            : this.splitSurface === 'ai'
-                              ? html`
-                                  <!-- AI Panel -->
-                                  <div class="sub-header">
-                                    <div class="sub-header-left">
-                                      <div
-                                        class="icon-action"
-                                        role="button"
-                                        tabindex="0"
-                                        aria-label="Back to surfaces"
-                                        title="Back to surfaces"
-                                        @keydown=${this.handleIconActionKey}
-                                        @click=${() => this.fileState.setSplitSurface('launcher')}
-                                      >
-                                        ${icon('arrow-left')}
-                                      </div>
-                                      <span>AI Assistant</span>
-                                    </div>
-                                    <div class="sub-header-center"></div>
-                                    <div class="sub-header-right">
-                                      <div class="ai-history-anchor">
-                                        <div
-                                          class="icon-action"
-                                          role="button"
-                                          tabindex="0"
-                                          aria-label="Chat history"
-                                          aria-haspopup="listbox"
-                                          aria-expanded=${this.aiHistoryOpen ? 'true' : 'false'}
-                                          title="Chat history"
-                                          @keydown=${this.handleIconActionKey}
-                                          @click=${this.toggleAiHistory}
-                                        >
-                                          ${icon('clock')}
-                                        </div>
-                                        ${
-                                          this.aiHistoryOpen
-                                            ? html`
-                                                <div
-                                                  class="ai-history"
-                                                  role="listbox"
-                                                  aria-label="Chat history"
-                                                >
-                                                  ${
-                                                    this.aiSessions.length === 0
-                                                      ? html`<div class="ai-history-empty">
-                                                          No saved chats for this file yet.
-                                                        </div>`
-                                                      : this.aiSessions.map(
-                                                          (s) => html`
-                                                            <div
-                                                              class="ai-history-item ${
-                                                                s.id === this.aiSessionId
-                                                                  ? 'current'
-                                                                  : ''
-                                                              }"
-                                                              role="option"
-                                                              tabindex="0"
-                                                              aria-selected=${
-                                                                s.id === this.aiSessionId
-                                                                  ? 'true'
-                                                                  : 'false'
-                                                              }
-                                                              @keydown=${this.handleIconActionKey}
-                                                              @click=${() => this.handleAiSelectSession(s.id)}
-                                                            >
-                                                              <span class="ai-history-title"
-                                                                >${s.title}</span
-                                                              >
-                                                              <span class="ai-history-meta"
-                                                                >${s.messageCount}
-                                                                message${
-                                                                  s.messageCount === 1 ? '' : 's'
-                                                                }
-                                                                - ${formatWhen(s.updatedAt)}</span
-                                                              >
-                                                            </div>
-                                                          `
-                                                        )
-                                                  }
-                                                </div>
-                                              `
-                                            : ''
-                                        }
-                                      </div>
-                                      <div
-                                        class="icon-action"
-                                        role="button"
-                                        tabindex="0"
-                                        aria-label="New chat"
-                                        title="New chat"
-                                        @keydown=${this.handleIconActionKey}
-                                        @click=${this.handleAiNewSession}
-                                      >
-                                        ${icon('plus')}
-                                      </div>
-                                      <div
-                                        class="icon-action"
-                                        role="button"
-                                        tabindex="0"
-                                        aria-label="Clear chat history"
-                                        title="Clear chat history"
-                                        @keydown=${this.handleIconActionKey}
-                                        @click=${() => this.handleAiClear()}
-                                      >
-                                        <svg
-                                          viewBox="0 0 24 24"
-                                          fill="none"
-                                          stroke="currentColor"
-                                          stroke-width="1.5"
-                                        >
-                                          <path d="M3 6h18" />
-                                          <path
-                                            d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"
-                                          />
-                                        </svg>
-                                      </div>
-                                      <div
-                                        class="icon-action"
-                                        role="button"
-                                        tabindex="0"
-                                        aria-label="Close split pane"
-                                        title="Close split pane"
-                                        @keydown=${this.handleIconActionKey}
-                                        @click=${() => this.fileState.toggleSplitView(false)}
-                                      >
-                                        <svg
-                                          viewBox="0 0 12 12"
-                                          fill="none"
-                                          stroke="currentColor"
-                                          stroke-width="1.5"
-                                        >
-                                          <line x1="2" y1="2" x2="10" y2="10" />
-                                          <line x1="10" y1="2" x2="2" y2="10" />
-                                        </svg>
-                                      </div>
-                                    </div>
-                                  </div>
-                                  <writemd-ai-panel
-                                    .configured=${this.isAiConfigured}
-                                    .messages=${this.aiMessages}
-                                    .loading=${this.aiIsLoading}
-                                    .model=${this.aiModel}
-                                    .models=${this.aiModels}
-                                    .modelsLoading=${this.aiModelsLoading}
-                                    .attachments=${this.aiAttachments}
-                                    .attaching=${this.aiAttaching}
-                                    .webSearch=${
-                                      this.settingsStore?.get<boolean>(
-                                        'ai.webSearchEnabled',
-                                        false
-                                      ) ?? false
-                                    }
-                                    @ai-submit=${this.handleAiSubmitEvent}
-                                    @ai-cancel=${this.handleAiCancel}
-                                    @ai-websearch-toggle=${this.handleAiWebSearchToggle}
-                                    @ai-attach-request=${this.handleAiAttachRequest}
-                                    @ai-attach-files=${this.handleAiAttachFiles}
-                                    @ai-attach-remove=${this.handleAiAttachRemove}
-                                    @ai-model-change=${this.handleAiModelChange}
-                                    @thought-settle=${this.handleThoughtSettle}
-                                  ></writemd-ai-panel>
-                                `
-                              : html`
-                                  <!-- Open a surface Launcher Panel -->
-                                  <div class="sub-header">
-                                    <div class="sub-header-left">Surface</div>
-                                    <div class="sub-header-right">
-                                      <div
-                                        class="icon-action"
-                                        role="button"
-                                        tabindex="0"
-                                        aria-label="Close split pane"
-                                        title="Close split pane"
-                                        @keydown=${this.handleIconActionKey}
-                                        @click=${() => this.fileState.toggleSplitView(false)}
-                                      >
-                                        <svg
-                                          viewBox="0 0 12 12"
-                                          fill="none"
-                                          stroke="currentColor"
-                                          stroke-width="1.5"
-                                        >
-                                          <line x1="2" y1="2" x2="10" y2="10" />
-                                          <line x1="10" y1="2" x2="2" y2="10" />
-                                        </svg>
-                                      </div>
-                                    </div>
-                                  </div>
-
-                                  <writemd-surface-launcher
-                                    @select-surface=${this.handleSurfaceSelection}
-                                  ></writemd-surface-launcher>
-                                `
+                          ? html`<writemd-vault-explorer></writemd-vault-explorer>`
+                          : this.splitSurface === 'preview'
+                            ? html`<writemd-preview-panel
+                                .markdown=${this.content}
+                                .docPath=${this.filePath}
+                              ></writemd-preview-panel>`
+                            : html`<writemd-backlinks-panel
+                                .currentPath=${this.filePath}
+                              ></writemd-backlinks-panel>`
                     }
                   </writemd-panel>
                 `
               : ''
           }
         </writemd-workspace>
+        ${this.renderAiDock()}
         ${
           this.textMenu && (this.textMenu.secondary ? this.secondaryEditorView : this.editorView)
             ? html`<writemd-text-menu
@@ -1996,6 +1916,9 @@ export class Editor extends LitElement {
                 .y=${this.textMenu.y}
                 .flip=${this.textMenu.x > window.innerWidth - 480}
                 .view=${this.textMenu.secondary ? this.secondaryEditorView : this.editorView}
+                .aiEnabled=${this.aiEnabled}
+                .selection=${this.textMenu.selection}
+                @ai-selection-action=${this.handleAiSelectionAction}
                 @close=${() => (this.textMenu = null)}
               ></writemd-text-menu>`
             : ''

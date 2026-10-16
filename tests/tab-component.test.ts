@@ -97,6 +97,12 @@ describe('writemd-tab', () => {
       t.shadowRoot?.querySelector('.close-btn')?.getAttribute('aria-label')
     )
     expect(closes).toEqual(['Close a.md', 'Close b.md'])
+    for (const tab of tabs) {
+      const icon = tab.shadowRoot!.querySelector('.close-btn svg')!
+      expect(icon.getAttribute('data-icon')).toBe('x')
+      expect(icon.getAttribute('width')).toBe('18')
+      expect(icon.getAttribute('height')).toBe('18')
+    }
   })
 
   it('hides the close button on inactive tabs and reveals it on hover', async () => {

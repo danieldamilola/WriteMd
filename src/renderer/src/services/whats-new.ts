@@ -1,48 +1,67 @@
 import { api } from '../api'
 import { SettingsStore } from '../state/settings'
 
-const notesModules = import.meta.glob('../../../../docs/release-notes/RELEASE_NOTES_*.md', {
+const changelogModules = import.meta.glob('../../../../CHANGELOG.md', {
   query: '?raw',
   import: 'default',
   eager: true
 }) as Record<string, string>
 
+// Take the single match by suffix rather than by the pattern key: the bundler is
+// free to normalize the key, and a literal lookup silently produced an empty
+// changelog in a production build while the dev build worked.
+const changelog =
+  Object.entries(changelogModules).find(([path]) => path.endsWith('CHANGELOG.md'))?.[1] ?? ''
+
+/**
+ * One version's block from the changelog, without its heading.
+ *
+ * The file is the single record in Keep a Changelog form, so a version is a `##`
+ * heading followed by `###` sections and bullets until the next `##`. Lines
+ * above the first version heading, including the format preamble, are skipped so
+ * a malformed heading can never return the whole file.
+ */
+export function changelogSection(markdown: string, version: string): string | null {
+  const wanted = `## [${version}]`
+  const lines = markdown.split('\n')
+  const start = lines.findIndex((line) => line.startsWith(wanted))
+  if (start === -1) return null
+  const end = lines.findIndex((line, index) => index > start && line.startsWith('## '))
+  const body = (end === -1 ? lines.slice(start + 1) : lines.slice(start + 1, end)).join('\n')
+  return body.trim() || null
+}
+
 function notesForVersion(version: string): string | null {
-  for (const [path, md] of Object.entries(notesModules)) {
-    if (path.includes(`v${version}`)) return md
-  }
-  return null
+  if (!version) return null
+  return changelogSection(changelog, version)
 }
 
 /**
- * A few lines of an update's notes, for the hover card on the toolbar button.
+ * A few lines of a release's notes, for the hover card on the toolbar button.
  *
- * The notes files open with `# Release Notes - v1.3.0`, then a `**Features**`
- * heading and one `- **Bold title**: prose...` bullet per feature. The bold
- * lead-in is the only part worth a hover card, so those are lifted out and the
- * prose dropped. Falls back to the first prose lines when a release has no
- * feature bullets, so an unusual notes file still says something.
+ * Only the bold lead-in of each bullet is worth a hover card, so the prose is
+ * dropped. Falls back to the first prose lines when a section has no bold
+ * lead-ins, so an unusual entry still says something.
  */
 export function summarizeNotes(markdown: string, maxItems = 3): string[] {
-  const withoutTitle = markdown.replace(/^#\s+.*\n+/, '')
-
   const bullets: string[] = []
-  for (const line of withoutTitle.split('\n')) {
+  for (const line of markdown.split('\n')) {
     const bullet = /^\s*[-*]\s+\*\*(.+?)\*\*/.exec(line)
     if (bullet) bullets.push(bullet[1].trim())
     if (bullets.length >= maxItems) return bullets
   }
   if (bullets.length > 0) return bullets
 
-  // No feature bullets: take the first few prose lines that are not headings.
-  // A `**Features**` section marker is a heading written in bold, and would
-  // otherwise survive the `*_#-` strip as the fragment `Features**`.
+  // No bold lead-ins: take the first few prose lines that are not headings.
   const prose: string[] = []
-  for (const line of withoutTitle.split('\n')) {
+  for (const line of markdown.split('\n')) {
     const trimmed = line.trim()
-    if (/^\*\*.+\*\*:?$/.test(trimmed)) continue
-    const text = trimmed.replace(/^[*_#-]+\s*/, '').trim()
-    if (!text || text.startsWith('**')) continue
+    if (!trimmed || trimmed.startsWith('#')) continue
+    const text = trimmed
+      .replace(/^[-*_]+\s*/, '')
+      .replace(/\s*[-:]$/, '')
+      .trim()
+    if (!text) continue
     prose.push(text)
     if (prose.length >= maxItems) break
   }

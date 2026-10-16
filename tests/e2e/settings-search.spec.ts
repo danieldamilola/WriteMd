@@ -1,7 +1,17 @@
 import { test, expect, type ElectronApplication, type Page } from '@playwright/test'
 import { makeFixture, launch, firstWindow, openSettings } from './fixtures'
+import { TAB_LABELS, SETTINGS_NAV_GROUPS } from '../../src/renderer/src/state/settings-search'
 
 const fixture = makeFixture('settings-search')
+
+/**
+ * Counted from the source of truth rather than written as a literal. A hardcoded
+ * 7 fails every time a section is added, and the failure says nothing about the
+ * thing the test is actually about - which is that clearing the search brings
+ * the whole navigation back.
+ */
+const NAV_COUNT = Object.keys(TAB_LABELS).length
+const GROUP_COUNT = SETTINGS_NAV_GROUPS.length
 
 /**
  * Search has to find the setting the user named, not just the section that
@@ -81,8 +91,8 @@ test.describe('Settings search', () => {
     await expect(modal.locator('.nav-btn:visible')).toHaveText('New notes')
     await expect(modal.locator('.search-status')).toHaveText('1 matching section')
     await search.fill('')
-    await expect(modal.locator('.nav-section:visible')).toHaveCount(3)
-    await expect(modal.locator('.nav-btn:visible')).toHaveCount(8)
+    await expect(modal.locator('.nav-section:visible')).toHaveCount(GROUP_COUNT)
+    await expect(modal.locator('.nav-btn:visible')).toHaveCount(NAV_COUNT)
     await expect(modal.locator('.search-status')).toHaveCount(0)
     await modal.locator('.nav-btn', { hasText: 'About WriteMd' }).click()
     await expect(modal.locator('.content-panel')).toHaveAttribute('data-tab', 'about')

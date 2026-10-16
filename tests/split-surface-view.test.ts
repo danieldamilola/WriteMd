@@ -9,7 +9,7 @@ import { tmpdir } from 'os'
  * the teardown guard used to test only `splitActive` and `secondaryDoc`.
  *
  * Two failures came out of that mismatch, both reachable by normal use:
- *  - switching the surface to AI/Files/Backlinks left a live view attached to a
+ *  - switching the surface to Files/Backlinks left a live view attached to a
  *    detached wrapper, so it kept its window listeners and its decoration
  *    loop running against a dead DOM node;
  *  - switching back to 'file' found `secondaryEditorView` still set, so
@@ -47,7 +47,7 @@ function predicate(): boolean {
 describe('shouldMountSecondaryView', () => {
   it('is false when nothing is open', () => {
     expect(
-      shouldMountSecondaryView({ splitActive: false, secondaryDoc: null, splitSurface: 'launcher' })
+      shouldMountSecondaryView({ splitActive: false, secondaryDoc: null, splitSurface: 'files' })
     ).toBe(false)
   })
 
@@ -58,7 +58,7 @@ describe('shouldMountSecondaryView', () => {
   })
 
   it('is false when a doc is open but the surface is not the file surface', () => {
-    for (const surface of ['ai', 'files', 'backlinks', 'launcher'] as SplitSurface[]) {
+    for (const surface of ['files', 'backlinks'] as SplitSurface[]) {
       expect(
         shouldMountSecondaryView({ splitActive: true, secondaryDoc: {}, splitSurface: surface })
       ).toBe(false)
@@ -85,7 +85,7 @@ describe('a surface round trip returns to a mounted view', () => {
 
     // The regression path: every one of these kept the predicate true before,
     // so the live view was never torn down.
-    for (const surface of ['ai', 'files', 'backlinks'] as SplitSurface[]) {
+    for (const surface of ['files', 'backlinks'] as SplitSurface[]) {
       files.setSplitSurface(surface)
       expect(predicate()).toBe(false)
     }
@@ -108,7 +108,7 @@ describe('a surface round trip returns to a mounted view', () => {
   it('stays false for every non-file surface after the split closes', () => {
     files.openSecondaryFile('C:/vault/fourth.md', 'body')
     files.closeSecondaryFile()
-    for (const surface of ['file', 'ai', 'files', 'backlinks', 'launcher'] as SplitSurface[]) {
+    for (const surface of ['file', 'files', 'backlinks'] as SplitSurface[]) {
       files.setSplitSurface(surface)
       expect(predicate()).toBe(false)
     }
@@ -144,14 +144,22 @@ describe('secondary view mode goes through the store', () => {
     files.closeSecondaryFile()
   })
 
-  it('allows navigating between launcher and tool surfaces', () => {
-    files.setSplitSurface('ai')
-    expect(files.getState().splitSurface).toBe('ai')
-    files.setSplitSurface('launcher')
-    expect(files.getState().splitSurface).toBe('launcher')
+  it('allows switching directly between surfaces', () => {
+    // Surfaces are tabs now. Every one of them is reachable from every other
+    // without routing back through a picker first, which is the whole point.
+    files.setSplitSurface('backlinks')
+    expect(files.getState().splitSurface).toBe('backlinks')
     files.setSplitSurface('files')
     expect(files.getState().splitSurface).toBe('files')
-    files.setSplitSurface('launcher')
-    expect(files.getState().splitSurface).toBe('launcher')
+    files.setSplitSurface('file')
+    expect(files.getState().splitSurface).toBe('file')
+  })
+
+  it('returns to Files when the pane closes', () => {
+    // There is no longer a picker to fall back to, so closing the pane has to
+    // land on a real surface rather than one that no longer exists.
+    files.setSplitSurface('backlinks')
+    files.closeSecondaryFile()
+    expect(files.getState().splitSurface).toBe('files')
   })
 })

@@ -1,6 +1,11 @@
+import { OpenCodeState } from '../state/opencode'
+import './ai/ModelOptions'
+import { providerIcon } from './ai/provider-icons'
+import { EMPTY_OPENCODE_AUTH, type OpenCodeAuthView } from '../../../shared/ai/opencode'
 import { html, css, LitElement, type PropertyValues } from 'lit'
 import { customElement, property, state } from 'lit/decorators.js'
 import './BackgroundControls'
+import './Background'
 import './IconButton'
 import './SearchBar'
 import { controlStyles, settingsSelectStyles } from '../design/controls'
@@ -10,11 +15,13 @@ import { chromeIcon } from '../design/icons'
 import './Modal'
 import { nativeModalAvailable } from './Modal'
 import { api } from '../api'
+import type { ProviderPresetView } from '../../../shared/electron-api'
+import type { AiSkillsView } from '../../../shared/ai/skills'
 import { deepActiveElement } from '../utils/links'
 import { MOTION_LABELS, MOTION_PREFERENCES, type MotionPreference } from '../utils/motion'
-import { DEFAULT_AI_SYSTEM_PROMPT } from '../../../shared/settings-schema'
 import { SettingsStore } from '../state/settings'
-import { emit } from '../events/bus'
+import { ChatgptState } from '../state/chatgpt'
+import { EMPTY_CHATGPT_AUTH, type ChatgptAuthView } from '../../../shared/ai/chatgpt'
 import { showConfirm } from './ConfirmDialog'
 import { icon } from './icons'
 import { scrollbarStyles } from './scrollbars'
@@ -39,6 +46,15 @@ import {
   type SettingsTab
 } from '../state/settings-search'
 
+const SKILLS_RESTART_MESSAGE = 'Restart WriteMd to finish enabling skills, then try again.'
+
+function skillsErrorMessage(error: unknown, fallback: string): string {
+  const message = error instanceof Error ? error.message : String(error)
+  return /No handler registered for ['"]?ai:(?:open-skills-folder|list-skills)/i.test(message)
+    ? SKILLS_RESTART_MESSAGE
+    : fallback
+}
+
 /**
  * The element that actually holds focus, descending through open shadow roots.
  *
@@ -62,8 +78,8 @@ const NAV_ICONS: Record<SettingsTab, string> = {
   editor: 'pencil',
   files: 'folder-open',
   appearance: 'palette',
+  ai: 'ai',
   shortcuts: 'keyboard',
-  ai: 'bot',
   advanced: 'settings',
   about: 'info'
 }
@@ -120,32 +136,6 @@ const ACCENT_COLORS = [
   '#f26419', // Orange
   '#00c4cc' // Cyan
 ]
-
-/**
- * Known models per provider, shown until the live list arrives. This lived as
- * two identical literals inside the class; a third partial copy sits in the
- * shared schema. One definition, referenced by both call sites.
- */
-const PROVIDER_MODEL_DEFAULTS: Record<string, string[]> = {
-  OpenAI: ['gpt-4o', 'gpt-4-turbo', 'gpt-3.5-turbo'],
-  Anthropic: ['claude-3-5-sonnet-20240620', 'claude-3-opus-20240229', 'claude-3-haiku-20240307'],
-  GoogleGemini: ['gemini-1.5-pro', 'gemini-1.5-flash'],
-  Mistral: ['mistral-large-latest', 'open-mixtral-8x22b'],
-  Groq: ['llama3-70b-8192', 'llama3-8b-8192', 'mixtral-8x7b-32768'],
-  DeepSeek: ['deepseek-chat', 'deepseek-coder'],
-  xAI: ['grok-2', 'grok-2-mini'],
-  OpenRouter: ['openai/gpt-4o', 'anthropic/claude-3.5-sonnet', 'google/gemini-1.5-pro'],
-  // Local CLI: model is free-text provider/model (or empty for CLI default).
-  OpenCode: [],
-  Nvidia: [
-    'meta/llama-3.3-70b-instruct',
-    'deepseek-ai/deepseek-r1',
-    'qwen/qwen2.5-coder-32b-instruct',
-    'nvidia/llama-3.1-nemotron-70b-instruct',
-    'mistralai/mixtral-8x22b-instruct-v0.1'
-  ],
-  Ollama: ['llama3', 'mistral', 'phi3']
-}
 
 @customElement('writemd-settings-modal')
 export class SettingsModal extends LitElement {
@@ -245,8 +235,8 @@ export class SettingsModal extends LitElement {
       }
 
       .nav-btn svg {
-        width: 16px;
-        height: 16px;
+        width: var(--icon-size, 18px);
+        height: var(--icon-size, 18px);
         opacity: 0.7;
         flex-shrink: 0;
       }
@@ -594,6 +584,81 @@ export class SettingsModal extends LitElement {
         background: var(--bg-active);
       }
 
+      .ai-settings .section {
+        margin-bottom: 20px;
+      }
+      .ai-settings .setting-row {
+        flex-wrap: nowrap;
+        gap: 20px;
+        padding: 12px 0;
+      }
+      .ai-settings .setting-row:first-child {
+        padding-top: 0;
+      }
+      .ai-settings .setting-row:last-child {
+        padding-bottom: 0;
+      }
+      .ai-settings .setting-row > :first-child {
+        flex: 1 1 0;
+      }
+      .ai-settings .setting-row > .control-group,
+      .ai-settings .setting-row > .control-stack,
+      .ai-settings .setting-row > wa-select,
+      .ai-settings .setting-row > input[type='url'] {
+        flex: 0 1 300px;
+        width: 300px;
+        min-width: 0;
+      }
+      .ai-settings .control-stack > wa-select,
+      .ai-settings .control-stack > .control-btn {
+        width: 100%;
+        flex: 0 0 auto;
+      }
+      .ai-settings .control-group .control-btn {
+        white-space: nowrap;
+      }
+      .ai-settings .setting-row > .toggle-switch {
+        flex: 0 0 36px;
+      }
+      .ai-skills-actions {
+        justify-content: flex-end;
+      }
+      .ai-skills-path {
+        overflow-wrap: anywhere;
+        font-size: 12px;
+        margin-top: 12px;
+      }
+      .ai-skill-list {
+        list-style: none;
+        margin: 12px 0 0;
+        padding: 0;
+      }
+      .ai-skill-list li {
+        padding: 8px 0;
+        overflow-wrap: anywhere;
+      }
+      .ai-skill-list .setting-desc {
+        margin-top: 2px;
+      }
+      .ai-message {
+        overflow-wrap: anywhere;
+        color: var(--danger);
+      }
+      .ai-skill-warning {
+        overflow-wrap: anywhere;
+        color: var(--warning);
+      }
+      .chatgpt-welcome {
+        width: 360px;
+        max-width: calc(100vw - 32px);
+        padding: 24px;
+        background: var(--bg-elevated);
+        color: var(--text);
+      }
+      .chatgpt-welcome p {
+        color: var(--text-secondary);
+        line-height: 1.5;
+      }
       .text-input {
         width: 220px;
         min-height: 34px;
@@ -614,15 +679,6 @@ export class SettingsModal extends LitElement {
       .text-input[type='number'] {
         flex: 0 0 88px;
         width: 88px;
-      }
-      textarea.text-input.prompt-input {
-        width: 100%;
-        min-height: 160px;
-        resize: vertical;
-        line-height: 1.5;
-        font-family: inherit;
-        box-sizing: border-box;
-        flex-shrink: 1;
       }
 
       .danger-btn {
@@ -672,24 +728,38 @@ export class SettingsModal extends LitElement {
       }
       ${scrollbarStyles}
 
+      /* Settings fills the window, so it takes the app's surface tokens: rail like
+         the app's rail, content like a document pane, and a clear host so what
+         shows through is the workspace rather than a second solid layer. Cards
+         below keep --bg-card and read as objects on top, as in Windows Settings. */
       :host(.embedded) {
         position: absolute;
         inset: 0;
         z-index: 6;
-        background: var(--bg);
+        background: transparent;
       }
       :host(.embedded) .modal-dialog {
         width: 100%;
         height: 100%;
         border-radius: 0;
         box-shadow: none;
+        background: transparent;
       }
       :host(.embedded) .sidebar {
         width: var(--shell-sidebar-width);
         background: var(--frame-surface);
+        backdrop-filter: blur(var(--surface-blur, 0px));
       }
       :host(.embedded) .main-area {
-        padding-top: var(--shell-header-height);
+        position: relative;
+        isolation: isolate;
+        background: var(--editor-surface);
+        backdrop-filter: blur(var(--surface-blur, 0px));
+        margin-top: var(--shell-header-height);
+      }
+      :host(.embedded) .content-panel {
+        position: relative;
+        z-index: 1;
       }
       :host(.embedded) .main-header {
         display: none;
@@ -721,6 +791,29 @@ export class SettingsModal extends LitElement {
         .text-input {
           max-width: 100%;
         }
+        .ai-settings .setting-row {
+          flex-wrap: wrap;
+          gap: 10px;
+        }
+        .ai-settings .setting-row > :first-child {
+          flex-basis: 100%;
+        }
+        .ai-settings .setting-row:has(> .toggle-switch) {
+          flex-wrap: nowrap;
+        }
+        .ai-settings .setting-row:has(> .toggle-switch) > :first-child {
+          flex-basis: 0;
+        }
+        .ai-settings .setting-row > .control-group,
+        .ai-settings .setting-row > .control-stack,
+        .ai-settings .setting-row > wa-select,
+        .ai-settings .setting-row > input[type='url'] {
+          flex-basis: 100%;
+          width: 100%;
+        }
+        .ai-skills-actions {
+          justify-content: flex-start;
+        }
       }
       @container settings (width < 440px) {
         .theme-grid {
@@ -733,7 +826,7 @@ export class SettingsModal extends LitElement {
   @state() private tab: SettingsTab = 'general'
   @state() private searchQuery = ''
 
-  /** Jump to a tab from outside, e.g. the AI panel's "not configured" state. */
+  /** Jump to a tab from outside, e.g. a deep link from another component. */
   @property({ type: Boolean }) embedded = false
   @property({ type: String }) initialTab: SettingsTab = 'general'
 
@@ -755,6 +848,7 @@ export class SettingsModal extends LitElement {
   @state() private wordWrap = true
   @state() private autoSave = true
   @state() private lineNumbers = false
+  @state() private showFilePath = true
   @state() private enableMermaid = true
   @state() private defaultNewFileName = 'Untitled.md'
   @state() private pdfPageSize = 'A4'
@@ -775,30 +869,31 @@ export class SettingsModal extends LitElement {
   @state() private capturingId: string | null = null
   @state() private conflictMsg = ''
 
-  private updaterUnsubs: Array<() => void> = []
+  // AI assistant
+  @state() private aiEnabled = false
+  @state() private aiAutoAcceptEdits = false
+  @state() private aiProviderId = 'openai'
+  @state() private aiBaseUrl = ''
+  @state() private aiModel = ''
+  @state() private aiKeySet = false
+  @state() private aiKeyUnreadable = false
+  @state() private aiKeyInput = ''
+  @state() private aiHistoryTurns = 8
+  @state() private aiMaxOutputTokens = 0
+  @state() private aiModels: string[] = []
+  @state() private aiPresets: ProviderPresetView[] = []
+  @state() private aiFetchingModels = false
+  @state() private aiFetchError = ''
+  @state() private aiChatgptState: ChatgptAuthView = { ...EMPTY_CHATGPT_AUTH }
+  private chatgptState = ChatgptState.getInstance()
+  @state() private aiOpenCodeState: OpenCodeAuthView = { ...EMPTY_OPENCODE_AUTH }
+  private openCodeState = OpenCodeState.getInstance()
+  @state() private aiSkills: AiSkillsView | null = null
+  @state() private aiSkillsError = ''
+  private aiModelRequest = 0
+  private aiSkillsRequest = 0
 
-  // AI State
-  @state() private aiProvider = 'OpenAI'
-  @state() private aiModel = 'gpt-4o'
-  @state() private aiApiKey = ''
-  @state() private aiKeyStored = false
-  @state() private aiKeyUndecryptable = false
-  @state() private aiSystemPrompt = DEFAULT_AI_SYSTEM_PROMPT
-  @state() private availableModels: string[] = []
-  @state() private isFetchingModels = false
-  @state() private fetchError = ''
-  @state() private opencodeCliFound: boolean | null = null
-  @state() private opencodeCliPath: string | null = null
-  @state() private opencodeCliVersion: string | null = null
-  @state() private opencodeLoginCommand = 'opencode auth login opencode'
-  @state() private opencodeAuthLoggedIn: boolean | null = null
-  @state() private opencodeAuthDetail = ''
-  @state() private opencodeCopied = false
-  @state() private opencodeCustomPath = ''
-  @state() private opencodeManagedUp: boolean | null = null
-  @state() private opencodeDebug: string[] = []
-  @state() private opencodeChecking = false
-  @state() private webSearchEnabled = false
+  private updaterUnsubs: Array<() => void> = []
 
   private settingsStore = SettingsStore.getInstance()
   private settingsSubscriptions: (() => void)[] = []
@@ -806,8 +901,42 @@ export class SettingsModal extends LitElement {
   connectedCallback(): void {
     super.connectedCallback()
     this.loadCurrentSettings()
+    void this.loadAiPresets()
+    void this.loadAiSkills()
     this.settingsSubscriptions = [
+      this.openCodeState.subscribe(() => {
+        const before = this.aiOpenCodeState
+        this.aiOpenCodeState = this.openCodeState.state()
+        if (
+          this.aiProviderId === 'opencode' &&
+          (before.connectionId !== this.aiOpenCodeState.connectionId ||
+            before.connected !== this.aiOpenCodeState.connected)
+        ) {
+          this.invalidateAiModels()
+          if (this.aiOpenCodeState.connected) void this.fetchAiModels()
+        }
+      }),
+      this.chatgptState.subscribe(() => {
+        const before = this.aiChatgptState
+        this.aiChatgptState = this.chatgptState.state()
+        if (
+          this.aiProviderId === 'chatgpt' &&
+          (before.activeId !== this.aiChatgptState.activeId ||
+            before.connected !== this.aiChatgptState.connected)
+        ) {
+          this.invalidateAiModels()
+          if (this.aiChatgptState.connected) void this.fetchAiModels()
+        }
+      }),
       this.settingsStore.subscribeSaveStatus(() => this.requestUpdate()),
+      this.settingsStore.subscribe('ai', () => {
+        const changed =
+          this.aiProviderId !== this.settingsStore.get('ai.providerId', 'openai') ||
+          this.aiBaseUrl !== this.settingsStore.get('ai.baseUrl', '') ||
+          this.aiKeySet !== this.settingsStore.get('ai.apiKeySet', false)
+        this.loadCurrentSettings()
+        if (changed) this.invalidateAiModels()
+      }),
       this.settingsStore.subscribe('appearance', () => {
         this.loadCurrentSettings()
         this.requestUpdate()
@@ -819,7 +948,6 @@ export class SettingsModal extends LitElement {
       ?.app?.getVersion?.()
       .then((v) => (this.appVersion = v))
       .catch(() => undefined)
-    void this.checkOpencodeStatus()
 
     const updater = api()?.updater
     if (updater) {
@@ -864,6 +992,8 @@ export class SettingsModal extends LitElement {
   }
 
   disconnectedCallback(): void {
+    this.aiModelRequest++
+    this.aiSkillsRequest++
     this.settingsSubscriptions.forEach((unsubscribe) => unsubscribe())
     this.settingsSubscriptions = []
     window.removeEventListener('keydown', this.handleKeyDown, true)
@@ -886,6 +1016,7 @@ export class SettingsModal extends LitElement {
     this.wordWrap = s.get('editor.wordWrap', true)
     this.autoSave = s.get('editor.autoSave', true)
     this.lineNumbers = s.get('editor.showLineNumbers', false)
+    this.showFilePath = s.get('editor.showFilePath', true)
     this.vaultPath = s.get('files.vaultPath', '')
     this.enableMermaid = s.get('advanced.enableMermaid', true)
     this.defaultNewFileName = s.get('files.defaultNewFileName', 'Untitled.md')
@@ -895,22 +1026,16 @@ export class SettingsModal extends LitElement {
     this.panelOrientation = s.get('appearance.panelOrientation', 'vertical') as
       'horizontal' | 'vertical'
     this.motion = s.get('appearance.motion', 'system') as MotionPreference
-    this.aiProvider = s.get('ai.provider', 'OpenAI')
-    this.aiModel = s.get('ai.model', 'gpt-4o')
-    this.aiApiKey = s.get('ai.apiKey', '')
-    this.aiKeyStored = s.get<boolean>('ai.apiKeySet', false)
-    this.aiKeyUndecryptable = s.get<boolean>('ai.apiKeyUndecryptable', false)
-    this.aiSystemPrompt = s.get('ai.systemPrompt', DEFAULT_AI_SYSTEM_PROMPT)
-    this.opencodeCustomPath = s.get('ai.opencodeCliPath', '')
-    this.webSearchEnabled = s.get<boolean>('ai.webSearchEnabled', false)
     this.autoCheckForUpdates = s.get('updates.autoCheckForUpdates', true)
-
-    if (this.availableModels.length === 0) {
-      this.availableModels = [...(PROVIDER_MODEL_DEFAULTS[this.aiProvider] ?? [])]
-      if (this.aiModel && !this.availableModels.includes(this.aiModel)) {
-        this.availableModels.unshift(this.aiModel)
-      }
-    }
+    this.aiEnabled = s.get('ai.enabled', false)
+    this.aiAutoAcceptEdits = s.get('ai.autoAcceptEdits', false)
+    this.aiProviderId = s.get('ai.providerId', 'openai')
+    this.aiBaseUrl = s.get('ai.baseUrl', '')
+    this.aiModel = s.get('ai.model', '')
+    this.aiKeySet = s.get('ai.apiKeySet', false)
+    this.aiHistoryTurns = s.get('ai.historyTurns', 8)
+    this.aiMaxOutputTokens = s.get('ai.maxOutputTokens', 0)
+    this.aiModels = s.get('ai.cachedModels', [])
   }
 
   private updateSetting(key: string, value: unknown): void {
@@ -926,6 +1051,12 @@ export class SettingsModal extends LitElement {
       return
     }
     if (e.key === 'Escape') {
+      if (
+        e
+          .composedPath()
+          .some((node) => node instanceof HTMLElement && node.localName === 'writemd-popover')
+      )
+        return
       const select = e
         .composedPath()
         .find(
@@ -1211,140 +1342,6 @@ export class SettingsModal extends LitElement {
     }
   }
 
-  /**
-   * The stored key is never readable, so the field is write-only: an empty
-   * input leaves the existing key alone, and typing one replaces it. Clearing
-   * the field does not delete the key, because there is no way to confirm the
-   * intent without being able to see the value.
-   */
-  private handleApiKeyInput = (e: Event): void => {
-    const value = (e.target as HTMLInputElement).value.trim()
-    if (!value) {
-      ;(e.target as HTMLInputElement).value = ''
-      return
-    }
-    this.aiApiKey = ''
-    this.updateSetting('ai.apiKey', value)
-  }
-
-  private async fetchModels(): Promise<void> {
-    this.fetchError = ''
-    if (
-      !this.aiApiKey &&
-      !this.aiKeyStored &&
-      this.aiProvider !== 'Ollama' &&
-      this.aiProvider !== 'OpenCode'
-    ) {
-      this.fetchError = 'API Key required'
-      return
-    }
-    this.isFetchingModels = true
-    this.availableModels = []
-    try {
-      const electron = api()
-      if (!electron) throw new Error('No electron API')
-
-      const models = await electron.net.fetchModels(this.aiProvider, this.aiApiKey)
-      if (models && models.length > 0) {
-        this.availableModels = models
-        emit('ai:models-updated', { models })
-        if (!this.availableModels.includes(this.aiModel)) {
-          this.aiModel = this.availableModels[0]
-          this.updateSetting('ai.model', this.aiModel)
-        }
-      } else if (this.aiProvider === 'OpenCode') {
-        // The CLI model field is free-text (provider/model, or empty for the
-        // CLI default); an empty list is not a failure.
-        this.availableModels = this.aiModel ? [this.aiModel] : []
-        this.fetchError = ''
-      } else {
-        throw new Error('No models returned')
-      }
-    } catch (e) {
-      console.error('Failed to fetch models', e)
-      this.fetchError = e instanceof Error ? e.message : 'Failed to fetch'
-    } finally {
-      this.isFetchingModels = false
-    }
-  }
-
-  private async checkOpencodeStatus(customPath?: string): Promise<void> {
-    const electron = api()
-    const getStatus = electron?.opencode?.getStatus
-    if (!getStatus) return
-    this.opencodeChecking = true
-    try {
-      const s = await getStatus(customPath ?? this.opencodeCustomPath ?? '')
-      this.opencodeCliFound = s.cliFound
-      this.opencodeCliPath = s.cliPath
-      this.opencodeCliVersion = s.cliVersion
-      this.opencodeLoginCommand = s.loginCommand ?? this.opencodeLoginCommand
-      this.opencodeAuthLoggedIn = s.auth?.loggedIn ?? null
-      this.opencodeAuthDetail = s.auth?.detail ?? ''
-      this.opencodeManagedUp = s.managedServerUp ?? null
-      this.opencodeDebug = Array.isArray(s.debug) ? s.debug : []
-    } catch {
-      this.opencodeCliFound = false
-      this.opencodeCliPath = null
-      this.opencodeAuthLoggedIn = null
-    } finally {
-      this.opencodeChecking = false
-    }
-  }
-
-  /** Copy the Console login command; runs in the user's own terminal (browser flow). */
-  private async handleOpencodeCopyLogin(): Promise<void> {
-    try {
-      await navigator.clipboard.writeText(this.opencodeLoginCommand)
-      this.opencodeCopied = true
-      window.setTimeout(() => (this.opencodeCopied = false), 2000)
-    } catch {
-      // Clipboard unavailable (permissions); the command is still visible to type.
-      this.opencodeCopied = false
-    }
-  }
-
-  /** Open the Console (opencode.ai) where the login session starts. */
-  private handleOpencodeOpenConsole(): void {
-    void api()?.shell?.openExternal?.('https://opencode.ai')
-  }
-
-  /** Let the user point at opencode.cmd directly (npm global bin not on PATH). */
-  private async handleOpencodeBrowse(): Promise<void> {
-    const electron = api()
-    const dialog = electron?.dialog?.showOpenDialog
-    if (!dialog) return
-    try {
-      const result = await dialog({
-        properties: ['openFile'],
-        filters: [
-          { name: 'Executables', extensions: ['cmd', 'exe', 'bat', '*'] },
-          { name: 'All files', extensions: ['*'] }
-        ]
-      })
-      if (!result.canceled && result.filePaths[0]) {
-        this.opencodeCustomPath = result.filePaths[0]
-        this.updateSetting('ai.opencodeCliPath', result.filePaths[0])
-        await this.checkOpencodeStatus(result.filePaths[0])
-      }
-    } catch (e) {
-      console.error('Failed to pick opencode binary:', e)
-    }
-  }
-
-  private handleProviderChange(e: Event): void {
-    const provider = String((e.currentTarget as WaSelect).value ?? '')
-    this.updateSetting('ai.provider', provider)
-
-    // Show known models immediately so the dropdown is not empty while the
-    // network fetch for the live list is in flight.
-    this.availableModels = [...(PROVIDER_MODEL_DEFAULTS[provider] ?? [])]
-    if (this.availableModels.length > 0) {
-      this.updateSetting('ai.model', this.availableModels[0])
-    }
-    void this.fetchModels()
-  }
-
   private async handleCheckForUpdates(): Promise<void> {
     const updater = api()?.updater
     if (!updater) return
@@ -1478,6 +1475,7 @@ export class SettingsModal extends LitElement {
 
         <!-- Main Area -->
         <div class="main-area">
+          ${this.embedded ? html`<writemd-background target="workspace"></writemd-background>` : null}
           <div class="main-header">
             <h2>${TAB_LABELS[this.tab]}</h2>
             <writemd-icon-button class="close-btn" title="Close settings" @click=${this.close}
@@ -1491,9 +1489,9 @@ export class SettingsModal extends LitElement {
               ${this.tab === 'appearance' ? this.renderAppearance() : ''}
               ${this.tab === 'editor' ? this.renderEditor() : ''}
               ${this.tab === 'files' ? this.renderFiles() : ''}
+              ${this.tab === 'ai' ? this.renderAi() : ''}
               ${this.tab === 'shortcuts' ? this.renderShortcuts() : ''}
               ${this.tab === 'advanced' ? this.renderAdvanced() : ''}
-              ${this.tab === 'ai' ? this.renderAI() : ''}
               ${this.tab === 'about' ? this.renderAbout() : ''}
             </div>
           </div>
@@ -1718,6 +1716,20 @@ export class SettingsModal extends LitElement {
             @click=${() => this.updateSetting('editor.showLineNumbers', !this.lineNumbers)}
           ></button>
         </div>
+
+        <div class="setting-row">
+          <div>
+            <div class="setting-label">File Path</div>
+            <div class="setting-desc">Show the document path on the left of the footer</div>
+          </div>
+          <button
+            class="toggle-switch"
+            role="switch"
+            aria-checked="${this.showFilePath}"
+            aria-label="File path"
+            @click=${() => this.updateSetting('editor.showFilePath', !this.showFilePath)}
+          ></button>
+        </div>
       </div>
     `
   }
@@ -1796,6 +1808,673 @@ export class SettingsModal extends LitElement {
             <div class="setting-desc">Restore all bindings to their defaults</div>
           </div>
           <button class="control-btn" @click=${this.handleResetShortcuts}>Reset All</button>
+        </div>
+      </div>
+    `
+  }
+
+  /**
+   * Which provider is selected, and what its defaults are.
+   *
+   * The list arrives from main because presets carry an endpoint and a default
+   * model, and hardcoding those in the renderer would let the two drift.
+   */
+  private activeAiPreset(): ProviderPresetView | undefined {
+    return this.aiPresets.find((p) => p.id === this.aiProviderId)
+  }
+
+  private async loadAiPresets(): Promise<void> {
+    const presets = await api()
+      ?.ai?.presets?.()
+      .catch(() => [])
+    this.aiPresets = presets ?? []
+    const state = await api()
+      ?.ai?.keyState?.()
+      .catch(() => 'empty' as const)
+    this.aiKeySet = state === 'stored'
+    this.aiKeyUnreadable = state === 'unavailable'
+  }
+
+  private selectAiProvider(id: string): void {
+    const preset = this.aiPresets.find((p) => p.id === id)
+    this.updateSetting('ai.providerId', id)
+    if (preset) {
+      this.updateSetting('ai.baseUrl', preset.defaultBaseUrl)
+      this.updateSetting('ai.model', preset.defaultModel)
+    }
+    this.aiFetchError = ''
+    this.aiModels = []
+    this.updateSetting('ai.cachedModels', [])
+  }
+
+  private async saveAiKey(): Promise<void> {
+    const key = this.aiKeyInput.trim()
+    if (!key) return
+    const result = await api()?.ai?.setKey?.(key)
+    this.aiKeyInput = ''
+    this.aiKeySet = result?.state === 'stored'
+    this.aiKeyUnreadable = result?.state === 'unavailable'
+    if (result && !result.stored) this.aiFetchError = result.reason ?? 'Could not save the key.'
+    else if (result) {
+      this.invalidateAiModels()
+      this.updateSetting('ai.apiKeySet', true)
+    }
+  }
+
+  private async clearAiKey(): Promise<void> {
+    const result = await api()?.ai?.clearKey?.()
+    this.aiKeySet = result?.state === 'stored'
+    this.aiKeyUnreadable = false
+    if (result) {
+      this.invalidateAiModels()
+      this.updateSetting('ai.apiKeySet', false)
+    }
+  }
+
+  private invalidateAiModels(): void {
+    this.aiModelRequest++
+    this.aiFetchingModels = false
+    this.aiFetchError = ''
+    this.aiModels = []
+    if (this.settingsStore.get<string[]>('ai.cachedModels', []).length) {
+      this.settingsStore.set('ai.cachedModels', [])
+    }
+  }
+
+  /**
+   * Ask the provider what models this key can reach.
+   *
+   * The key argument is only a fallback for a first-time setup: once one is
+   * stored, the typed field is blank by design and main uses the stored one. The
+   * list is cached in settings so the picker is populated on reopening Settings
+   * without another round trip.
+   */
+  private async fetchAiModels(): Promise<void> {
+    const request = ++this.aiModelRequest
+    const key = this.aiKeyInput.trim()
+    this.aiFetchError = ''
+    this.aiFetchingModels = true
+    try {
+      const models =
+        this.aiProviderId === 'chatgpt'
+          ? (await this.chatgptState.models()).map((model) => model.id)
+          : this.aiProviderId === 'opencode'
+            ? (await this.openCodeState.models()).map((model) => model.id)
+            : await api()?.ai?.fetchModels?.(this.aiProviderId, this.aiBaseUrl, key)
+      if (request !== this.aiModelRequest || key !== this.aiKeyInput.trim()) return
+      if (!models || models.length === 0) {
+        this.aiFetchError = 'No models returned for this endpoint.'
+        return
+      }
+      this.aiModels = models
+      this.updateSetting('ai.cachedModels', models)
+      // Keep the current model if it is still offered; otherwise fall to the
+      // first, so the picker is never left pointing at something unavailable.
+      if (!models.includes(this.aiModel)) {
+        const first = models[0]
+        this.updateSetting('ai.model', first)
+      }
+    } catch (e) {
+      if (request === this.aiModelRequest)
+        this.aiFetchError = e instanceof Error ? e.message : String(e)
+    } finally {
+      if (request === this.aiModelRequest) this.aiFetchingModels = false
+    }
+  }
+
+  private async loadAiSkills(): Promise<void> {
+    const request = ++this.aiSkillsRequest
+    const list = api()?.ai?.listSkills
+    if (!list) {
+      if (this.isConnected) this.aiSkillsError = SKILLS_RESTART_MESSAGE
+      return
+    }
+    try {
+      const view = await list()
+      if (!this.isConnected || request !== this.aiSkillsRequest) return
+      this.aiSkills = view ?? null
+      this.aiSkillsError = ''
+    } catch (error) {
+      if (this.isConnected && request === this.aiSkillsRequest)
+        this.aiSkillsError = skillsErrorMessage(
+          error,
+          'Could not read skills. Try Refresh skills again.'
+        )
+    }
+  }
+
+  private async openAiSkillsFolder(): Promise<void> {
+    const open = api()?.ai?.openSkillsFolder
+    if (!open) {
+      if (this.isConnected) this.aiSkillsError = SKILLS_RESTART_MESSAGE
+      return
+    }
+    try {
+      const folder = await open()
+      if (!folder) throw new Error('The skills folder is available in the desktop app.')
+      await this.loadAiSkills()
+    } catch (error) {
+      if (this.isConnected)
+        this.aiSkillsError = skillsErrorMessage(
+          error,
+          'Could not open the Skills folder. Open Skills in your vault, or try again.'
+        )
+    }
+  }
+
+  private async chatgptAction(action: () => Promise<ChatgptAuthView> | undefined): Promise<void> {
+    this.aiFetchError = ''
+    try {
+      const state = await action()
+      if (!state) throw new Error('ChatGPT sign-in is unavailable. Restart WriteMd after updating.')
+      this.chatgptState.apply(state)
+    } catch (error) {
+      this.aiFetchError = error instanceof Error ? error.message : 'ChatGPT sign-in failed.'
+    }
+  }
+
+  private renderChatgptCredentials(): unknown {
+    const state = this.aiChatgptState
+    const bridge = api()?.ai?.chatgpt
+    return html`
+      <div class="setting-row">
+        <div>
+          <div class="setting-label">ChatGPT account</div>
+          <div class="setting-desc">
+            ${state.connected ? 'Using your ChatGPT plan.' : 'Sign in to use your ChatGPT plan.'} No
+            API key needed.
+          </div>
+        </div>
+        <div class="control-stack">
+          ${
+            state.accounts.length
+              ? html` <wa-select
+                  class="select-input"
+                  size="small"
+                  aria-label="ChatGPT account"
+                  .value=${state.activeId ?? ''}
+                  @change=${(event: Event) => void this.chatgptAction(() => bridge?.select(String((event.currentTarget as WaSelect).value)))}
+                >
+                  ${state.accounts.map((account) => html`<wa-option value=${account.id}>${account.label}</wa-option>`)}
+                </wa-select>`
+              : null
+          }
+          ${
+            state.pending
+              ? html`<button
+                  class="control-btn"
+                  @click=${() => void this.chatgptAction(() => bridge?.cancel())}
+                >
+                  Cancel sign-in
+                </button>`
+              : !state.connected
+                ? html`<button
+                    class="control-btn"
+                    @click=${() => void this.chatgptAction(() => bridge?.login())}
+                  >
+                    Continue with ChatGPT
+                  </button>`
+                : null
+          }
+          ${
+            state.accounts.length
+              ? html` <div class="control-group">
+                  <button
+                    class="control-btn"
+                    ?disabled=${state.pending}
+                    @click=${() => void this.chatgptAction(() => bridge?.login(true))}
+                  >
+                    Add account
+                  </button>
+                  <button
+                    class="control-btn"
+                    ?disabled=${!state.connected}
+                    @click=${() => void this.chatgptAction(() => bridge?.logout())}
+                  >
+                    Sign out
+                  </button>
+                  <button
+                    class="control-btn"
+                    @click=${() => void api()?.shell?.openExternal?.('https://chatgpt.com/settings/usage')}
+                  >
+                    Manage usage
+                  </button>
+                </div>`
+              : null
+          }
+        </div>
+      </div>
+      ${state.pending ? html`<div class="setting-desc" role="status">Finish sign-in in your browser.</div>` : null}
+      ${state.error ? html`<div class="setting-desc" role="alert">${state.error}</div>` : null}
+      ${state.sessionOnly ? html`<div class="setting-desc">Secure storage is unavailable. This connection lasts for this app session.</div>` : null}
+      ${
+        state.needsWelcome
+          ? html` <writemd-modal
+              label="You're using your ChatGPT plan"
+              @modal-dismiss=${() => void this.chatgptAction(() => bridge?.acknowledgePlan())}
+            >
+              <div
+                class="section chatgpt-welcome"
+                role="dialog"
+                aria-label="You're using your ChatGPT plan"
+              >
+                <h2>You're using your ChatGPT plan</h2>
+                <p>
+                  Eligible AI requests in WriteMd use your ChatGPT plan. Manage usage and this app's
+                  access in ChatGPT Settings.
+                </p>
+                <button
+                  class="control-btn"
+                  @click=${() => void api()?.shell?.openExternal?.('https://chatgpt.com/settings/usage')}
+                >
+                  Manage usage
+                </button>
+                <button
+                  class="control-btn"
+                  @click=${() => void this.chatgptAction(() => bridge?.acknowledgePlan())}
+                >
+                  Got it
+                </button>
+              </div>
+            </writemd-modal>`
+          : null
+      }
+    `
+  }
+
+  private async openCodeAction(action: () => Promise<OpenCodeAuthView> | undefined): Promise<void> {
+    this.aiFetchError = ''
+    try {
+      const state = await action()
+      if (!state)
+        throw new Error('OpenCode sign-in is unavailable. Restart WriteMd after updating.')
+      this.openCodeState.apply(state)
+    } catch (error) {
+      this.aiFetchError = error instanceof Error ? error.message : 'OpenCode sign-in failed.'
+    }
+  }
+
+  private renderOpenCodeCredentials(): unknown {
+    const state = this.aiOpenCodeState
+    const bridge = api()?.ai?.opencode
+    return html`
+      <div class="setting-row">
+        <div>
+          <div class="setting-label">OpenCode account</div>
+          <div class="setting-desc">
+            ${state.connected ? 'Connected to your OpenCode workspace.' : 'Sign in and choose a workspace in your browser.'}
+            No API key needed.
+          </div>
+        </div>
+        <div class="control-stack">
+          ${
+            state.pending
+              ? html` <div class="setting-desc" role="status">
+                    Enter code <strong>${state.userCode}</strong> in your browser.
+                  </div>
+                  <div class="control-group">
+                    <button
+                      class="control-btn"
+                      @click=${() => state.verificationUri && void api()?.shell?.openExternal?.(state.verificationUri)}
+                    >
+                      Open sign-in page
+                    </button>
+                    <button
+                      class="control-btn"
+                      @click=${() => void this.openCodeAction(() => bridge?.cancel())}
+                    >
+                      Cancel sign-in
+                    </button>
+                  </div>`
+              : html` <button
+                  class="control-btn"
+                  @click=${() => void this.openCodeAction(() => bridge?.login())}
+                >
+                  ${state.connected ? 'Change workspace' : 'Continue with OpenCode'}
+                </button>`
+          }
+          ${
+            state.connected
+              ? html` <div class="control-group">
+                  <button
+                    class="control-btn"
+                    @click=${() => void this.openCodeAction(() => bridge?.logout())}
+                  >
+                    Sign out
+                  </button>
+                  <button
+                    class="control-btn"
+                    @click=${() => void api()?.shell?.openExternal?.('https://opencode.ai/console')}
+                  >
+                    Open Console
+                  </button>
+                </div>`
+              : null
+          }
+        </div>
+      </div>
+      ${state.error ? html`<div class="setting-desc ai-message" role="alert">${state.error}</div>` : null}
+      ${state.sessionOnly ? html`<div class="setting-desc ai-message">Secure storage is unavailable. Sign in again after restarting WriteMd.</div>` : null}
+    `
+  }
+
+  private renderAi(): unknown {
+    const preset = this.activeAiPreset()
+    const needsKey = preset?.keyRequired ?? true
+    const chatgpt = this.aiProviderId === 'chatgpt'
+    const opencode = this.aiProviderId === 'opencode'
+    return html`
+      <div class="ai-settings">
+        <div class="section-title">Assistant</div>
+        <div class="section">
+          <div class="setting-row">
+            <div>
+              <div class="setting-label">Enable AI assistant</div>
+              <div class="setting-desc">Chat about your notes and make changes you can undo.</div>
+            </div>
+            <button
+              class="toggle-switch"
+              role="switch"
+              aria-checked="${this.aiEnabled}"
+              aria-label="Enable AI assistant"
+              @click=${() => this.updateSetting('ai.enabled', !this.aiEnabled)}
+            ></button>
+          </div>
+        </div>
+
+        <div class="section-title">Connection</div>
+        <div class="section">
+          <div class="setting-row">
+            <div>
+              <div class="setting-label">Provider</div>
+              <div class="setting-desc">Choose the service that runs your assistant.</div>
+            </div>
+            <wa-select
+              size="small"
+              class="select-input"
+              label="Provider"
+              aria-label="Provider"
+              .value=${this.aiProviderId}
+              @change=${(e: Event) =>
+                this.selectAiProvider(String((e.currentTarget as WaSelect).value ?? ''))}
+            >
+              <span slot="start">${providerIcon(this.aiProviderId, 16)}</span>
+              ${this.aiPresets.map((p) => html`<wa-option value=${p.id}><span slot="start">${providerIcon(p.id, 16)}</span>${p.label}</wa-option>`)}
+            </wa-select>
+          </div>
+
+          ${
+            chatgpt
+              ? this.renderChatgptCredentials()
+              : opencode
+                ? this.renderOpenCodeCredentials()
+                : html`
+                    <div class="setting-row">
+                      <div>
+                        <div class="setting-label">API Key</div>
+                        <div class="setting-desc">
+                          ${
+                            this.aiKeyUnreadable
+                              ? html`<span style="color: var(--warning)"
+                                  >A key is stored but this install cannot decrypt it. Type a new
+                                  one to replace it.</span
+                                >`
+                              : this.aiKeySet
+                                ? 'A key is stored on this machine, encrypted with your OS keychain.'
+                                : needsKey
+                                  ? 'Your secret API key'
+                                  : 'Not needed for this provider'
+                          }
+                          ${preset?.keyHint ? html` &middot; ${preset.keyHint}` : ''}
+                        </div>
+                      </div>
+                      <div class="control-group">
+                        <input
+                          type="password"
+                          class="text-input"
+                          aria-label="API Key"
+                          placeholder=${needsKey ? 'Paste your API key' : 'Not needed'}
+                          .value=${this.aiKeyInput}
+                          @input=${(e: Event) => {
+                            this.aiKeyInput = (e.currentTarget as HTMLInputElement).value
+                          }}
+                        />
+                        <button
+                          class="control-btn"
+                          @click=${() => void this.saveAiKey()}
+                          ?disabled=${!this.aiKeyInput.trim()}
+                        >
+                          Save
+                        </button>
+                        ${
+                          this.aiKeySet
+                            ? html`<button
+                                class="control-btn"
+                                @click=${() => void this.clearAiKey()}
+                              >
+                                Clear
+                              </button>`
+                            : ''
+                        }
+                      </div>
+                    </div>
+                  `
+          }
+          ${
+            !chatgpt && !opencode
+              ? html`
+                  <div class="setting-row">
+                    <div>
+                      <div class="setting-label">Endpoint</div>
+                      <div class="setting-desc">
+                        ${
+                          needsKey && !this.aiBaseUrl.startsWith('https://') && this.aiBaseUrl
+                            ? 'An API key will not be sent over plain http to a remote host.'
+                            : chatgpt
+                              ? 'ChatGPT account requests use the official OpenAI service.'
+                              : 'Edit this for a proxy or a self-hosted server.'
+                        }
+                      </div>
+                    </div>
+                    <input
+                      type="url"
+                      class="text-input"
+                      aria-label="Endpoint"
+                      placeholder="https://api.openai.com/v1"
+                      .value=${this.aiBaseUrl}
+                      ?disabled=${chatgpt}
+                      @change=${(e: Event) =>
+                        this.updateSetting(
+                          'ai.baseUrl',
+                          (e.currentTarget as HTMLInputElement).value.trim()
+                        )}
+                    />
+                  </div>
+                `
+              : null
+          }
+          <div class="setting-row">
+            <div>
+              <div class="setting-label">Model</div>
+              <div class="setting-desc">
+                ${
+                  this.aiModels.length
+                    ? `${this.aiModels.length} available`
+                    : chatgpt
+                      ? 'Load the models available to your account.'
+                      : 'Load the models available from your provider.'
+                }
+              </div>
+            </div>
+            <div class="control-group">
+              <wa-select
+                size="small"
+                class="select-input"
+                label="Model"
+                aria-label="Model"
+                .value=${this.aiModel}
+                @change=${(e: Event) =>
+                  this.updateSetting('ai.model', String((e.currentTarget as WaSelect).value ?? ''))}
+              >
+                <span slot="start">${providerIcon(this.aiProviderId, 14)}</span>
+                ${(this.aiModels.length ? this.aiModels : this.aiModel ? [this.aiModel] : []).map(
+                  (m) =>
+                    html`<wa-option value=${m}
+                      >${chatgpt ? this.chatgptState.label(m) : opencode ? this.openCodeState.label(m) : m}</wa-option
+                    >`
+                )}
+              </wa-select>
+              <button
+                class="control-btn"
+                aria-label="Fetch models"
+                ?disabled=${this.aiFetchingModels}
+                @click=${() => void this.fetchAiModels()}
+              >
+                ${this.aiFetchingModels ? 'Loading...' : 'Fetch'}
+              </button>
+            </div>
+          </div>
+          ${
+            this.aiFetchError
+              ? html`<div class="setting-desc ai-message" role="alert">${this.aiFetchError}</div>`
+              : ''
+          }
+          <div class="setting-row">
+            <div>
+              <div class="setting-label">Model options</div>
+              <div class="setting-desc">Saved separately for each model.</div>
+            </div>
+            <writemd-ai-model-options .settingsMode=${true}></writemd-ai-model-options>
+          </div>
+        </div>
+
+        <div class="section-title">Conversation</div>
+        <div class="section">
+          <div class="setting-row">
+            <div>
+              <div class="setting-label">Automatically accept AI edits</div>
+              <div class="setting-desc">
+                Apply completed floating-bar edits without pressing Accept. The side panel already
+                applies edits automatically.
+              </div>
+            </div>
+            <button
+              class="toggle-switch"
+              role="switch"
+              aria-checked=${this.aiAutoAcceptEdits}
+              aria-label="Automatically accept AI edits"
+              @click=${() => this.updateSetting('ai.autoAcceptEdits', !this.aiAutoAcceptEdits)}
+            ></button>
+          </div>
+          <div class="setting-row">
+            <div>
+              <div class="setting-label">Output limit</div>
+              <div class="setting-desc">
+                Maximum tokens per reply, including reasoning.
+                ${
+                  preset?.kind === 'anthropic'
+                    ? 'Automatic uses 4,096 tokens for Anthropic, which requires an explicit limit.'
+                    : 'Automatic uses the provider default.'
+                }
+              </div>
+            </div>
+            <wa-select
+              size="small"
+              class="select-input"
+              label="Output limit"
+              aria-label="Output limit"
+              .value=${String(this.aiMaxOutputTokens)}
+              @change=${(e: Event) => this.updateSetting('ai.maxOutputTokens', Number((e.currentTarget as WaSelect).value))}
+            >
+              ${[0, 4096, 8192, 16384, 32768, 65536, 131072].map(
+                (value) => html`
+                  <wa-option value=${String(value)}
+                    >${value === 0 ? 'Automatic' : `${value.toLocaleString('en-US')} tokens`}</wa-option
+                  >
+                `
+              )}
+            </wa-select>
+          </div>
+          <div class="setting-row">
+            <div>
+              <div class="setting-label">Chat history</div>
+              <div class="setting-desc">
+                Previous turns included with each message. Set to 0 to start fresh. Your open
+                document is attached to the latest message.
+              </div>
+            </div>
+            <input
+              type="number"
+              class="text-input"
+              aria-label="Chat history"
+              min="0"
+              max="50"
+              step="1"
+              style="max-width: 90px"
+              .value=${String(this.aiHistoryTurns)}
+              @change=${(e: Event) =>
+                this.updateSetting(
+                  'ai.historyTurns',
+                  Math.max(
+                    0,
+                    Math.min(50, Number((e.currentTarget as HTMLInputElement).value) || 0)
+                  )
+                )}
+            />
+          </div>
+        </div>
+
+        <div class="section-title">Skills</div>
+        <div class="section">
+          <div class="setting-row">
+            <div>
+              <div class="setting-label">Personal skills</div>
+              <div class="setting-desc">
+                Add <code>proofread.md</code> or <code>proofread/SKILL.md</code> in your vault's
+                <code>Skills</code> folder. Start a prompt with <code>/proofread</code> to use it.
+                Instructions only; scripts are not run.
+              </div>
+            </div>
+            <div class="control-group ai-skills-actions">
+              <button class="control-btn" @click=${() => void this.openAiSkillsFolder()}>
+                Open skills folder
+              </button>
+              <button class="control-btn" @click=${() => void this.loadAiSkills()}>
+                Refresh skills
+              </button>
+            </div>
+          </div>
+          ${
+            this.aiSkills
+              ? html`<div class="setting-desc ai-skills-path">${this.aiSkills.folder}</div>
+                  ${
+                    this.aiSkills.skills.length
+                      ? html`<ul class="ai-skill-list" aria-label="Available skills">
+                          ${this.aiSkills.skills.map(
+                            (skill) =>
+                              html` <li>
+                                <div class="setting-label"><code>/${skill.name}</code></div>
+                                <div class="setting-desc">${skill.description}</div>
+                              </li>`
+                          )}
+                        </ul>`
+                      : html`<div class="setting-desc">
+                          No skills added yet. Files are read fresh when you send a prompt.
+                        </div>`
+                  }
+                  ${this.aiSkills.warnings.map((warning) => html`<div class="setting-desc ai-skill-warning" role="status">${warning}</div>`)}`
+              : ''
+          }
+          ${this.aiSkillsError ? html`<div class="setting-desc" role="alert">${this.aiSkillsError}</div>` : ''}
+        </div>
+
+        <div class="section-title">Privacy</div>
+        <div class="section">
+          <div class="setting-desc">
+            Messages, your open document, and selections are sent to your chosen provider.
+            Credentials stay encrypted on this machine. Use a local provider such as Ollama to keep
+            your notes on your device.
+          </div>
         </div>
       </div>
     `
@@ -1884,248 +2563,6 @@ export class SettingsModal extends LitElement {
             <div class="setting-desc">Restore all options to their factory defaults</div>
           </div>
           <button class="control-btn danger-btn" @click=${this.handleReset}>Reset All</button>
-        </div>
-      </div>
-    `
-  }
-
-  private renderAI(): unknown {
-    return html`
-      <div class="section-title">AI Assistant Config</div>
-      <div class="section">
-        <div class="setting-row">
-          <div>
-            <div class="setting-label">Provider</div>
-            <div class="setting-desc">Select your AI backend provider</div>
-          </div>
-          <wa-select
-            size="small"
-            class="select-input"
-            label="Provider"
-            aria-label="Provider"
-            .value=${this.aiProvider}
-            @change=${this.handleProviderChange}
-          >
-            <wa-option value="OpenAI">OpenAI</wa-option>
-            <wa-option value="Anthropic"> Anthropic </wa-option>
-            <wa-option value="GoogleGemini"> Google Gemini </wa-option>
-            <wa-option value="Mistral">Mistral</wa-option>
-            <wa-option value="Groq">Groq</wa-option>
-            <wa-option value="OpenRouter"> OpenRouter </wa-option>
-            <wa-option value="OpenCode"> OpenCode (Console login) </wa-option>
-            <wa-option value="Nvidia">Nvidia</wa-option>
-            <wa-option value="DeepSeek">DeepSeek</wa-option>
-            <wa-option value="xAI">xAI (Grok)</wa-option>
-            <wa-option value="Ollama">Ollama (Local)</wa-option>
-          </wa-select>
-        </div>
-
-        <div class="setting-row">
-          <div>
-            <div class="setting-label">Web search</div>
-            <div class="setting-desc">
-              Ground answers with a keyless web search before sending. Works with any provider.
-            </div>
-          </div>
-          <button
-            class="toggle-switch"
-            role="switch"
-            aria-checked="${this.webSearchEnabled}"
-            aria-label="Web search"
-            @click=${() => this.updateSetting('ai.webSearchEnabled', !this.webSearchEnabled)}
-          ></button>
-        </div>
-
-        <div class="setting-row">
-          <div>
-            <div class="setting-label">Model</div>
-            <div class="setting-desc">
-              ${
-                this.aiProvider === 'OpenCode'
-                  ? 'provider/model from your CLI (e.g. opencode/big-pickle), or empty for its default. Fetch lists `opencode models` when available.'
-                  : 'Specify the model to use (e.g. gpt-4o, claude-3.5-sonnet, gemini-1.5-pro, llama3)'
-              }
-            </div>
-          </div>
-          <div class="control-stack">
-            <div class="control-group">
-              ${
-                this.aiProvider === 'OpenCode'
-                  ? html`
-                      <input
-                        type="text"
-                        class="text-input"
-                        list="ai-model-suggestions"
-                        placeholder="opencode/big-pickle or empty"
-                        .value=${this.aiModel}
-                        @change=${(e: Event) => {
-                          const v = (e.target as HTMLInputElement).value.trim()
-                          this.aiModel = v
-                          this.updateSetting('ai.model', v)
-                        }}
-                      />
-                      <datalist id="ai-model-suggestions">
-                        ${this.availableModels.map((m) => html`<option value=${m}></option>`)}
-                      </datalist>
-                    `
-                  : html`
-                      <wa-select
-                        size="small"
-                        class="select-input"
-                        label="Model"
-                        aria-label="Model"
-                        .value=${this.aiModel}
-                        @change=${(e: Event) => this.updateSetting('ai.model', String((e.currentTarget as WaSelect).value ?? ''))}
-                      >
-                        ${
-                          this.availableModels.length > 0
-                            ? this.availableModels.map(
-                                (m) => html`<wa-option value=${m}> ${m} </wa-option>`
-                              )
-                            : html`<wa-option value=${this.aiModel}>${this.aiModel}</wa-option>`
-                        }
-                      </wa-select>
-                    `
-              }
-              <button
-                class="control-btn"
-                @click=${this.fetchModels}
-                ?disabled=${this.isFetchingModels}
-              >
-                ${this.isFetchingModels ? 'Loading...' : 'Fetch'}
-              </button>
-            </div>
-            ${this.fetchError ? html`<div class="setting-desc" style="color: var(--danger);">${this.fetchError}</div>` : ''}
-          </div>
-        </div>
-
-        <div class="setting-row">
-          <div>
-            <div class="setting-label">API Key</div>
-            <div class="setting-desc">
-              ${
-                this.aiKeyUndecryptable
-                  ? html`<span style="color: var(--warning)"
-                      >A key is stored but this install cannot decrypt it. Type a new one to replace
-                      it.</span
-                    >`
-                  : this.aiKeyStored
-                    ? 'A key is stored on this machine. Type a new one to replace it.'
-                    : 'Your secret API key (saved locally)'
-              }
-            </div>
-          </div>
-          <input
-            type="password"
-            class="text-input"
-            placeholder=${this.aiKeyStored ? 'stored - type to replace' : 'sk-...'}
-            autocomplete="off"
-            .value=${this.aiApiKey}
-            @change=${this.handleApiKeyInput}
-          />
-        </div>
-        ${
-          this.aiProvider === 'OpenCode'
-            ? html`<div class="setting-row">
-                  <div>
-                    <div class="setting-label">Connect via Console</div>
-                    <div class="setting-desc">
-                      ${
-                        this.opencodeAuthLoggedIn
-                          ? `Logged in - ${this.opencodeAuthDetail}.`
-                          : this.opencodeAuthDetail
-                            ? `${this.opencodeAuthDetail}.`
-                            : 'Login happens in your browser: open the Console, sign in, then run the command in a terminal.'
-                      }
-                      1) Open console.opencode.ai and sign in. 2) Run the command, complete the
-                      browser login. 3) Back here, Recheck, then /models in the CLI to pick a model.
-                    </div>
-                  </div>
-                  <div class="control-group">
-                    <code
-                      class="text-input"
-                      style="padding: 8px 12px; font-size: 12px; user-select: all;"
-                      >${this.opencodeLoginCommand}</code
-                    >
-                    <button class="control-btn" @click=${this.handleOpencodeCopyLogin}>
-                      ${this.opencodeCopied ? 'Copied' : 'Copy'}
-                    </button>
-                    <button class="control-btn" @click=${this.handleOpencodeOpenConsole}>
-                      Open console
-                    </button>
-                  </div>
-                </div>
-                <div class="setting-row">
-                  <div>
-                    <div class="setting-label">CLI path</div>
-                    <div class="setting-desc">
-                      ${
-                        this.opencodeChecking
-                          ? 'Checking…'
-                          : this.opencodeCliFound
-                            ? `Found: ${this.opencodeCliPath ?? 'opencode'}${this.opencodeCliVersion ? ` (${this.opencodeCliVersion})` : ''}. Chat runs through a managed server WriteMd starts itself - no manual serve needed, no API key needed.`
-                            : 'Not found. npm installs land at %APPDATA%\\npm\\opencode.cmd - pick it below if it is not on PATH.'
-                      }
-                      ${this.opencodeManagedUp ? ' Managed server running.' : ''}
-                    </div>
-                  </div>
-                  <div class="control-group">
-                    <button class="control-btn" @click=${this.handleOpencodeBrowse}>
-                      ${this.opencodeCustomPath ? 'Change…' : 'Browse…'}
-                    </button>
-                    <button
-                      class="control-btn"
-                      @click=${() => void this.checkOpencodeStatus()}
-                      ?disabled=${this.opencodeChecking}
-                    >
-                      ${this.opencodeChecking ? 'Checking…' : 'Recheck'}
-                    </button>
-                  </div>
-                </div>
-                ${
-                  !this.opencodeCliFound && this.opencodeDebug.length > 0
-                    ? html`<div class="setting-row">
-                        <div>
-                          <div class="setting-label">Why wasn't it found?</div>
-                          <div
-                            class="setting-desc"
-                            style="font-family: var(--font-mono); font-size: 11px; white-space: pre-wrap;"
-                          >
-                            ${this.opencodeDebug.join('\n')}
-                          </div>
-                        </div>
-                      </div>`
-                    : ''
-                }`
-            : ''
-        }
-      </div>
-
-      <div class="section-title">System Prompt</div>
-      <div class="section">
-        <div class="setting-desc" style="margin-bottom: 8px;">
-          Instructions sent with every request. The open file's content is appended automatically.
-        </div>
-        <textarea
-          class="text-input prompt-input"
-          rows="10"
-          .value=${this.aiSystemPrompt}
-          @change=${(e: Event) => {
-            const v = (e.target as HTMLTextAreaElement).value
-            this.aiSystemPrompt = v
-            this.updateSetting('ai.systemPrompt', v)
-          }}
-        ></textarea>
-        <div style="display: flex; justify-content: flex-end; margin-top: 8px;">
-          <button
-            class="control-btn"
-            @click=${() => {
-              this.aiSystemPrompt = DEFAULT_AI_SYSTEM_PROMPT
-              this.updateSetting('ai.systemPrompt', DEFAULT_AI_SYSTEM_PROMPT)
-            }}
-          >
-            Reset to default
-          </button>
         </div>
       </div>
     `

@@ -5,7 +5,6 @@ import { makeFixture, launch, firstWindow, openSettings } from './fixtures'
 import type { FileState } from '../../src/renderer/src/state/file-state'
 import type { SettingsStore } from '../../src/renderer/src/state/settings'
 import type { TabDragController } from '../../src/renderer/src/controllers/tab-drag'
-import type { AiMessage } from '../../src/renderer/src/components/AiPanel'
 
 type AppHost = HTMLElement & {
   fileState: FileState
@@ -164,6 +163,51 @@ test.describe('workspace UI', () => {
     expect(await order(page)).toEqual(before)
   })
 
+  test('a dragged group previews its icon beside its label', async () => {
+    await prefs(page, { 'appearance.panelOrientation': 'vertical' })
+    const groupId = await page.evaluate(() =>
+      (document.querySelector('writemd-app') as unknown as AppHost).fileState.createTabGroup(
+        'Dragged',
+        'star'
+      )
+    )
+    const header = page.locator(`.group-header[data-group-id="${groupId}"]`)
+    await expect(header.locator('svg[data-icon="star"]')).toBeVisible()
+
+    const box = await header.boundingBox()
+    await page.mouse.move(box!.x + 30, box!.y + box!.height / 2)
+    await page.mouse.down()
+    await page.mouse.move(box!.x + 60, box!.y + 90, { steps: 8 })
+
+    // The preview carries the same icon and label as the row it came from.
+    const preview = page.locator('.writemd-drag-preview')
+    await expect(preview).toBeVisible()
+    await expect(preview.locator('svg[data-icon="star"]')).toBeVisible()
+    await expect(preview.locator('.writemd-drag-preview-group')).toHaveText('Dragged')
+    await page.screenshot({ path: 'artifacts/ui-review/group-drag-preview.png' })
+
+    await page.mouse.up()
+    await expect(preview).toHaveCount(0)
+  })
+
+  test('a group with no icon previews the folder pair', async () => {
+    await prefs(page, { 'appearance.panelOrientation': 'vertical' })
+    const groupId = await page.evaluate(() =>
+      (document.querySelector('writemd-app') as unknown as AppHost).fileState.createTabGroup(
+        'Plain'
+      )
+    )
+    const header = page.locator(`.group-header[data-group-id="${groupId}"]`)
+    const box = await header.boundingBox()
+    await page.mouse.move(box!.x + 30, box!.y + box!.height / 2)
+    await page.mouse.down()
+    await page.mouse.move(box!.x + 60, box!.y + 90, { steps: 8 })
+
+    const preview = page.locator('.writemd-drag-preview')
+    await expect(preview.locator('svg[data-icon="folder-open"]')).toBeVisible()
+    await page.mouse.up()
+  })
+
   test('vertical dragging shares cancellation and keyboard ordering behavior', async () => {
     await prefs(page, { 'appearance.panelOrientation': 'vertical' })
     const before = await order(page)
@@ -211,6 +255,10 @@ test.describe('workspace UI', () => {
 
   test('workspace divider persists preference and narrow windows switch surfaces without overflow', async () => {
     await page.locator('writemd-icon-button[title="Split view"]').click()
+    await expect(page.locator('writemd-workspace wa-split-panel')).toHaveJSProperty(
+      'disabled',
+      false
+    )
     const divider = page.locator('writemd-workspace wa-split-panel [role="separator"]')
     await expect(divider).toBeVisible()
     const box = await divider.boundingBox()
@@ -290,7 +338,8 @@ test.describe('workspace UI', () => {
         ''
       )
     )
-    expect(id).toMatch(/^[a-f0-9-]+\.png$/)
+    // The fixture is an opaque gradient, so it must land as JPEG rather than PNG.
+    expect(id).toMatch(/^[a-f0-9-]+\.jpg$/)
     expect(existsSync(join(fixture.userData, 'backgrounds', id))).toBe(true)
     expect(
       await page.evaluate(() =>
@@ -324,41 +373,12 @@ test.describe('workspace UI', () => {
     await expect(paneImage).toHaveCSS('opacity', '0.19')
     await prefs(page, { 'appearance.surfaceOpacity': 100, 'appearance.backgroundShowOn': 'empty' })
     await expect(paneImage).toHaveCSS('opacity', '0')
-    await prefs(page, { 'appearance.backgroundShowOn': 'all', 'appearance.backgroundTarget': 'ai' })
-    await expect(paneImage).toHaveCSS('opacity', '0')
-    await prefs(page, { 'appearance.backgroundTarget': 'workspace' })
+    await prefs(page, {
+      'appearance.backgroundShowOn': 'all',
+      'appearance.backgroundTarget': 'workspace'
+    })
     await expect(paneImage).toHaveCSS('opacity', '0.19')
     await page.screenshot({ path: 'artifacts/ui-review/fixed-background-workspace.png' })
-    await prefs(page, { 'ai.provider': 'Ollama', 'appearance.backgroundShowOn': 'empty' })
-    await page.evaluate(() =>
-      (document.querySelector('writemd-app') as unknown as AppHost).fileState.setSplitSurface('ai')
-    )
-    await expect(page.locator('writemd-ai-panel')).toBeVisible()
-    const auxiliaryImage = page
-      .locator('writemd-panel[slot="auxiliary"]')
-      .locator('writemd-background')
-      .first()
-      .locator('img')
-    await expect(auxiliaryImage).toHaveCSS('opacity', '0.31')
-    await page.locator('writemd-editor').evaluate((element) => {
-      const editor = element as unknown as { aiMessages: AiMessage[] }
-      editor.aiMessages = [{ role: 'user', content: 'Background scope fixture' }]
-    })
-    await expect(auxiliaryImage).toHaveCSS('opacity', '0')
-    await prefs(page, { 'appearance.backgroundShowOn': 'all' })
-    await expect(auxiliaryImage).toHaveCSS('opacity', '0.19')
-    await prefs(page, { 'appearance.backgroundTarget': 'ai' })
-    await expect(auxiliaryImage).toHaveCSS('opacity', '0')
-    const aiImage = page.locator('writemd-ai-panel writemd-background img')
-    await expect(aiImage).toBeVisible()
-    await expect(aiImage).toHaveCSS('opacity', '0.19')
-    await prefs(page, { 'appearance.backgroundShowOn': 'empty' })
-    await expect(aiImage).toHaveCSS('opacity', '0')
-    await page.locator('writemd-editor').evaluate((element) => {
-      ;(element as unknown as { aiMessages: AiMessage[] }).aiMessages = []
-    })
-    await expect(aiImage).toHaveCSS('opacity', '0.31')
-    await page.screenshot({ path: 'artifacts/ui-review/pr23-fixed-ai-background.png' })
     await prefs(page, {
       'appearance.backgroundTarget': 'workspace',
       'appearance.backgroundShowOn': 'all'

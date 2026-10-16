@@ -62,13 +62,3 @@ export function hardenWebContents(
 export function hardenIsolatedWindow(contents: Electron.WebContents): void {
   hardenWebContents(contents, () => false)
 }
-
-/**
- * Content-Security-Policy for the standalone HTML export.
- *
- * Scripts are off outright. Images stay allowed because the exporter inlines
- * local assets as data URIs and leaves remote ones as ordinary URLs, and styles
- * must stay inline because the document ships its own stylesheet.
- */
-export const EXPORT_CSP =
-  "default-src 'none'; img-src data: https: http:; style-src 'unsafe-inline'; font-src data:"

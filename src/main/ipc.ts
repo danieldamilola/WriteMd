@@ -1,7 +1,10 @@
-import { ipcMain, dialog, shell, net, app, type BrowserWindow } from 'electron'
+import { openCodeAuth, cancelOpenCodeLogin } from './ai/opencode-auth'
+import { openCodeCatalog } from './ai/providers/opencode'
+import { ipcMain, dialog, shell, app, type BrowserWindow } from 'electron'
 import { readFile, writeFile, stat, rename, unlink, open } from 'fs/promises'
-import { watch, existsSync, mkdirSync, type FSWatcher } from 'fs'
-import { basename, dirname, extname, join, resolve } from 'path'
+import { existsSync, mkdirSync, type FSWatcher } from 'fs'
+import { watchDocument } from './file-watch'
+import { dirname, join, resolve } from 'path'
 import { randomUUID } from 'crypto'
 import {
   importBackground,
@@ -19,40 +22,13 @@ import {
   getVaultTree,
   invalidateVaultPathCache
 } from './vault'
-import {
-  getSettings,
-  getSettingsForRenderer,
-  getStoredApiKey,
-  setSettings,
-  type WriteMdSettingsPatch
-} from './settings'
+import { getSettings, setSettings, type WriteMdSettingsPatch } from './settings'
 import { exportDocx, exportHtml, exportPdf } from './export'
-import {
-  createSession,
-  deleteSession,
-  ensureTitle,
-  listSessions,
-  loadSession,
-  saveSession
-} from './chat-sessions'
-import { getAiProvider } from '../shared/ai-providers'
-import { SseParser } from './sse'
-import {
-  getOpencodeAuthStatus,
-  listOpencodeModels,
-  opencodeLoginCommand,
-  opencodeSearchHints,
-  resolveOpencodeBinary
-} from './opencode'
-import { isManagedServerUp, opencodeChat, opencodeChatStream } from './opencode-server'
-import { formatSearchContext, webSearch } from './web-search'
-import type { AttachedFile, ChatMessage, ChatSession } from '../shared/electron-api'
 import {
   setVaultRootProvider,
   registerExternalPath,
   registerExternalPaths,
   registerAttachmentPaths,
-  assertCanReadAttachment,
   canAccessPath,
   canProbePath,
   canRenamePath,
@@ -65,24 +41,34 @@ import {
   assertCanAccess,
   isSubpath
 } from './path-guard'
+import { PRESETS, adapterFor } from './ai/providers'
+import { ensureSkillsFolder, listSkills } from './ai/skills'
+import { checkEndpoint } from './ai/endpoint'
+import { getApiKey, keyState, setApiKey } from './ai/key-store'
+import {
+  acceptPreview,
+  cancelTurn,
+  deleteSavedSession,
+  getJournal,
+  listChanges,
+  readSessions,
+  setEventEmitter,
+  setFileChangeEmitter,
+  startTurn,
+  writeSession,
+  type AiSendInput
+} from './ai/service'
+import type { PersistedSession } from '../shared/ai/sessions'
+import type { FileChangeSnapshot, SetKeyResult } from '../shared/electron-api'
+import { statOrNull } from './ai/paths'
+import { chatgptAuth, cancelChatgptLogin, CHATGPT_API_BASE } from './ai/chatgpt-auth'
+import { chatgptModels } from './ai/providers/chatgpt'
+import { cancelAll } from './ai/service'
+
+/** A model listing is a single small GET; anything slower is a wrong endpoint. */
+const MODEL_LIST_TIMEOUT_MS = 20_000
 
 const watchedPaths = new Map<string, FSWatcher>()
-
-/** Guard against a runaway conversation filling the disk with transcripts. */
-const MAX_SESSION_MESSAGES = 2000
-
-/** Image types a vision-capable provider will accept as an attachment. */
-const IMAGE_MEDIA_TYPES: Record<string, string> = {
-  '.png': 'image/png',
-  '.jpg': 'image/jpeg',
-  '.jpeg': 'image/jpeg',
-  '.gif': 'image/gif',
-  '.webp': 'image/webp'
-}
-
-/** Per-file ceilings for the attach dialog, chosen to stay inside a request. */
-const MAX_IMAGE_BYTES = 8 * 1024 * 1024
-const MAX_TEXT_BYTES = 256 * 1024
 
 /** Restore access to documents referenced by our own persisted config. */
 export function registerPersistedPaths(): void {
@@ -96,6 +82,8 @@ export function registerPersistedPaths(): void {
 
 /** Close all fs watchers; called on app quit so nothing leaks. */
 export function closeAllWatchers(): void {
+  cancelChatgptLogin()
+  cancelOpenCodeLogin()
   for (const watcher of watchedPaths.values()) {
     try {
       watcher.close()
@@ -109,12 +97,29 @@ export function closeAllWatchers(): void {
 export function setupIpc(getWindow: () => BrowserWindow | null): void {
   setVaultRootProvider(getVaultPath)
   registerPersistedPaths()
+  setEventEmitter((event) => getWindow()?.webContents.send('ai:event', event))
+  const fileChanged = (path: string, snapshot?: FileChangeSnapshot): void =>
+    getWindow()?.webContents.send('file:changed', path, snapshot)
+  setFileChangeEmitter(fileChanged)
+  let openCodeConnection = openCodeAuth().state().connectionId
+  openCodeAuth().subscribe((state) => {
+    if (state.connectionId !== openCodeConnection) {
+      openCodeConnection = state.connectionId
+      cancelAll()
+    }
+    getWindow()?.webContents.send('ai:opencode-auth', state)
+  })
+  chatgptAuth().subscribe((state) => getWindow()?.webContents.send('ai:chatgpt-auth', state))
   ipcMain.handle('appearance:import-background', () => importBackground(getWindow()))
   ipcMain.handle('appearance:get-background', (_, id: string) => getBackground(id))
   ipcMain.handle('appearance:remove-background', (_, id: string) => removeBackground(id))
   ipcMain.handle('appearance:material-support', () => materialSupport())
 
   ipcMain.handle('app:get-version', () => app.getVersion())
+  ipcMain.handle('app:get-build-info', () => ({
+    development: !app.isPackaged,
+    version: app.getVersion()
+  }))
   ipcMain.handle('app:get-path', (_, name: 'home' | 'documents' | 'downloads' | 'temp') =>
     app.getPath(name)
   )
@@ -196,53 +201,6 @@ export function setupIpc(getWindow: () => BrowserWindow | null): void {
     return result
   })
 
-  /*
-   * Read one file chosen in the attach dialog.
-   *
-   * The dialog registers every path it returns, so `assertCanAccess` is what
-   * stops the renderer from naming any other file on disk. Text is returned
-   * decoded because the prompt inlines it; images are returned as base64 with
-   * no data: prefix, since that is the form every provider's payload wants.
-   *
-   * The size ceiling is what keeps a pasted 40MB video from becoming a 53MB
-   * JSON body the provider will reject with an opaque 400. Text gets a tighter
-   * bound than images because it is inlined into the message itself.
-   */
-  ipcMain.handle('file:read-attachment', async (_, filePath: string): Promise<AttachedFile> => {
-    assertCanReadAttachment(filePath)
-    const stats = await stat(filePath)
-    if (!stats.isFile()) throw new Error(`Not a file: ${filePath}`)
-
-    const ext = extname(filePath).toLowerCase()
-    const name = basename(filePath)
-
-    if (IMAGE_MEDIA_TYPES[ext]) {
-      if (stats.size > MAX_IMAGE_BYTES) {
-        throw new Error(`${name} is larger than ${Math.round(MAX_IMAGE_BYTES / 1024 / 1024)}MB.`)
-      }
-      const buffer = await readFile(filePath)
-      return {
-        path: filePath,
-        name,
-        kind: 'image',
-        size: stats.size,
-        data: buffer.toString('base64'),
-        mediaType: IMAGE_MEDIA_TYPES[ext]
-      }
-    }
-
-    if (stats.size > MAX_TEXT_BYTES) {
-      throw new Error(`${name} is larger than ${Math.round(MAX_TEXT_BYTES / 1024)}KB.`)
-    }
-    return {
-      path: filePath,
-      name,
-      kind: 'text',
-      size: stats.size,
-      text: await readFile(filePath, 'utf-8')
-    }
-  })
-
   ipcMain.handle('file:register-paths', (_, paths: string[]) => {
     if (Array.isArray(paths)) registerAttachmentPaths(paths.filter((p) => typeof p === 'string'))
   })
@@ -279,14 +237,7 @@ export function setupIpc(getWindow: () => BrowserWindow | null): void {
     // instead of racing two 'change' events for the same file.
     const key = normalizePath(filePath)
     if (watchedPaths.has(key)) return
-    const watcher = watch(filePath, { persistent: false })
-    // 'rename' matters as much as 'change' here. macOS fs.watch is
-    // FSEvents-backed and reports an atomic replace as 'rename', and this app
-    // (plus Obsidian, git, and every sync client) writes via rename-over. On
-    // a 'change'-only subscription the conflict dialog never sees those.
-    const emit = (): void => getWindow()?.webContents.send('file:changed', filePath)
-    watcher.on('change', emit)
-    watcher.on('rename', emit)
+    const watcher = watchDocument(filePath, () => fileChanged(filePath))
     // Close before dropping the entry: a watcher removed from the map without
     // close() keeps its file descriptor open until app quit.
     watcher.on('error', (err) => {
@@ -387,9 +338,10 @@ export function setupIpc(getWindow: () => BrowserWindow | null): void {
   ipcMain.handle('vault:list-files', () => listMarkdownFiles(getVaultPath()))
   ipcMain.handle('vault:get-tree', () => getVaultTree())
 
-  ipcMain.handle('settings:get', () => getSettingsForRenderer())
+  ipcMain.handle('settings:get', () => getSettings())
   ipcMain.handle('settings:set', async (_, settings: WriteMdSettingsPatch) => {
     const previousMaterial = getSettings().appearance.windowMaterial
+    const previousTheme = getSettings().appearance.theme
     // Every path guard measures against `getVaultPath()`. A vault change that
     // arrives through settings rather than `vault:set-path` still has to move
     // that boundary, so the cache cannot survive it.
@@ -397,7 +349,10 @@ export function setupIpc(getWindow: () => BrowserWindow | null): void {
       invalidateVaultPathCache()
     }
     await setSettings(settings)
-    if (getSettings().appearance.windowMaterial !== previousMaterial)
+    if (
+      getSettings().appearance.windowMaterial !== previousMaterial ||
+      getSettings().appearance.theme !== previousTheme
+    )
       applyWindowMaterial(getWindow())
   })
 
@@ -474,420 +429,151 @@ export function setupIpc(getWindow: () => BrowserWindow | null): void {
     if (docPath) assertCanAccess(docPath)
   }
 
-  async function assertOk(res: Response): Promise<void> {
-    if (res.ok) return
-    if (res.status === 429) throw new Error('rate limit hit')
-    throw new Error(`HTTP ${res.status}: ${await res.text()}`)
-  }
+  // ---------------------------------------------------------------- AI
 
-  // The renderer sends an empty key and the stored one is substituted here, so
-  // the plaintext secret never has to live in renderer memory.
-  const resolveApiKey = (provided: string | undefined): string =>
-    provided && provided.length > 0 ? provided : getStoredApiKey()
+  ipcMain.handle('ai:presets', () => PRESETS)
+  ipcMain.handle('ai:opencode-state', () => openCodeAuth().state())
+  ipcMain.handle('ai:opencode-login', () => {
+    cancelAll()
+    return openCodeAuth().login()
+  })
+  ipcMain.handle('ai:opencode-cancel', () => openCodeAuth().cancelLogin())
+  ipcMain.handle('ai:opencode-logout', () => {
+    cancelAll()
+    return openCodeAuth().logout()
+  })
+  ipcMain.handle('ai:opencode-models', () =>
+    openCodeCatalog.models(AbortSignal.timeout(MODEL_LIST_TIMEOUT_MS))
+  )
+  ipcMain.handle('ai:chatgpt-state', () => chatgptAuth().state())
+  ipcMain.handle('ai:chatgpt-login', (_, addAccount: boolean) =>
+    chatgptAuth().login(addAccount === true)
+  )
+  ipcMain.handle('ai:chatgpt-cancel', () => chatgptAuth().cancelLogin())
+  ipcMain.handle('ai:chatgpt-logout', () => {
+    cancelAll()
+    return chatgptAuth().logout()
+  })
+  ipcMain.handle('ai:chatgpt-select', (_, id: string) => {
+    cancelAll()
+    return chatgptAuth().select(id)
+  })
+  ipcMain.handle('ai:chatgpt-acknowledge', () => chatgptAuth().acknowledgePlan())
+  ipcMain.handle('ai:chatgpt-models', async () =>
+    chatgptModels(
+      {
+        baseUrl: CHATGPT_API_BASE,
+        apiKey: await chatgptAuth().accessToken()
+      },
+      AbortSignal.timeout(MODEL_LIST_TIMEOUT_MS)
+    )
+  )
 
-  /** One-line per probe, newest last, for the Settings diagnostics box. */
-  function formatAttempts(
-    attempts: Array<{ path: string; ok: boolean; detail: string }>
-  ): string[] {
-    return attempts.map((a) => `${a.ok ? 'OK' : '--'} ${a.path} - ${a.detail}`)
-  }
-
-  ipcMain.handle('net:fetch-models', async (_, provider: string, apiKey: string) => {
-    if (provider === 'OpenCode') {
-      const customPath = getSettings().ai.opencodeCliPath || undefined
-      const { found } = await resolveOpencodeBinary(customPath)
-      if (!found)
-        throw new Error('opencode CLI not found. Set its path in Settings → AI Assistant.')
-      const models = await listOpencodeModels(found.path, getVaultPath())
-      // Empty when the CLI has no models subcommand output: the model field
-      // stays free-text (provider/model) rather than blocking the user.
-      return models ?? []
-    }
-    const adapter = getAiProvider(provider)
-    if (!adapter) throw new Error(`Unknown AI provider: ${provider}`)
-    if (adapter.staticModels) return [...adapter.staticModels]
-    const req = adapter.buildModelsRequest(resolveApiKey(apiKey))
-    if (!req) return []
-    try {
-      const res = await net.fetch(req.url, { headers: req.headers })
-      await assertOk(res)
-      return adapter.extractModelIds(await res.json())
-    } catch (e) {
-      console.error('Failed to fetch models in main process:', e)
-      throw e
-    }
+  ipcMain.handle('ai:list-skills', () => listSkills(getVaultPath()))
+  ipcMain.handle('ai:open-skills-folder', async () => {
+    const folder = ensureSkillsFolder(getVaultPath())
+    const error = await shell.openPath(folder)
+    if (error) throw new Error('Could not open the skills folder. Open it from your vault instead.')
+    return folder
   })
 
-  /** Flatten chat messages for the OpenCode prompt (single text part). */
-  function opencodePromptFrom(
-    messages: Array<ChatMessage | { role: string; content: string }>,
-    systemPrompt?: string
-  ): string {
-    // Images are not silently dropped. `opencodePromptFrom` reads only role and
-    // content, so a screenshot attached to the last message used to vanish here
-    // while the panel still showed the attachment chip - and the model answered a
-    // question about an image it had never been sent. Saying so beats a
-    // confident wrong answer.
-    const withImages = messages.filter(
-      (m) => 'images' in m && Array.isArray(m.images) && m.images.length > 0
-    )
-    if (withImages.length > 0) {
-      throw new Error(
-        'OpenCode cannot read image attachments in this build. Remove the image and ask again, or use a provider that accepts images.'
-      )
-    }
-    const parts: string[] = []
-    if (systemPrompt) parts.push(systemPrompt)
-    for (const m of messages) {
-      if (m.role === 'thinking') continue
-      parts.push(`${m.role === 'assistant' ? 'Assistant' : 'User'}: ${m.content}`)
-    }
-    // Sessions run deny-all permissions, so tools can never execute - but the
-    // model does not know that and still emits tool-call markup into its
-    // answer. Forbid it in prose too; stripToolArtifacts is the backstop.
-    parts.push(
-      '[WriteMd: answer directly in markdown. You have no tools available - ' +
-        'never emit tool calls, invoke blocks, or XML-like markup, just the answer.]'
-    )
-    return parts.join('\n\n')
-  }
+  ipcMain.handle('ai:key-state', () => keyState())
 
-  async function resolveOpencodeOrThrow(): Promise<{ path: string; version: string | null }> {
-    const customPath = getSettings().ai.opencodeCliPath || undefined
-    const { found } = await resolveOpencodeBinary(customPath)
-    if (!found) {
-      throw new Error(
-        'opencode CLI not found. Set its path in Settings → AI Assistant (e.g. %APPDATA%\\npm\\opencode.cmd).'
-      )
-    }
-    return found
-  }
+  ipcMain.handle('ai:set-key', (_, key: string) => {
+    const result = setApiKey(key)
+    return { ...result, state: keyState() } satisfies SetKeyResult
+  })
+
+  ipcMain.handle('ai:clear-key', () => {
+    const result = setApiKey('')
+    return { ...result, state: keyState() } satisfies SetKeyResult
+  })
 
   /**
-   * The free-tier gate answers 403 to anything it does not recognize as the
-   * official client with a completed login (proxies hit it too). A raw
-   * "within OpenCode" dump sends the user nowhere, so translate it into the
-   * three things that actually fix it.
+   * Ask the provider which models this key can reach.
+   *
+   * `apiKey` is only ever a first-run fallback. Once a key is stored, the typed
+   * field is blank by design and main uses the stored one - so the renderer has
+   * no key to send and the Fetch button still works on a reopening of Settings.
+   *
+   * Every guard that matters runs in main. `checkEndpoint` is the real
+   * enforcement point; the renderer runs it too, but only so the user finds out
+   * before a round trip.
    */
-  function opencodeFriendlyError(e: unknown): string {
-    const msg = e instanceof Error ? e.message : 'Chat failed'
-    if (/within OpenCode|free tier/i.test(msg)) {
-      return (
-        'OpenCode refused the free model. Complete `opencode console login` in a terminal ' +
-        'and confirm with `opencode auth list`, then Recheck in Settings → AI Assistant. ' +
-        'If login is done, the free IP quota may be spent - wait or pick a connected/paid model.'
+  ipcMain.handle(
+    'ai:fetch-models',
+    async (_, providerId: string, baseUrl: string, typedKey: string) => {
+      if (providerId === 'opencode')
+        return (await openCodeCatalog.models(AbortSignal.timeout(MODEL_LIST_TIMEOUT_MS))).map(
+          (model) => model.id
+        )
+      if (providerId === 'chatgpt')
+        return (
+          await chatgptModels(
+            {
+              baseUrl: CHATGPT_API_BASE,
+              apiKey: await chatgptAuth().accessToken()
+            },
+            AbortSignal.timeout(MODEL_LIST_TIMEOUT_MS)
+          )
+        ).map((model) => model.id)
+      const adapter = adapterFor(providerId)
+      if (!adapter) throw new Error(`Unknown provider: ${providerId}`)
+      const apiKey = typedKey.trim() || getApiKey() || undefined
+      // `checkEndpoint` rejects on a missing model too, which does not apply to a
+      // model listing, so only the endpoint and key checks are relevant here.
+      const check = checkEndpoint(baseUrl, 'unused', apiKey)
+      if (!check.ok) throw new Error(check.message)
+      return adapter.listModels(
+        { baseUrl, apiKey, providerId },
+        AbortSignal.timeout(MODEL_LIST_TIMEOUT_MS)
       )
     }
-    return msg
-  }
-
-  async function runOpencodeChat(
-    model: string,
-    messages: ChatMessage[],
-    systemPrompt: string | undefined,
-    cwd: string,
-    onDelta?: (delta: string) => void,
-    signal?: AbortSignal,
-    sessionId?: string
-  ): Promise<string> {
-    const found = await resolveOpencodeOrThrow()
-    const prompt = opencodePromptFrom(messages, systemPrompt)
-    const input = {
-      bin: found.path,
-      version: found.version,
-      directory: cwd,
-      model: model?.trim() || undefined,
-      prompt,
-      signal,
-      sessionId
-    }
-    // One-shot and streaming share the managed `serve` backend: blocking
-    // message for chat, prompt_async + /event SSE for stream.
-    const text = onDelta
-      ? await opencodeChatStream({ ...input, onDelta })
-      : await opencodeChat(input)
-    if (!text) throw new Error('opencode returned no output')
-    return text
-  }
-
-  ipcMain.handle(
-    'net:chat',
-    async (
-      _,
-      provider: string,
-      model: string,
-      apiKey: string,
-      messages: ChatMessage[],
-      systemPrompt?: string
-    ) => {
-      if (provider === 'OpenCode') {
-        try {
-          return await runOpencodeChat(model, messages, systemPrompt, getVaultPath())
-        } catch (e) {
-          console.error('OpenCode chat error:', e)
-          throw new Error(opencodeFriendlyError(e), { cause: e })
-        }
-      }
-      const adapter = getAiProvider(provider)
-      if (!adapter) throw new Error(`Unknown AI provider: ${provider}`)
-      try {
-        const req = adapter.buildChatRequest({
-          model,
-          apiKey: resolveApiKey(apiKey),
-          messages,
-          systemPrompt
-        })
-        const res = await net.fetch(req.url, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', ...req.headers },
-          body: JSON.stringify(req.body)
-        })
-        await assertOk(res)
-        return adapter.extractChatText(await res.json())
-      } catch (e) {
-        console.error('Chat error:', e)
-        // { cause } keeps the provider's own error on the rethrow, which
-        // otherwise flattened a 401 from the API into a bare message.
-        throw new Error(e instanceof Error ? e.message : 'Chat failed', { cause: e })
-      }
-    }
   )
 
-  /*
-   * In-flight stream aborts, keyed by a composite stream key:
-   *   `${event.sender.id}:${sessionId}` when a sessionId is provided, or
-   *   `${event.sender.id}` as fallback.
-   *
-   * Keying by session ID allows concurrent background generations across tabs.
-   * A sender-level cancel aborts all streams for that window, while a session-scoped
-   * cancel aborts only that specific session.
-   */
-  const activeStreams = new Map<string, AbortController>()
+  // Chat. `invoke` returns as soon as the turn is under way and everything after
+  // arrives on the `ai:event` push channel, because a turn can outlast the call
+  // by minutes and a single invoke result would have to buffer all of it.
+  ipcMain.handle('ai:send', (_, requestId: string, input: AiSendInput) =>
+    startTurn(requestId, input)
+  )
+  ipcMain.handle('ai:accept-preview', (_, previewId: string) => acceptPreview(previewId))
 
-  ipcMain.handle('net:chat-cancel', (event, sessionId?: string) => {
-    if (sessionId) {
-      const key = `${event.sender.id}:${sessionId}`
-      activeStreams.get(key)?.abort()
-      activeStreams.delete(key)
-    } else {
-      // Cancel all streams for this window
-      const prefix = `${event.sender.id}:`
-      for (const [key, controller] of activeStreams.entries()) {
-        if (key === `${event.sender.id}` || key.startsWith(prefix)) {
-          controller.abort()
-          activeStreams.delete(key)
-        }
-      }
-    }
+  ipcMain.handle('ai:cancel', (_, requestId: string) => {
+    cancelTurn(requestId)
+    return true
   })
 
-  ipcMain.handle(
-    'net:chat-stream',
-    async (
-      event,
-      provider: string,
-      model: string,
-      apiKey: string,
-      messages: ChatMessage[],
-      systemPrompt?: string,
-      sessionId?: string
-    ): Promise<string> => {
-      const streamKey = sessionId ? `${event.sender.id}:${sessionId}` : `${event.sender.id}`
-      const chunkChannel = sessionId ? `net:chat-chunk:${sessionId}` : 'net:chat-chunk'
+  ipcMain.handle('ai:list-changes', (_, sessionId?: string) => listChanges(sessionId))
 
-      if (provider === 'OpenCode') {
-        const send = (delta: string): void => {
-          if (delta && !event.sender.isDestroyed()) {
-            event.sender.send(chunkChannel, delta)
-          }
-        }
-        activeStreams.get(streamKey)?.abort()
-        const controller = new AbortController()
-        activeStreams.set(streamKey, controller)
-        try {
-          return await runOpencodeChat(
-            model,
-            messages,
-            systemPrompt,
-            getVaultPath(),
-            send,
-            controller.signal,
-            sessionId
-          )
-        } catch (e) {
-          if (controller.signal.aborted) return ''
-          console.error('OpenCode stream error:', e)
-          throw new Error(opencodeFriendlyError(e), { cause: e })
-        } finally {
-          if (activeStreams.get(streamKey) === controller) {
-            activeStreams.delete(streamKey)
-          }
-        }
-      }
-      const adapter = getAiProvider(provider)
-      if (!adapter) throw new Error(`Unknown AI provider: ${provider}`)
-      const req = adapter.buildStreamRequest({
-        model,
-        apiKey: resolveApiKey(apiKey),
-        messages,
-        systemPrompt
-      })
-      if (!req) throw new Error(`${provider} cannot stream responses`)
-      const send = (delta: string): void => {
-        if (delta && !event.sender.isDestroyed()) {
-          event.sender.send(chunkChannel, delta)
-        }
-      }
-      // Supersede any existing generation for THIS session:
-      activeStreams.get(streamKey)?.abort()
-      const controller = new AbortController()
-      activeStreams.set(streamKey, controller)
-      let full = ''
-      try {
-        const res = await net.fetch(req.url, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', ...req.headers },
-          body: JSON.stringify(req.body),
-          signal: controller.signal
-        })
-        await assertOk(res)
-        const parser = new SseParser()
-        const body = res.body
-        if (!body) {
-          // No readable stream (a provider that ignored `stream: true`, or a
-          // fetch build without streaming). Deliver it as one delta so the
-          // renderer path is identical either way.
-          const text = adapter.extractChatText(await res.json())
-          send(text)
-          return text
-        }
-        const reader = body.getReader()
-        const decoder = new TextDecoder()
-        for (;;) {
-          const { done, value } = await reader.read()
-          if (done) break
-          // `stream: true` on the decoder matters: a multi-byte character can be
-          // split across two reads and would otherwise decode to U+FFFD.
-          for (const payload of parser.feed(decoder.decode(value, { stream: true }))) {
-            const delta = adapter.extractStreamChunk(payload)
-            if (delta) {
-              full += delta
-              send(delta)
+  ipcMain.handle('ai:undo-change', (_, journalId: string) => {
+    const journal = getJournal()
+    const entry = journal.list().find((entry) => entry.id === journalId)
+    const path = entry?.path
+    const outcome = journal.undo(journalId)
+    if (path && (outcome.status === 'restored' || outcome.status === 'gone'))
+      fileChanged(
+        path,
+        outcome.status === 'restored' && entry?.before !== null && entry
+          ? {
+              before: entry.after,
+              content: entry.before,
+              mtime: statOrNull(path)?.mtimeMs ?? Date.now()
             }
-          }
-        }
-        // A provider that closes without a trailing blank line hides its last
-        // frame until flush.
-        for (const payload of parser.flush()) {
-          const delta = adapter.extractStreamChunk(payload)
-          if (delta) {
-            full += delta
-            send(delta)
-          }
-        }
-        return full
-      } catch (e) {
-        // A user-initiated stop is not a failure and must not be reported as
-        // one: it would put "aborted" in the transcript as an assistant message.
-        if (controller.signal.aborted) return full
-        console.error('Chat stream error:', e)
-        throw new Error(e instanceof Error ? e.message : 'Chat failed', { cause: e })
-      } finally {
-        if (activeStreams.get(streamKey) === controller) {
-          activeStreams.delete(streamKey)
-        }
-      }
-    }
-  )
-
-  // Chat sessions. The id arrives from the renderer, so chat-sessions.ts
-  // validates it against a bare-id pattern before touching the filesystem.
-  ipcMain.handle('chat:create', async (_e, docPath: string | null) => createSession(docPath))
-
-  ipcMain.handle('chat:load', async (_e, id: string) => loadSession(id))
-
-  ipcMain.handle('chat:save', async (_e, session: ChatSession) => {
-    if (!session || typeof session.id !== 'string') throw new Error('Invalid chat session')
-    // A session is a transcript, not a document. Cap it so a runaway loop cannot
-    // fill the disk, and reject the shape rather than writing whatever arrived.
-    if (!Array.isArray(session.messages)) throw new Error('Invalid chat session messages')
-    if (session.messages.length > MAX_SESSION_MESSAGES) {
-      throw new Error(`Chat session exceeds ${MAX_SESSION_MESSAGES} messages`)
-    }
-    for (const m of session.messages) {
-      // `thinking` is a local elapsed-time record the panel renders, so it is
-      // accepted here and filtered out before the payload reaches a provider.
-      const valid =
-        typeof m?.content === 'string' &&
-        (m.role === 'user' || m.role === 'assistant' || m.role === 'thinking')
-      if (!valid) throw new Error('Invalid chat session message')
-    }
-    await saveSession(await ensureTitle({ ...session, updatedAt: Date.now() }))
+          : undefined
+      )
+    return outcome
   })
 
-  ipcMain.handle('chat:delete', async (_e, id: string) => deleteSession(id))
+  ipcMain.handle('ai:list-sessions', () => readSessions())
 
-  ipcMain.handle('chat:list', async (_e, docPath: string | null) => listSessions(docPath))
-
-  /*
-   * Local opencode detection. Handles the Windows npm shim (%APPDATA%\npm\
-   * opencode.cmd) and prefers runnable extensions when `where` lists the
-   * extensionless script first. Accepts an explicit path so Settings can
-   * verify a user-picked binary.
-   */
-  ipcMain.handle('opencode:get-status', async (_, customPath?: string) => {
-    const stored = typeof customPath === 'string' && customPath ? customPath : undefined
-    const { found, attempts } = await resolveOpencodeBinary(
-      stored ?? getSettings().ai.opencodeCliPath ?? ''
-    )
-    const debug = formatAttempts(attempts)
-    if (!found) {
-      return {
-        cliFound: false,
-        cliPath: null as string | null,
-        cliVersion: null as string | null,
-        cliMajor: null as number | null,
-        loginCommand: 'opencode auth login opencode',
-        auth: { loggedIn: false, detail: 'CLI not found' },
-        managedServerUp: isManagedServerUp(),
-        searchHints: opencodeSearchHints(),
-        debug
-      }
-    }
-    const loginCommand = opencodeLoginCommand(found.major)
-    let auth = { loggedIn: false, detail: 'login status unknown' }
-    try {
-      auth = await getOpencodeAuthStatus(found.path, getVaultPath())
-    } catch {
-      // Status is advisory; chat still attempts the run and surfaces real errors.
-    }
-    return {
-      cliFound: true,
-      cliPath: found.path,
-      cliVersion: found.version,
-      cliMajor: found.major,
-      loginCommand,
-      auth,
-      managedServerUp: isManagedServerUp(),
-      searchHints: opencodeSearchHints(),
-      debug
-    }
+  ipcMain.handle('ai:save-session', (_, session: PersistedSession) => {
+    writeSession(session)
+    return true
   })
 
-  ipcMain.handle('opencode:get-models', async () => {
-    const { found } = await resolveOpencodeBinary(getSettings().ai.opencodeCliPath || undefined)
-    if (!found) throw new Error('opencode CLI not found')
-    return (await listOpencodeModels(found.path, getVaultPath())) ?? []
-  })
-
-  ipcMain.handle('web:search', async (_, query: string, maxResults?: number) => {
-    if (typeof query !== 'string' || !query.trim()) throw new Error('Empty search query')
-    return webSearch(query, typeof maxResults === 'number' ? maxResults : 6)
-  })
-
-  ipcMain.handle('web:search-context', async (_, query: string) => {
-    if (typeof query !== 'string' || !query.trim()) throw new Error('Empty search query')
-    const results = await webSearch(query, 6)
-    return formatSearchContext(query, results)
+  ipcMain.handle('ai:delete-session', (_, id: string) => {
+    deleteSavedSession(id)
+    return true
   })
 }

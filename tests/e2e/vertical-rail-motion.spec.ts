@@ -4,9 +4,10 @@ import { join } from 'path'
 import { makeFixture, launch, firstWindow } from './fixtures'
 
 /**
- * The rail collapses to a slim 48px strip holding only the expand button —
- * never to zero, never inert — through the shared engine, which collapses to
- * a single frame when motion is off. These tests pin both halves of that.
+ * The rail collapses to a slim 48px strip holding expand, one icon per tab
+ * group, and settings — never to zero, never inert — through the shared engine,
+ * which collapses to a single frame when motion is off. These tests pin both
+ * halves of that.
  */
 
 async function config(vault: string, motion: string): Promise<void> {
@@ -73,13 +74,15 @@ test.describe('Vertical tab rail motion', () => {
         .toBe(48)
       await expect(page.locator('writemd-vertical-tab-bar')).toBeAttached()
       await expect(page.locator('writemd-rail-frame .rail')).not.toHaveAttribute('inert', '')
-      // The slim strip holds only the expand button; the resize handle is gone.
+      // The slim strip holds expand, AI and settings, in the same top/bottom
+      // slots they occupy when the panel is open; the resize handle is gone.
       // Slotted tab content pierces locators, so count the shadow root's own.
       const ownButtons = await page.locator('writemd-sidebar').evaluate((el) => {
         const root = (el as HTMLElement).shadowRoot!
         return Array.from(root.querySelectorAll('writemd-icon-button')).map((b) => b.title)
       })
-      expect(ownButtons).toEqual(['Expand panel'])
+      // AI is on by default in a new profile, so the strip keeps it.
+      expect(ownButtons).toEqual(['Expand panel', 'AI assistant', 'Settings'])
       await expect(page.locator('writemd-rail-frame .divider')).toHaveCount(0)
       await page.locator('writemd-sidebar button[title="Expand panel"]').click()
       await expect

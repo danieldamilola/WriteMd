@@ -1,5 +1,12 @@
 /// <reference types="electron" />
+import type { OpenCodeAuthView, OpenCodeModelView } from './ai/opencode'
 import type { WriteMdSettings, WriteMdSettingsPatch } from './settings-schema'
+import type { ChatgptAuthView, ChatgptModelView } from './ai/chatgpt'
+
+export interface AppBuildInfo {
+  development: boolean
+  version: string
+}
 
 export interface BackgroundAsset {
   id: string
@@ -15,6 +22,11 @@ export interface MaterialSupport {
 export interface FileReadResult {
   content: string
   mtime: number
+}
+
+export interface FileChangeSnapshot extends FileReadResult {
+  /** Text replaced by a committed AI edit, for preserving newer typing. */
+  before: string | null
 }
 
 export interface FileWriteResult {
@@ -44,89 +56,130 @@ export interface ExportResult {
   reason?: string
 }
 
-/** An image attached to a prompt, base64 with no data: prefix. */
-export interface ChatImage {
-  /** Base64 payload. Prefixed onto a data URL only for OpenAI-shaped APIs. */
-  data: string
-  /** IANA subtype, e.g. `image/png`. Gemini and Anthropic want this verbatim. */
-  mediaType: string
-  /** File name, shown in the transcript so the user can see what they sent. */
-  name: string
-}
-
-/** A single chat message sent to an AI provider. */
-export interface ChatMessage {
-  role: 'user' | 'assistant' | 'system'
-  content: string
-  /**
-   * Images attached alongside `content`, vision-capable providers only.
-   *
-   * Every provider spells this differently, so the shape stays uniform here and
-   * each adapter translates it. A message with images but empty content is
-   * legitimate (a bare screenshot with no prompt), which is why `content`
-   * cannot be folded into the images themselves.
-   */
-  images?: ChatImage[]
+/**
+ * A provider the user can pick, as the settings UI sees it.
+ *
+ * Mirrors `ProviderDescriptor` in the main process. Declared here rather than
+ * imported from `main/ai/providers` because the renderer must not pull in
+ * main-only code, and because this is the only part of a descriptor that is
+ * contractual across the bridge.
+ */
+export interface ProviderPresetView {
+  id: string
+  label: string
+  kind: 'openai' | 'anthropic' | 'gemini' | 'responses'
+  defaultBaseUrl: string
+  defaultModel: string
+  keyRequired: boolean
+  keyHint: string
 }
 
 /**
- * One file the user attached to a prompt.
+ * Result of storing the API key.
  *
- * `kind` decides how it reaches the provider: text is inlined into the message
- * content, images ride along as vision parts.
+ * `stored: false` with a reason is not an error path the caller should retry -
+ * it is the machine having no usable keychain, and the UI has to say so rather
+ * than showing a stored key that is not protected.
  */
-export interface AttachedFile {
+export interface SetKeyResult {
+  stored: boolean
+  reason?: string
+  state: 'empty' | 'stored' | 'unavailable'
+}
+
+/** What the renderer sends to start a turn. Mirrors main's `AiSendInput`. */
+export interface AiSendInput {
+  selectionOnly?: boolean
+  /** Return proposed text for review without writing document files. */
+  previewOnly?: boolean
+  sessionId: string
+  userText: string
+  document: { path: string; content: string } | null
+  selection: string | null
+  references: { path: string; content: string }[]
+  attachments: {
+    name: string
+    kind: 'image' | 'text'
+    data?: string
+    mimeType?: string
+    text?: string
+  }[]
+  openPaths: string[]
+}
+
+/** One undoable change, as the change list needs it. */
+export interface ChangeView {
+  id: string
   path: string
-  name: string
-  kind: 'text' | 'image'
-  /** Byte length, for the transcript chip. */
-  size: number
-  /** Populated for `kind: 'text'`; the content inlined into the prompt. */
-  text?: string
-  /** Populated for `kind: 'image'`; base64 with no data: prefix. */
-  data?: string
-  mediaType?: string
+  kind: 'created' | 'modified'
+  createdAt: number
+  revertedAt: number | null
 }
 
-/** A stored conversation. `docPath` is null for a scratch chat with no file. */
-export interface ChatSession {
+export interface PreviewChangeView {
+  /** Identifies the proposal retained in main for acceptance. */
+  previewId?: string
+  path: string
+  original: string
+  content: string
+  kind: 'created' | 'modified'
+}
+
+export interface SkippedView {
+  path: string
+  reason: string
+  detail: string
+}
+
+/**
+ * Result of undoing one change.
+ *
+ * `changed-since` is the one that matters to the user: the file no longer holds
+ * what the assistant wrote, so the prior content is no longer a description of
+ * anything and restoring it would destroy a later edit. It is a refusal, not a
+ * failure, and the UI says so rather than showing an error.
+ */
+export type UndoStatus = 'restored' | 'gone' | 'already-reverted' | 'changed-since' | 'unknown'
+
+/** A saved conversation, as the history list needs it. */
+export interface PersistedSessionView {
   id: string
-  /** Derived from the first user message; empty until there is one. */
   title: string
-  docPath: string | null
   createdAt: number
   updatedAt: number
+  providerId: string
+  model: string | null
+  contextFile: string | null
+  messages: { role: 'user' | 'assistant'; content: string }[]
+}
+
+/**
+ * Pushed from main as a turn runs.
+ *
+ * `requestId` is chosen by the renderer so it can drop events belonging to a
+ * turn it already stopped - a cancelled stream is often still in flight when
+ * the next one starts, and appending it into the new transcript produces text
+ * neither turn produced.
+ */
+export type AiEvent =
+  | { type: 'status'; requestId: string; message: string }
+  | { type: 'text'; requestId: string; delta: string }
+  | { type: 'proposal'; requestId: string; files: string[]; blocks: number; skipped: string[] }
+  | { type: 'applied'; requestId: string; changed: ChangeView[]; skipped: SkippedView[] }
+  | { type: 'preview'; requestId: string; changes: PreviewChangeView[]; skipped: SkippedView[] }
+  | { type: 'answer'; requestId: string; text: string }
+  | { type: 'error'; requestId: string; message: string }
   /**
-   * `thinking` entries are a local record of elapsed time, rendered by the
-   * panel and filtered out before any provider sees them.
+   * The turn is over. `text` is authoritative and replaces whatever streamed -
+   * the streamed deltas are provisional, and when the model edited files they
+   * contained the protocol rather than prose.
    */
-  messages: Array<{
-    role: 'user' | 'assistant' | 'thinking'
-    content: string
-    filePath?: string
-    elapsed?: number
-    /**
-     * Names of files this prompt carried. Metadata only: the image bytes are
-     * never stored, so a restored session shows what was sent without keeping
-     * megabytes of base64 on disk.
-     */
-    attachments?: Array<{ name: string; kind: 'text' | 'image'; size: number }>
-  }>
-}
-
-/** What the history list needs, without shipping every message. */
-export interface ChatSessionSummary {
-  id: string
-  title: string
-  docPath: string | null
-  createdAt: number
-  updatedAt: number
-  messageCount: number
-}
+  | { type: 'done'; requestId: string; text?: string }
 
 /** Update info pushed by electron-updater. Only version is contractual. */
 export interface UpdateInfo {
   version?: string
+  releaseNotes?: string | { version: string; note: string | null }[] | null
 }
 
 /** Download progress pushed by electron-updater. */
@@ -143,6 +196,7 @@ export interface UpdaterState {
   version: string
   percent: number
   error: string
+  releaseNotes?: string
 }
 
 export interface ElectronAPI {
@@ -153,6 +207,7 @@ export interface ElectronAPI {
     materialSupport: () => Promise<MaterialSupport>
   }
   app: {
+    getBuildInfo: () => Promise<AppBuildInfo>
     getVersion: () => Promise<string>
     getPath: (name: 'home' | 'documents' | 'downloads' | 'temp') => Promise<string>
     quit: () => Promise<void>
@@ -179,14 +234,9 @@ export interface ElectronAPI {
       filters?: { name: string; extensions: string[] }[]
     }) => Promise<Electron.SaveDialogReturnValue>
     exists: (path: string) => Promise<boolean>
-    /**
-     * Read one file the user picked in the attach dialog, as text or as base64
-     * depending on its extension. Paths must have come from `showOpenDialog`.
-     */
-    readAttachment: (path: string) => Promise<AttachedFile>
     /** Electron 32+ removed File.path; this is the supported way back. */
     getPathForFile: (file: File) => string
-    /** Register dropped paths so the guards in read-attachment allow them. */
+    /** Register dropped paths so the guards allow them to be opened. */
     registerDroppedPaths: (paths: string[]) => Promise<void>
     saveImage: (docPath: string, base64Data: string, ext: string) => Promise<SavedImageResult>
     resolveAsset: (docPath: string, relativePath: string) => Promise<string | null>
@@ -194,7 +244,7 @@ export interface ElectronAPI {
     unwatch: (path: string) => Promise<void>
     rename: (oldPath: string, newPath: string) => Promise<boolean>
     delete: (path: string) => Promise<boolean>
-    onChanged: (callback: (path: string) => void) => () => void
+    onChanged: (callback: (path: string, snapshot?: FileChangeSnapshot) => void) => () => void
   }
   vault: {
     getPath: () => Promise<string>
@@ -206,77 +256,6 @@ export interface ElectronAPI {
   settings: {
     get: () => Promise<WriteMdSettings>
     set: (settings: WriteMdSettingsPatch) => Promise<void>
-  }
-  net: {
-    fetchModels: (provider: string, apiKey: string) => Promise<string[]>
-    chat: (
-      provider: string,
-      model: string,
-      apiKey: string,
-      messages: ChatMessage[],
-      systemPrompt?: string
-    ) => Promise<string>
-    /**
-     * Streams an answer token by token. `onChunk` fires per delta as it arrives;
-     * the returned promise resolves with the same full text once the stream
-     * closes, so the caller can post-process it.
-     */
-    chatStream: (
-      provider: string,
-      model: string,
-      apiKey: string,
-      messages: ChatMessage[],
-      onChunk: (delta: string) => void,
-      systemPrompt?: string,
-      sessionId?: string
-    ) => Promise<string>
-    /**
-     * Abort the in-flight stream. The promise from `chatStream` then resolves
-     * with whatever text had already arrived instead of rejecting, so a stopped
-     * reply keeps its partial answer. Pass `sessionId` to abort a specific
-     * conversation, or omit it to abort any stream for this window.
-     */
-    cancelChat: (sessionId?: string) => Promise<void>
-  }
-  chat: {
-    /** Create an empty session bound to a document, or null for a scratch chat. */
-    createSession: (docPath: string | null) => Promise<ChatSession>
-    loadSession: (id: string) => Promise<ChatSession | null>
-    saveSession: (session: ChatSession) => Promise<void>
-    deleteSession: (id: string) => Promise<void>
-    /** Summaries for one document, newest first. */
-    listSessions: (docPath: string | null) => Promise<ChatSessionSummary[]>
-  }
-  opencode: {
-    /**
-     * Deliberately reports only whether the managed server is up, never its URL.
-     *
-     * `opencode serve` is unauthenticated: loopback bind plus an ephemeral port
-     * are the only things protecting it. Handing the port to the renderer gave
-     * that away, and a renderer holding the URL can create its own session with
-     * `permission: allow` and run tools as the user, which is exactly what the
-     * `permission: deny` sessions this app creates exist to prevent. The UI
-     * needs the boolean and nothing more.
-     */
-    getStatus: (customPath?: string) => Promise<{
-      cliFound: boolean
-      cliPath: string | null
-      cliVersion: string | null
-      cliMajor: number | null
-      loginCommand: string
-      auth: { loggedIn: boolean; detail: string }
-      managedServerUp: boolean
-      searchHints: string[]
-      debug: string[]
-    }>
-    getModels: () => Promise<string[]>
-  }
-  web: {
-    search: (
-      query: string,
-      maxResults?: number
-    ) => Promise<Array<{ title: string; url: string; snippet: string }>>
-    searchContext: (query: string) => Promise<string>
   }
   dialog: {
     showOpenDialog: (options: Electron.OpenDialogOptions) => Promise<Electron.OpenDialogReturnValue>
@@ -290,6 +269,66 @@ export interface ElectronAPI {
     pdf: (markdown: string, docPath: string | null) => Promise<ExportResult>
     html: (markdown: string, docPath: string | null) => Promise<ExportResult>
     docx: (markdown: string, docPath: string | null) => Promise<ExportResult>
+  }
+  /**
+   * The AI assistant. Note there is no "get the key" call anywhere in this
+   * interface, and that is deliberate: the renderer sends a key in to store it
+   * and receives back only whether one exists. The secret never crosses the
+   * bridge in the readable direction.
+   */
+  ai: {
+    opencode?: {
+      state: () => Promise<OpenCodeAuthView>
+      login: () => Promise<OpenCodeAuthView>
+      cancel: () => Promise<OpenCodeAuthView>
+      logout: () => Promise<OpenCodeAuthView>
+      models: () => Promise<OpenCodeModelView[]>
+      onChanged: (callback: (state: OpenCodeAuthView) => void) => () => void
+    }
+    chatgpt?: {
+      state: () => Promise<ChatgptAuthView>
+      login: (addAccount?: boolean) => Promise<ChatgptAuthView>
+      cancel: () => Promise<ChatgptAuthView>
+      logout: () => Promise<ChatgptAuthView>
+      select: (id: string) => Promise<ChatgptAuthView>
+      acknowledgePlan: () => Promise<ChatgptAuthView>
+      models: () => Promise<ChatgptModelView[]>
+      onChanged: (callback: (state: ChatgptAuthView) => void) => () => void
+    }
+    listSkills: () => Promise<import('./ai/skills').AiSkillsView>
+    openSkillsFolder: () => Promise<string>
+    presets: () => Promise<ProviderPresetView[]>
+    /**
+     * Model ids this key can reach. Rejects on a bad key rather than resolving
+     * an empty list, so the UI can distinguish "your key is wrong" from "this
+     * provider has no models".
+     */
+    fetchModels: (providerId: string, baseUrl: string, apiKey: string) => Promise<string[]>
+    setKey: (key: string) => Promise<SetKeyResult>
+    clearKey: () => Promise<SetKeyResult>
+    keyState: () => Promise<'empty' | 'stored' | 'unavailable'>
+    /**
+     * Start a turn. Resolves once it is under way; output arrives on
+     * `onEvent`. The renderer owns `requestId`.
+     */
+    send: (requestId: string, input: AiSendInput) => Promise<unknown>
+    acceptPreview: (previewId: string) => Promise<ChangeView | null>
+    /**
+     * Fire-and-forget. These resolve once the request is accepted, not once the
+     * work is done, and the renderer only cares that they did not throw - so
+     * they are typed void rather than carrying a result nobody reads.
+     */
+    cancel: (requestId: string) => Promise<void>
+    onEvent: (callback: (event: AiEvent) => void) => () => void
+    listChanges: (sessionId?: string) => Promise<ChangeView[]>
+    undoChange: (journalId: string) => Promise<{
+      status: UndoStatus
+      path?: string
+      entryId?: string
+    }>
+    listSessions: () => Promise<PersistedSessionView[]>
+    saveSession: (session: PersistedSessionView) => Promise<void>
+    deleteSession: (id: string) => Promise<void>
   }
   updater: {
     /**

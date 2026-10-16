@@ -35,6 +35,20 @@ function profileWithVault(name: string): { userData: string; vault: string } {
   return { userData, vault }
 }
 
+/**
+ * The user's own notes, with the app's own folders out of the way.
+ *
+ * The Skills folder is created in every vault on purpose - it holds the Unslop
+ * skill, which has to exist for the assistant to have house style. These tests
+ * are about a different promise, which is that WriteMd does not seed *notes*,
+ * and that promise is about everything that is not one of our own folders.
+ */
+function userFiles(vault: string): string[] {
+  return readdirSync(vault)
+    .filter((entry) => entry !== 'Skills')
+    .sort()
+}
+
 test.describe('Vault welcome note', () => {
   test('a vault the app did not create is never seeded', async () => {
     const { userData, vault } = profileWithVault('welcome-standdown')
@@ -52,7 +66,7 @@ test.describe('Vault welcome note', () => {
       expect(existsSync(join(vault, 'Welcome.md'))).toBe(false)
       // And the note that was there is untouched.
       expect(readFileSync(join(vault, 'PRD.md'), 'utf-8')).toBe('# mine\n')
-      expect(readdirSync(vault)).toEqual(['PRD.md'])
+      expect(userFiles(vault)).toEqual(['PRD.md'])
     } finally {
       await app.close()
       rmSync(join(vault, '..'), { recursive: true, force: true })
@@ -73,7 +87,7 @@ test.describe('Vault welcome note', () => {
     const app = await launch({ args: [`--user-data-dir=${userData}`, '.'] })
     try {
       await firstWindow(app)
-      expect(readdirSync(vault)).toEqual([])
+      expect(userFiles(vault)).toEqual([])
     } finally {
       await app.close()
       rmSync(join(vault, '..'), { recursive: true, force: true })

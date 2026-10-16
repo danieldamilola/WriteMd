@@ -6,15 +6,17 @@ WriteMd uses a hybrid vault model. By default, new files created in the app are 
 
 ## Does WriteMd require an internet connection?
 
-No! The core editor is 100% offline. WriteMd does not have accounts or telemetry. Network connections are only used if you configure an AI Assistant and select a cloud provider like OpenAI or Anthropic.
+No! The editor is 100% offline. WriteMd does not have accounts or telemetry. The only outbound requests are the update check against GitHub releases, which can be turned off in Settings, and the AI assistant if you turn it on - which is off by default and sends nothing until you do.
 
-## How do I configure the AI Assistant?
+## Can the AI assistant change my files? Is that safe?
 
-1. Open Settings (`Ctrl+,`).
-2. Navigate to the **AI Assistant Config** section.
-3. Select your provider (e.g. OpenAI, Anthropic, or Ollama for local offline AI).
-4. Enter your API key (stored securely and locally on your machine).
-5. Click **Fetch** to retrieve available models and select one.
+Yes, and it is undoable. When you ask it for a change it edits the file on disk, and every file it touches is listed in its panel with its own **Undo** button.
+
+Two rules it follows without being asked. If one of its changes doesn't match the text it expected, it does **not** write that file at all and tells you why, rather than leaving a half-finished rewrite that looks complete. And if you've edited a file yourself since it read it, it skips that file too, so it can't quietly overwrite something you just wrote.
+
+It works on any file your user account can reach, not just files in the vault. That is a deliberate choice, and the Undo list is the reason it is an acceptable one.
+
+To keep your notes on your own machine, point it at a local provider - Ollama or LM Studio - in **Settings > AI assistant**. Nothing then leaves the computer. Your API key is stored encrypted in your operating system's keychain, never in WriteMd's settings file.
 
 ## How do I update WriteMd?
 

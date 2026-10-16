@@ -6,3 +6,7 @@ WriteMd includes adaptations from these MIT-licensed projects. Their license not
 - [OpenCode](https://github.com/anomalyco/opencode): settings dialog and navigation proportions, menu and resizable workspace patterns, adapted for WriteMd's Lit components. Copyright (c) 2025 opencode. See [licenses/opencode.txt](licenses/opencode.txt).
 
 Dependencies distributed with WriteMd retain their respective licenses and notices.
+
+## Lobe Icons
+
+The bundled AI provider marks are from [Lobe Icons](https://github.com/lobehub/lobe-icons), distributed under the MIT license. The notice is included in `licenses/lobe-icons.txt`. Provider marks identify their respective services.

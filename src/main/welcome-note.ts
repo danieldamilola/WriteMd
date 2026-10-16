@@ -102,12 +102,11 @@ rather than memorising it.
 
 | | |
 | --- | --- |
-| **Ctrl+P** | command palette — files, views, themes, AI |
+| **Ctrl+P** | command palette — files, views, themes |
 | **Ctrl+E** | flip reading / live |
 | **Ctrl+F** / **Ctrl+H** | find / replace |
 | **Ctrl+Shift+E** | files in the split pane |
 | **Ctrl+Shift+B** | backlinks in the split pane |
-| **Ctrl+Alt+A** | AI assistant in the split pane |
 | **Ctrl+,** | settings |
 
 All of them are rebindable in Settings, so treat that table as the default rather

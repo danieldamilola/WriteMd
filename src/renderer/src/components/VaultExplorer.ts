@@ -99,8 +99,8 @@ export class VaultExplorer extends LitElement {
     }
 
     svg {
-      width: 14px;
-      height: 14px;
+      width: var(--icon-size, 18px);
+      height: var(--icon-size, 18px);
     }
     ${scrollbarStyles}
 

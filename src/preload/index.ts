@@ -1,5 +1,14 @@
+import type { OpenCodeAuthView } from '../shared/ai/opencode'
 import { contextBridge, ipcRenderer, webUtils, type IpcRendererEvent } from 'electron'
-import type { ChatMessage, ChatSession, UpdateInfo, UpdateProgress } from '../shared/electron-api'
+import type { ChatgptAuthView } from '../shared/ai/chatgpt'
+import type {
+  AiEvent,
+  AiSendInput,
+  FileChangeSnapshot,
+  PersistedSessionView,
+  UpdateInfo,
+  UpdateProgress
+} from '../shared/electron-api'
 
 function onChannel(channel: string, callback: (...args: unknown[]) => void): () => void {
   const handler = (_: IpcRendererEvent, ...args: unknown[]): void => callback(...args)
@@ -16,6 +25,7 @@ const writemdAPI = {
     materialSupport: () => ipcRenderer.invoke('appearance:material-support')
   },
   app: {
+    getBuildInfo: () => ipcRenderer.invoke('app:get-build-info'),
     getVersion: () => ipcRenderer.invoke('app:get-version'),
     getPath: (name: 'home' | 'documents' | 'downloads' | 'temp') =>
       ipcRenderer.invoke('app:get-path', name),
@@ -46,11 +56,6 @@ const writemdAPI = {
     exists: (path: string) => ipcRenderer.invoke('file:exists', path),
     saveImage: (docPath: string, base64Data: string, ext: string) =>
       ipcRenderer.invoke('file:save-image', docPath, base64Data, ext),
-    /**
-     * Read one file the user picked in the attach dialog. Text comes back
-     * decoded, images as bare base64, which is what the provider payloads want.
-     */
-    readAttachment: (path: string) => ipcRenderer.invoke('file:read-attachment', path),
     /** Electron 32+ removed File.path; this is the supported way back. */
     getPathForFile: (file: File) => webUtils.getPathForFile(file),
     /** Dropped files are not dialog results, so nothing registered them yet. */
@@ -62,7 +67,7 @@ const writemdAPI = {
     rename: (oldPath: string, newPath: string) =>
       ipcRenderer.invoke('file:rename', oldPath, newPath),
     delete: (path: string) => ipcRenderer.invoke('file:delete', path),
-    onChanged: (callback: (path: string) => void) =>
+    onChanged: (callback: (path: string, snapshot?: FileChangeSnapshot) => void) =>
       onChannel('file:changed', callback as (...args: unknown[]) => void)
   },
   vault: {
@@ -75,67 +80,6 @@ const writemdAPI = {
   settings: {
     get: () => ipcRenderer.invoke('settings:get'),
     set: (settings: Record<string, unknown>) => ipcRenderer.invoke('settings:set', settings)
-  },
-  net: {
-    fetchModels: (provider: string, apiKey: string) =>
-      ipcRenderer.invoke('net:fetch-models', provider, apiKey),
-    chat: (
-      provider: string,
-      model: string,
-      apiKey: string,
-      messages: ChatMessage[],
-      systemPrompt?: string
-    ) => ipcRenderer.invoke('net:chat', provider, model, apiKey, messages, systemPrompt),
-    chatStream: (
-      provider: string,
-      model: string,
-      apiKey: string,
-      messages: ChatMessage[],
-      onChunk: (delta: string) => void,
-      systemPrompt?: string,
-      sessionId?: string
-    ): Promise<string> => {
-      // If sessionId is provided, listen on a session-specific channel so
-      // concurrent streams across tabs never mix deltas. Also listen on the
-      // default channel for backward compatibility with un-scoped streams.
-      const specificChannel = sessionId ? `net:chat-chunk:${sessionId}` : null
-      const listener = (_e: Electron.IpcRendererEvent, delta: string): void => onChunk(delta)
-      if (specificChannel) {
-        ipcRenderer.on(specificChannel, listener)
-      } else {
-        ipcRenderer.on('net:chat-chunk', listener)
-      }
-      return ipcRenderer
-        .invoke('net:chat-stream', provider, model, apiKey, messages, systemPrompt, sessionId)
-        .finally(() => {
-          if (specificChannel) {
-            ipcRenderer.removeListener(specificChannel, listener)
-          } else {
-            ipcRenderer.removeListener('net:chat-chunk', listener)
-          }
-        })
-    },
-    /**
-     * Abort the stream this renderer started. Resolves with the text that had
-     * already arrived, so the partial answer is kept rather than lost.
-     */
-    cancelChat: (sessionId?: string) => ipcRenderer.invoke('net:chat-cancel', sessionId)
-  },
-  chat: {
-    createSession: (docPath: string | null) => ipcRenderer.invoke('chat:create', docPath),
-    loadSession: (id: string) => ipcRenderer.invoke('chat:load', id),
-    saveSession: (session: ChatSession) => ipcRenderer.invoke('chat:save', session),
-    deleteSession: (id: string) => ipcRenderer.invoke('chat:delete', id),
-    listSessions: (docPath: string | null) => ipcRenderer.invoke('chat:list', docPath)
-  },
-  opencode: {
-    getStatus: (customPath?: string) => ipcRenderer.invoke('opencode:get-status', customPath),
-    getModels: () => ipcRenderer.invoke('opencode:get-models')
-  },
-  web: {
-    search: (query: string, maxResults?: number) =>
-      ipcRenderer.invoke('web:search', query, maxResults),
-    searchContext: (query: string) => ipcRenderer.invoke('web:search-context', query)
   },
   dialog: {
     showOpenDialog: (options: Electron.OpenDialogOptions) =>
@@ -153,6 +97,55 @@ const writemdAPI = {
       ipcRenderer.invoke('export:html', markdown, docPath),
     docx: (markdown: string, docPath: string | null) =>
       ipcRenderer.invoke('export:docx', markdown, docPath)
+  },
+  /**
+   * The AI assistant.
+   *
+   * There is deliberately no way to read the API key back. The renderer sends
+   * one in to store it and gets a boolean back; main keeps the secret. A
+   * `getKey` here would hand the key to every script that can reach the
+   * renderer, which is exactly the boundary `contextIsolation` exists to hold.
+   */
+  ai: {
+    opencode: {
+      state: () => ipcRenderer.invoke('ai:opencode-state'),
+      login: () => ipcRenderer.invoke('ai:opencode-login'),
+      cancel: () => ipcRenderer.invoke('ai:opencode-cancel'),
+      logout: () => ipcRenderer.invoke('ai:opencode-logout'),
+      models: () => ipcRenderer.invoke('ai:opencode-models'),
+      onChanged: (callback: (state: OpenCodeAuthView) => void) =>
+        onChannel('ai:opencode-auth', callback as (...args: unknown[]) => void)
+    },
+    chatgpt: {
+      state: () => ipcRenderer.invoke('ai:chatgpt-state'),
+      login: (addAccount = false) => ipcRenderer.invoke('ai:chatgpt-login', addAccount),
+      cancel: () => ipcRenderer.invoke('ai:chatgpt-cancel'),
+      logout: () => ipcRenderer.invoke('ai:chatgpt-logout'),
+      select: (id: string) => ipcRenderer.invoke('ai:chatgpt-select', id),
+      acknowledgePlan: () => ipcRenderer.invoke('ai:chatgpt-acknowledge'),
+      models: () => ipcRenderer.invoke('ai:chatgpt-models'),
+      onChanged: (callback: (state: ChatgptAuthView) => void) =>
+        onChannel('ai:chatgpt-auth', callback as (...args: unknown[]) => void)
+    },
+    listSkills: () => ipcRenderer.invoke('ai:list-skills'),
+    openSkillsFolder: () => ipcRenderer.invoke('ai:open-skills-folder'),
+    presets: () => ipcRenderer.invoke('ai:presets'),
+    fetchModels: (providerId: string, baseUrl: string, apiKey: string) =>
+      ipcRenderer.invoke('ai:fetch-models', providerId, baseUrl, apiKey),
+    setKey: (key: string) => ipcRenderer.invoke('ai:set-key', key),
+    clearKey: () => ipcRenderer.invoke('ai:clear-key'),
+    keyState: () => ipcRenderer.invoke('ai:key-state'),
+    send: (requestId: string, input: AiSendInput) =>
+      ipcRenderer.invoke('ai:send', requestId, input),
+    acceptPreview: (previewId: string) => ipcRenderer.invoke('ai:accept-preview', previewId),
+    cancel: (requestId: string) => ipcRenderer.invoke('ai:cancel', requestId),
+    onEvent: (callback: (event: AiEvent) => void) =>
+      onChannel('ai:event', (...args: unknown[]) => callback(args[0] as AiEvent)),
+    listChanges: (sessionId?: string) => ipcRenderer.invoke('ai:list-changes', sessionId),
+    undoChange: (journalId: string) => ipcRenderer.invoke('ai:undo-change', journalId),
+    listSessions: () => ipcRenderer.invoke('ai:list-sessions'),
+    saveSession: (session: PersistedSessionView) => ipcRenderer.invoke('ai:save-session', session),
+    deleteSession: (id: string) => ipcRenderer.invoke('ai:delete-session', id)
   },
   updater: {
     check: () => ipcRenderer.invoke('updater:check'),

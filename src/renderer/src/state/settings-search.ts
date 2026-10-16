@@ -1,5 +1,5 @@
 export type SettingsTab =
-  'general' | 'appearance' | 'editor' | 'files' | 'shortcuts' | 'advanced' | 'ai' | 'about'
+  'general' | 'appearance' | 'editor' | 'files' | 'ai' | 'shortcuts' | 'advanced' | 'about'
 
 /** Human labels used both by the nav buttons and by search filtering. */
 export const TAB_LABELS: Record<SettingsTab, string> = {
@@ -7,9 +7,9 @@ export const TAB_LABELS: Record<SettingsTab, string> = {
   appearance: 'Appearance',
   editor: 'Editor',
   files: 'Files & vault',
+  ai: 'AI assistant',
   shortcuts: 'Keyboard shortcuts',
   advanced: 'Advanced',
-  ai: 'AI Assistant',
   about: 'About WriteMd'
 }
 
@@ -30,10 +30,10 @@ export const SETTINGS_SEARCH_INDEX: Record<SettingsTab, string> = {
     'appearance theme dark graphite nord midnight light paper dracula accent color panel orientation horizontal vertical tabs side rail top bar layout window full screen shell',
   editor: 'editor font family size word wrap line numbers source mode highlight active line',
   files: 'files vault location path storage folder recent tabs open disk',
+  ai: 'ai assistant model provider openai anthropic gemini openrouter deepseek groq mistral xai grok ollama lmstudio api key endpoint fetch models history privacy local cloud',
   shortcuts: 'shortcuts keyboard keys bindings commands rebind reset',
   advanced:
     'advanced features mermaid diagrams export pdf page size theme margin paper a4 letter legal danger reset preferences factory defaults',
-  ai: 'ai assistant provider model api key system prompt instructions web search opencode cli console login managed server nvidia ollama grok',
   about: 'about version updates release notes whats new auto check download restart install'
 }
 
@@ -84,6 +84,11 @@ export const SETTINGS_ROW_INDEX: SettingsRowEntry[] = [
     terms: 'gutter show source mode'
   },
   {
+    tab: 'editor',
+    label: 'File Path',
+    terms: 'footer hide path location breadcrumb'
+  },
+  {
     tab: 'files',
     label: 'Vault Location',
     terms: 'storage folder path documents default change'
@@ -92,6 +97,52 @@ export const SETTINGS_ROW_INDEX: SettingsRowEntry[] = [
     tab: 'files',
     label: 'Auto-save',
     terms: 'automatically write modifications to disk timer'
+  },
+  {
+    tab: 'ai',
+    label: 'Enable AI assistant',
+    terms: 'turn on off master switch panel toggle'
+  },
+  {
+    tab: 'ai',
+    label: 'Automatically accept AI edits',
+    terms: 'auto accept automatic apply suggestions floating bar preview review'
+  },
+  {
+    tab: 'ai',
+    label: 'Output limit',
+    terms: 'maximum response length tokens reasoning thinking automatic draft article'
+  },
+  {
+    tab: 'ai',
+    label: 'Personal skills',
+    terms: 'skill.md writing instructions slash commands open skills folder refresh'
+  },
+  {
+    tab: 'ai',
+    label: 'Provider',
+    terms:
+      'openai anthropic gemini openrouter deepseek groq mistral xai grok ollama lmstudio local service'
+  },
+  {
+    tab: 'ai',
+    label: 'API Key',
+    terms: 'secret credential keychain encrypted paste'
+  },
+  {
+    tab: 'ai',
+    label: 'Endpoint',
+    terms: 'base url address host https custom proxy'
+  },
+  {
+    tab: 'ai',
+    label: 'Model',
+    terms: 'fetch refresh models list gpt claude llama pick choose'
+  },
+  {
+    tab: 'ai',
+    label: 'Chat history',
+    terms: 'turns context previous messages replay tokens'
   },
   {
     tab: 'shortcuts',
@@ -123,30 +174,6 @@ export const SETTINGS_ROW_INDEX: SettingsRowEntry[] = [
     label: 'Reset Preferences',
     terms: 'restore all options factory defaults danger zone'
   },
-  {
-    tab: 'ai',
-    label: 'Provider',
-    terms:
-      'backend openai anthropic google gemini mistral groq openrouter opencode nvidia deepseek grok xai ollama local select'
-  },
-  { tab: 'ai', label: 'Web search', terms: 'ground answers keyless before sending' },
-  {
-    tab: 'ai',
-    label: 'Model',
-    terms: 'fetch list gpt claude llama suggestions grok'
-  },
-  { tab: 'ai', label: 'API Key', terms: 'secret stored locally password replace decrypt' },
-  {
-    tab: 'ai',
-    label: 'Connect via Console',
-    terms: 'login browser sign in opencode managed server'
-  },
-  {
-    tab: 'ai',
-    label: 'CLI path',
-    terms: 'browse recheck opencode npm appdata not found'
-  },
-  { tab: 'ai', label: 'System Prompt', terms: 'instructions every request reset default' },
   { tab: 'about', label: 'WriteMd Desktop', terms: 'version unavailable' },
   {
     tab: 'about',

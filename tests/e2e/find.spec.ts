@@ -38,6 +38,10 @@ test.describe('Find/Replace panel', () => {
     // Type a query
     await panel.locator('.find-input').fill('hello')
     await expect(panel.locator('.match-count')).toContainText('of 2')
+    for (const icon of await panel.locator('svg').all()) {
+      await expect(icon).toHaveCSS('width', '18px')
+      await expect(icon).toHaveCSS('height', '18px')
+    }
 
     // Built-in CodeMirror search panel must not exist
     await expect(window.locator('.cm-panel.cm-search')).toHaveCount(0)

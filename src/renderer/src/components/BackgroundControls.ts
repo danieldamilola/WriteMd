@@ -72,7 +72,7 @@ export class BackgroundControls extends LitElement {
         height: 130px;
         border: 1px solid var(--border-subtle);
         border-radius: var(--radius-md);
-        background: var(--bg-frame);
+        background: var(--bg-elevated);
         overflow: hidden;
       }
       .image-row {
@@ -234,7 +234,7 @@ export class BackgroundControls extends LitElement {
             aria-pressed=${selected === value}
             @click=${() => this.settings.set(key, value)}
           >
-            ${value === 'ascii' ? 'ASCII' : value === 'ai' ? 'AI pane' : value === 'all' ? 'Always' : value === 'empty' ? 'Empty only' : value[0].toUpperCase() + value.slice(1)}
+            ${value === 'ascii' ? 'ASCII' : value === 'all' ? 'Always' : value === 'empty' ? 'Empty only' : value[0].toUpperCase() + value.slice(1)}
           </button>`
       )}
     </div>`
@@ -297,7 +297,7 @@ export class BackgroundControls extends LitElement {
         </div>
         <div class="row">
           <div class="label">Show behind</div>
-          ${this.segments('appearance.backgroundTarget', ['workspace', 'ai'])}
+          ${this.segments('appearance.backgroundTarget', ['workspace'])}
         </div>
         <div class="row">
           <div class="label">Show on</div>

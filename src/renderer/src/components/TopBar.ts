@@ -1,9 +1,10 @@
 import { html, css, LitElement } from 'lit'
-import { customElement, property } from 'lit/decorators.js'
+import { customElement, property, state } from 'lit/decorators.js'
 import './IconButton'
 import './UpdateButton'
 import { chromeIcon } from '../design/icons'
 import { api } from '../api'
+import type { AppBuildInfo } from '../../../shared/electron-api'
 
 @customElement('writemd-top-bar')
 export class WriteMdTopBar extends LitElement {
@@ -26,6 +27,18 @@ export class WriteMdTopBar extends LitElement {
       gap: 8px;
       -webkit-app-region: no-drag;
       flex-shrink: 0;
+    }
+
+    .development-badge {
+      display: inline-block;
+      padding: 2px 6px;
+      border-radius: var(--radius-md);
+      background: color-mix(in oklab, var(--accent-choice-2) 15%, transparent);
+      color: color-mix(in oklab, var(--accent-choice-2) 70%, var(--text));
+      font: 500 10px / 16px var(--font-ui);
+      letter-spacing: 0.025em;
+      white-space: nowrap;
+      -webkit-app-region: drag;
     }
 
     .tabs-slot {
@@ -57,6 +70,10 @@ export class WriteMdTopBar extends LitElement {
       gap: 0;
       align-self: stretch;
       margin: -6px 0;
+    }
+    .assistant[aria-pressed='true'] {
+      background: var(--bg-active);
+      border-radius: var(--radius-sm);
     }
 
     :host {
@@ -100,6 +117,21 @@ export class WriteMdTopBar extends LitElement {
   @property({ type: Boolean, reflect: true, attribute: 'document-header' }) documentHeader = false
   @property({ type: Boolean }) showSplitButton = true
   @property({ type: Boolean }) splitActive = false
+  @property({ type: Boolean }) showAiButton = false
+  @property({ type: Boolean }) aiOpen = false
+  @state() private buildInfo: AppBuildInfo | null = null
+
+  connectedCallback(): void {
+    super.connectedCallback()
+    // Electron also identifies local production previews as unpackaged builds.
+    // Vite's DEV flag alone would hide the indicator during `pnpm start`.
+    void api()
+      ?.app?.getBuildInfo?.()
+      .then((info) => {
+        if (this.isConnected) this.buildInfo = info
+      })
+      .catch(() => undefined)
+  }
 
   private emit(event: string, detail?: unknown): void {
     this.dispatchEvent(new CustomEvent(event, { detail, bubbles: true, composed: true }))
@@ -108,6 +140,15 @@ export class WriteMdTopBar extends LitElement {
   render(): unknown {
     return html`
       <div class="left-group">
+        ${
+          this.buildInfo?.development
+            ? html`<span
+                class="development-badge"
+                title=${`Development build, v${this.buildInfo.version}`}
+                >Development</span
+              >`
+            : null
+        }
         ${this.documentHeader ? '' : html`<writemd-update-button></writemd-update-button>`}
       </div>
 
@@ -116,6 +157,18 @@ export class WriteMdTopBar extends LitElement {
       </div>
 
       <div class="right-group">
+        ${
+          this.showAiButton && !this.settingsOpen
+            ? html`<writemd-icon-button
+                class="assistant"
+                title="AI assistant"
+                aria-pressed=${this.aiOpen ? 'true' : 'false'}
+                @click=${() => this.emit('toggle-ai')}
+                @mousedown=${(event: MouseEvent) => event.preventDefault()}
+                >${chromeIcon('ai')}</writemd-icon-button
+              >`
+            : null
+        }
         ${
           this.showSplitButton && !this.settingsOpen
             ? html`

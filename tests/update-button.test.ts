@@ -14,9 +14,9 @@ import type { WriteMdUpdateButton } from '../src/renderer/src/components/UpdateB
 
 type Status = 'idle' | 'checking' | 'available' | 'downloading' | 'downloaded' | 'error'
 
-const VERSION = '1.3.0'
+const VERSION = '0.1.0'
 
-type Listener = (info: { version?: string; percent?: number }) => void
+type Listener = (info: { version?: string; percent?: number; releaseNotes?: string }) => void
 
 const listeners: Record<string, Listener[]> = {
   available: [],
@@ -140,18 +140,19 @@ describe('writemd-update-button', () => {
     emit('available')
     await settle(el)
     const button = el.shadowRoot!.querySelector<HTMLButtonElement>('.sidebar-action')!
-    expect(button.textContent).toContain('Update available')
+    expect(button.textContent?.trim()).toBe(`Update to v${VERSION}`)
+    expect(button.querySelector('small')).toBeNull()
     expect(button.title).toContain(VERSION)
     button.click()
     await settle(el)
     expect(updater.download).toHaveBeenCalledOnce()
     emit('downloading', 43)
     await settle(el)
-    expect(button.textContent).toContain('Downloading 43%')
+    expect(button.textContent?.trim()).toBe('Downloading 43%')
     expect(button.disabled).toBe(true)
     emit('downloaded')
     await settle(el)
-    expect(button.textContent).toContain('Restart to update')
+    expect(button.textContent?.trim()).toBe('Restart to update')
     expect(button.disabled).toBe(false)
     button.click()
     expect(updater.install).toHaveBeenCalledOnce()
@@ -160,12 +161,16 @@ describe('writemd-update-button', () => {
     expect(el.shadowRoot?.querySelector('.sidebar-action')).toBeNull()
   })
 
-  it('sidebar variant does not show a toolbar icon or floating card', async () => {
+  it('sidebar opens update details on hover without downloading', async () => {
     const el = await mount(true)
     emit('downloaded')
     await settle(el)
     expect(el.shadowRoot?.querySelector('writemd-icon-button')).toBeNull()
     expect(card(el)).toBeNull()
+    hover(el)
+    await settle(el)
+    expect(card(el)?.textContent).toContain(`Click to install v${VERSION} and restart`)
+    expect(updater.download).not.toHaveBeenCalled()
     expect(el.shadowRoot?.querySelector('svg[data-icon="refresh"]')).not.toBeNull()
   })
 
@@ -181,7 +186,7 @@ describe('writemd-update-button', () => {
     emit('available')
     await settle(el)
 
-    expect(card(el)?.classList.contains('open')).toBe(false)
+    expect(card(el)).toBeNull()
     hover(el)
     await settle(el)
 
@@ -199,8 +204,8 @@ describe('writemd-update-button', () => {
 
     const items = [...(card(el)?.querySelectorAll('li') ?? [])]
     expect(items.length).toBeGreaterThan(0)
-    expect(items.length).toBeLessThanOrEqual(3)
-    // Bold lead-ins only: no prose, no markdown left in the text.
+    expect(items.length).toBeLessThanOrEqual(5)
+    // Release summaries render plain text rather than Markdown markers.
     for (const li of items) {
       expect(li.textContent ?? '').not.toContain('**')
     }
@@ -215,8 +220,31 @@ describe('writemd-update-button', () => {
     expect(card(el)?.classList.contains('open')).toBe(true)
 
     wrap(el)?.dispatchEvent(new MouseEvent('mouseleave', { bubbles: true }))
+    await new Promise((resolve) => setTimeout(resolve, 200))
     await settle(el)
-    expect(card(el)?.classList.contains('open')).toBe(false)
+    expect(card(el)).toBeNull()
+  })
+
+  it('shows release notes from a future update, strips HTML, and keeps the card open while entering it', async () => {
+    const el = await mount(true)
+    for (const fn of listeners.available)
+      fn({
+        version: '9.0.0',
+        releaseNotes:
+          '<ul><li>Fixed folder navigation</li><li>Saved model preferences &amp; tiers</li></ul>'
+      })
+    await settle(el)
+    hover(el)
+    await settle(el)
+    expect(card(el)?.textContent).toContain('Fixed folder navigation')
+    expect(card(el)?.textContent).toContain('Saved model preferences & tiers')
+    expect(card(el)?.querySelector('ul ul')).toBeNull()
+    wrap(el)?.dispatchEvent(new MouseEvent('mouseleave'))
+    card(el)?.dispatchEvent(new MouseEvent('mouseenter'))
+    await new Promise((resolve) => setTimeout(resolve, 200))
+    await settle(el)
+    expect(card(el)).not.toBeNull()
+    expect(updater.download).not.toHaveBeenCalled()
   })
 
   it('shows the ring and no dot while downloading', async () => {

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  TAB_LABELS,
   searchSettingsRows,
   searchSettingsTabs,
   searchTargetTab,
@@ -8,8 +9,11 @@ import {
 
 describe('searchSettingsTabs', () => {
   it('returns every tab on an empty query', () => {
-    expect(searchSettingsTabs('')).toHaveLength(8)
-    expect(searchSettingsTabs('   ')).toHaveLength(8)
+    // Counted from TAB_LABELS rather than hardcoded, so adding a section does
+    // not fail here for a reason unrelated to what this test is about.
+    const total = Object.keys(TAB_LABELS).length
+    expect(searchSettingsTabs('')).toHaveLength(total)
+    expect(searchSettingsTabs('   ')).toHaveLength(total)
   })
 
   it('finds Appearance from an unvisited setting value', () => {
@@ -19,7 +23,6 @@ describe('searchSettingsTabs', () => {
   })
 
   it('matches labels case-insensitively', () => {
-    expect(searchSettingsTabs('AI')).toContain('ai')
     expect(searchSettingsTabs('short')).toEqual(['shortcuts'])
   })
 
@@ -66,12 +69,15 @@ describe('searchSettingsRows', () => {
 
   it('finds rows by description and option values', () => {
     expect(searchSettingsRows('a4').map((r) => r.label)).toContain('PDF page size')
-    expect(searchSettingsRows('grok').map((r) => r.label)).toContain('Provider')
+    expect(searchSettingsRows('legal').map((r) => r.label)).toContain('PDF page size')
   })
 
   it('ranks label hits above description hits', () => {
-    const rows = searchSettingsRows('model')
-    expect(rows[0].label).toBe('Model')
+    // 'File Path' hits on its label; 'Vault Location' only mentions path in its
+    // description. The row the user named has to come first.
+    const rows = searchSettingsRows('path')
+    expect(rows[0].label).toBe('File Path')
+    expect(rows.map((r) => r.label)).toContain('Vault Location')
   })
 
   it('returns nothing for an empty query or a miss', () => {
@@ -86,7 +92,6 @@ describe('searchSettingsRows', () => {
     expect(searchSettingsRows('vault')[0].tab).toBe('files')
     expect(searchSettingsRows('motion')[0].tab).toBe('appearance')
     expect(searchSettingsRows('beta')).toEqual([])
-    expect(searchSettingsRows('system prompt')[0].tab).toBe('ai')
     expect(searchSettingsRows('release notes')[0].tab).toBe('about')
   })
 })

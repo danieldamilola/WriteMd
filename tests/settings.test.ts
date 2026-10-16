@@ -8,19 +8,10 @@ import { makeTempRoot } from './helpers/temp-root'
 const TEST_ROOT = makeTempRoot('settings')
 const CONFIG = join(TEST_ROOT, 'userData', 'config.json')
 
-function mockElectron(encryptAvailable: boolean): void {
+function mockElectron(): void {
   vi.doMock('electron', () => ({
     app: {
       getPath: (name: string) => (name === 'userData' ? `${TEST_ROOT}/userData` : TEST_ROOT)
-    },
-    safeStorage: {
-      isEncryptionAvailable: () => encryptAvailable,
-      encryptString: (plain: string) => Buffer.from(`enc(${plain})`, 'utf-8'),
-      decryptString: (buf: Buffer) => {
-        const s = buf.toString('utf-8')
-        if (s.startsWith('enc(') && s.endsWith(')')) return s.slice(4, -1)
-        throw new Error('not encrypted')
-      }
     }
   }))
 }
@@ -32,41 +23,106 @@ describe('settings persistence', () => {
     vi.resetModules()
   })
 
-  it('encrypts the API key at rest and decrypts it in memory', async () => {
-    mockElectron(true)
-    const { getSettings, setSettings } = await import('../src/main/settings')
-    await setSettings({ ai: { ...getSettings().ai, apiKey: 'sk-secret-123' } })
+  it.each(['openrouter', 'deepseek', 'groq', 'mistral', 'xai'])(
+    'loads and persists the %s provider',
+    async (providerId) => {
+      mockElectron()
+      writeFileSync(CONFIG, JSON.stringify({ ai: { providerId } }))
+      const { getSettings, setSettings } = await import('../src/main/settings')
+      expect(getSettings().ai.providerId).toBe(providerId)
+      await setSettings({ ai: { providerId } })
+      expect(JSON.parse(readFileSync(CONFIG, 'utf8')).ai.providerId).toBe(providerId)
+    }
+  )
 
-    const raw = readFileSync(CONFIG, 'utf-8')
-    const persisted = JSON.parse(raw)
-    expect(persisted.ai.apiKey).toMatch(/^enc:v1:/)
-    expect(raw).not.toContain('sk-secret-123')
-
-    // Fresh module load simulates an app restart: key comes back decrypted.
-    vi.resetModules()
-    mockElectron(true)
-    const { getSettings: fresh } = await import('../src/main/settings')
-    expect(fresh().ai.apiKey).toBe('sk-secret-123')
-  })
-
-  it('falls back to plaintext when safeStorage is unavailable', async () => {
-    mockElectron(false)
-    const { getSettings, setSettings } = await import('../src/main/settings')
-    await setSettings({ ai: { ...getSettings().ai, apiKey: 'sk-plain-fallback' } })
-
-    const persisted = JSON.parse(readFileSync(CONFIG, 'utf-8'))
-    expect(persisted.ai.apiKey).toBe('sk-plain-fallback')
-  })
-
-  it('reads legacy plaintext keys without mangling them', async () => {
-    mockElectron(true)
-    writeFileSync(CONFIG, JSON.stringify({ ai: { apiKey: 'sk-legacy' } }), 'utf-8')
+  it('enables AI for a fresh profile and provides a resizable default panel', async () => {
+    mockElectron()
     const { getSettings } = await import('../src/main/settings')
-    expect(getSettings().ai.apiKey).toBe('sk-legacy')
+    expect(getSettings().ai.enabled).toBe(true)
+    expect(getSettings().ai.autoAcceptEdits).toBe(false)
+    expect(getSettings().ai.maxOutputTokens).toBe(0)
+    expect(getSettings().appearance.aiDockWidth).toBe(360)
+  })
+
+  it('persists automatic AI acceptance and rejects invalid values', async () => {
+    mockElectron()
+    const { getSettings, setSettings } = await import('../src/main/settings')
+    await setSettings({ ai: { autoAcceptEdits: true } })
+    expect(JSON.parse(readFileSync(CONFIG, 'utf8')).ai.autoAcceptEdits).toBe(true)
+    vi.resetModules()
+    const reloaded = await import('../src/main/settings')
+    expect(reloaded.getSettings().ai.autoAcceptEdits).toBe(true)
+    writeFileSync(CONFIG, JSON.stringify({ ai: { autoAcceptEdits: 'yes' } }))
+    vi.resetModules()
+    const invalid = await import('../src/main/settings')
+    expect(invalid.getSettings().ai.autoAcceptEdits).toBe(false)
+    expect(getSettings().ai.autoAcceptEdits).toBe(true)
+  })
+
+  it('persists a custom output limit and falls back to Automatic for invalid configuration', async () => {
+    mockElectron()
+    const { setSettings } = await import('../src/main/settings')
+    await setSettings({ ai: { maxOutputTokens: 65536 } })
+    vi.resetModules()
+    const restored = await import('../src/main/settings')
+    expect(restored.getSettings().ai.maxOutputTokens).toBe(65536)
+    writeFileSync(CONFIG, JSON.stringify({ ai: { maxOutputTokens: -1 } }))
+    vi.resetModules()
+    const invalid = await import('../src/main/settings')
+    expect(invalid.getSettings().ai.maxOutputTokens).toBe(0)
+  })
+
+  it('repairs the background target left by a build that used the AI panel', async () => {
+    mockElectron()
+    // A config written by a build that had the AI panel. That panel is back, so
+    // the `ai` block is no longer dead weight - but `backgroundTarget: 'ai'` is
+    // still invalid and the artwork is still hidden behind it.
+    writeFileSync(
+      CONFIG,
+      JSON.stringify({
+        appearance: { backgroundTarget: 'ai', theme: 'nord' },
+        ai: { enabled: false, providerId: 'openai', apiKey: 'sk-legacy-value' }
+      }),
+      'utf-8'
+    )
+    const { getSettings, setSettings } = await import('../src/main/settings')
+
+    const s = getSettings()
+    expect(s.appearance.backgroundTarget).toBe('workspace')
+    expect(s.appearance.theme).toBe('nord')
+    // The section survives, and the known keys are read from it.
+    expect(s.ai.providerId).toBe('openai')
+    expect(s.ai.enabled).toBe(false)
+
+    // And the repair must survive a save, which is where a stale value would
+    // otherwise be written back out and undo itself.
+    await setSettings({ editor: { fontSize: 17 } })
+    const persisted = JSON.parse(readFileSync(CONFIG, 'utf-8'))
+    expect(persisted.appearance.backgroundTarget).toBe('workspace')
+  })
+
+  it('never persists an api key into config.json', async () => {
+    mockElectron()
+    // The key lives in a safeStorage-encrypted file, not in plain JSON. A key
+    // reaching config.json would be copied, backed up and pasted into bug
+    // reports with the rest of the file, and nothing would ever remove it.
+    writeFileSync(CONFIG, JSON.stringify({ ai: { enabled: true } }), 'utf-8')
+    const { getSettings, setSettings } = await import('../src/main/settings')
+
+    const s = getSettings()
+    expect(s.ai).not.toHaveProperty('apiKey')
+
+    // Even a patch that tries to smuggle one in is dropped by the schema, which
+    // only accepts declared keys.
+    await setSettings({ ai: { apiKey: 'sk-should-not-be-written' } } as never)
+    const raw = readFileSync(CONFIG, 'utf-8')
+    expect(raw).not.toContain('sk-should-not-be-written')
+    // Quoted, so this cannot match `apiKeySet`, which is a legitimate boolean.
+    expect(raw).not.toContain('"apiKey"')
   })
 
   it('moves a corrupt config aside instead of silently resetting', async () => {
-    mockElectron(false)
+    mockElectron()
     writeFileSync(CONFIG, '{not valid json', 'utf-8')
     const { getSettings } = await import('../src/main/settings')
     expect(getSettings().editor.fontSize).toBe(15)
@@ -74,7 +130,7 @@ describe('settings persistence', () => {
   })
 
   it('deep-merges partial settings over defaults', async () => {
-    mockElectron(false)
+    mockElectron()
     const { getSettings, setSettings } = await import('../src/main/settings')
     await setSettings({ editor: { fontSize: 21 } })
     const s = getSettings()
@@ -84,7 +140,7 @@ describe('settings persistence', () => {
   })
 
   it('recovers the write queue after an atomic rename fails', async () => {
-    mockElectron(false)
+    mockElectron()
     const { setSettings, getSettings } = await import('../src/main/settings')
     getSettings()
     mkdirSync(CONFIG)

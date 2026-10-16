@@ -235,7 +235,7 @@ export class WelcomeScreen extends LitElement {
             ${this.shortcut('new-file') ? html`<kbd>${this.shortcut('new-file')}</kbd>` : ''}
           </button>
           <button class="secondary" @click=${() => this.emit('open-file')}>
-            ${chromeIcon('folder-open')}<span>Open file</span>
+            ${chromeIcon('file-text')}<span>Open file</span>
             ${this.shortcut('open-file') ? html`<kbd>${this.shortcut('open-file')}</kbd>` : ''}
           </button>
         </div>
@@ -245,9 +245,7 @@ export class WelcomeScreen extends LitElement {
             this.recentLoading
               ? html`<p class="empty-state" role="status">Loading notes...</p>`
               : this.recentFiles.length === 0
-                ? html`<p class="empty-state">
-                    No recent notes yet. Create a note or open a Markdown file to get started.
-                  </p>`
+                ? html`<p class="empty-state">Nothing</p>`
                 : html`<ul class="file-list">
                     ${this.recentFiles.map(
                       (file) =>
@@ -269,18 +267,15 @@ export class WelcomeScreen extends LitElement {
                   </ul>`
           }
         </section>
-        <div class="utilities">
-          <button class="nav-row utility" @click=${() => this.emit('open-vault')}>
-            ${chromeIcon('folder-tree')}Open vault folder
-          </button>
-          ${
-            this.vertical
-              ? ''
-              : html`<button class="nav-row utility" @click=${() => this.emit('open-settings')}>
+        ${
+          this.vertical
+            ? ''
+            : html`<div class="utilities">
+                <button class="nav-row utility" @click=${() => this.emit('open-settings')}>
                   ${chromeIcon('settings')}Settings
-                </button>`
-          }
-        </div>
+                </button>
+              </div>`
+        }
       </main>
     </writemd-panel>`
   }

@@ -44,7 +44,45 @@ export const COMMANDS: CommandDef[] = [
     category: 'View',
     defaultBinding: 'Ctrl+Shift+B'
   },
-  { id: 'split-ai', title: 'Show AI Panel', category: 'View', defaultBinding: 'Ctrl+Alt+A' },
+  {
+    id: 'split-document',
+    title: 'Show Document Panel',
+    category: 'View',
+    defaultBinding: 'Ctrl+Shift+D'
+  },
+  {
+    id: 'split-preview',
+    title: 'Show Export Preview',
+    category: 'View',
+    defaultBinding: 'Ctrl+Shift+P'
+  },
+  {
+    id: 'toggle-sidebar',
+    title: 'Toggle Sidebar',
+    category: 'View',
+    defaultBinding: 'Ctrl+B'
+  },
+  {
+    id: 'toggle-ai',
+    title: 'Ask AI',
+    category: 'View',
+    defaultBinding: 'Ctrl+Alt+A'
+  },
+  {
+    // The bar took over the old binding, so the panel gets its own. Without it
+    // the panel would be reachable only by clicking through the bar.
+    id: 'ai-chat',
+    title: 'Open AI Chat Panel',
+    category: 'View',
+    defaultBinding: 'Ctrl+Alt+Shift+A',
+    aliases: ['Ctrl+J']
+  },
+  {
+    id: 'ai-selection',
+    title: 'AI Actions on Selection',
+    category: 'View',
+    defaultBinding: 'Alt+J'
+  },
   { id: 'open-settings', title: 'Open Settings', category: 'App', defaultBinding: 'Ctrl+,' },
   {
     id: 'command-palette',

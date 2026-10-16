@@ -60,8 +60,8 @@ export class FindPanel extends LitElement {
       border-color: var(--border-focus);
     }
     .field svg {
-      width: 14px;
-      height: 14px;
+      width: var(--icon-size, 18px);
+      height: var(--icon-size, 18px);
       color: var(--text-muted);
       flex-shrink: 0;
     }
@@ -120,8 +120,9 @@ export class FindPanel extends LitElement {
       cursor: default;
     }
     .btn svg {
-      width: 14px;
-      height: 14px;
+      width: var(--icon-size, 18px);
+      height: var(--icon-size, 18px);
+      flex-shrink: 0;
     }
     .btn.active {
       color: var(--accent, var(--text));

@@ -2,9 +2,11 @@ import { css, html, LitElement, type PropertyValues } from 'lit'
 import { customElement, property, state, eventOptions } from 'lit/decorators.js'
 import '@awesome.me/webawesome/dist/components/split-panel/split-panel.js'
 import type WaSplitPanel from '@awesome.me/webawesome/dist/components/split-panel/split-panel.js'
+import { animate } from 'motion'
 import { WorkspaceState, paneGeometry } from '../state/workspace'
 import { SettingsStore } from '../state/settings'
 import { resizeHandleStyles } from '../design/controls'
+import { PANEL_RESIZE_MOTION, reducedMotionNow } from '../utils/motion'
 
 @customElement('writemd-workspace')
 export class Workspace extends LitElement {
@@ -92,6 +94,10 @@ export class Workspace extends LitElement {
   @state() private available = 0
   @state() private width = WorkspaceState.getInstance().paneWidth
   @state() private auxiliary = false
+  @state() private transitioning = false
+  @state() private animatedPosition: number | null = null
+  private animation: ReturnType<typeof animate> | null = null
+  private animationRevision = 0
   private layout = WorkspaceState.getInstance()
   private observer: ResizeObserver | null = null
   private dragging = false
@@ -116,6 +122,11 @@ export class Workspace extends LitElement {
     window.addEventListener('blur', this.cancelResize)
   }
   disconnectedCallback(): void {
+    this.animation?.stop()
+    this.animationRevision += 1
+    this.animation = null
+    this.transitioning = false
+    this.animatedPosition = null
     this.observer?.disconnect()
     this.unsubscribe?.()
     window.removeEventListener('pointerup', this.finishResize)
@@ -124,8 +135,53 @@ export class Workspace extends LitElement {
     super.disconnectedCallback()
   }
   protected willUpdate(changed: PropertyValues): void {
+    if (changed.has('active') && changed.get('active') !== undefined) {
+      const position = this.animatedPosition ?? this.panel?.positionInPixels ?? this.available
+      this.animation?.stop()
+      this.animation = null
+      this.animationRevision += 1
+      this.transitioning =
+        this.available > 0 &&
+        !paneGeometry(this.available, this.width).compact &&
+        !reducedMotionNow()
+      this.animatedPosition = this.transitioning ? position : null
+    } else if (this.transitioning && (changed.has('available') || changed.has('width'))) {
+      // Window constraints and user resizing take priority over an in-flight toggle.
+      this.animation?.stop()
+      this.animation = null
+      this.animationRevision += 1
+      this.transitioning = false
+      this.animatedPosition = null
+    }
     if (changed.has('surface') && this.active) this.auxiliary = this.surface !== 'launcher'
     if (!this.active) this.auxiliary = false
+  }
+  protected updated(changed: PropertyValues): void {
+    if (this.transitioning && !this.animation) {
+      const revision = this.animationRevision
+      const target = this.active ? paneGeometry(this.available, this.width).width : this.available
+      this.animation = animate(this.animatedPosition ?? target, target, {
+        ...PANEL_RESIZE_MOTION,
+        onUpdate: (position) => {
+          if (revision !== this.animationRevision) return
+          this.animatedPosition = position
+        },
+        onComplete: () => {
+          if (revision !== this.animationRevision) return
+          this.animation = null
+          this.transitioning = false
+          this.animatedPosition = null
+        }
+      })
+    } else if (
+      !this.active &&
+      !this.transitioning &&
+      (changed.has('active') || changed.has('transitioning'))
+    ) {
+      this.dispatchEvent(
+        new CustomEvent('workspace-split-closed', { bubbles: true, composed: true })
+      )
+    }
   }
   private isDivider(event: Event): boolean {
     return event
@@ -133,7 +189,7 @@ export class Workspace extends LitElement {
       .some((node) => node instanceof Element && node.getAttribute('role') === 'separator')
   }
   private startResize = (event: PointerEvent): void => {
-    if (event.button !== 0) return
+    if (event.button !== 0 || this.transitioning || !this.active) return
     if (!this.isDivider(event)) return
     this.dragging = true
   }
@@ -153,6 +209,8 @@ export class Workspace extends LitElement {
   @eventOptions({ capture: true })
   private onKey(event: KeyboardEvent): void {
     if (
+      this.active &&
+      !this.transitioning &&
       this.isDivider(event) &&
       ['ArrowLeft', 'ArrowRight', 'Home', 'End', 'Enter'].includes(event.key)
     )
@@ -171,9 +229,16 @@ export class Workspace extends LitElement {
   }
   render(): unknown {
     const geometry = paneGeometry(this.available, this.width)
-    const split = this.active && !geometry.compact
+    const split = (this.active || this.transitioning) && !geometry.compact
     const showAuxiliary = this.active && geometry.compact && this.auxiliary
-    const position = split ? geometry.width : showAuxiliary ? 0 : this.available
+    const position =
+      this.animatedPosition ?? (split ? geometry.width : showAuxiliary ? 0 : this.available)
+    const gutter = this.transitioning
+      ? 5 *
+        Math.max(0, Math.min(1, (this.available - position) / (this.available - geometry.width)))
+      : split
+        ? 5
+        : 0
     return html` ${
         this.active && geometry.compact
           ? html`<div class="compact-switch" aria-label="Workspace surfaces">
@@ -181,7 +246,7 @@ export class Workspace extends LitElement {
                 Document
               </button>
               <button aria-pressed=${showAuxiliary} @click=${() => (this.auxiliary = true)}>
-                ${this.surface === 'ai' ? 'AI' : 'Second pane'}
+                Second pane
               </button>
             </div>`
           : ''
@@ -190,8 +255,8 @@ export class Workspace extends LitElement {
         class=${split ? 'split' : `single ${showAuxiliary ? 'auxiliary' : 'primary'}`}
         primary="start"
         .positionInPixels=${position}
-        ?disabled=${!split}
-        style=${`--min: ${split ? geometry.min : 0}px; --max: ${split ? geometry.max : this.available}px`}
+        ?disabled=${!split || this.transitioning}
+        style=${`--divider-width:${gutter}px;--min: ${split && !this.transitioning ? geometry.min : 0}px; --max: ${split && !this.transitioning ? geometry.max : this.available}px`}
         @pointerdown=${this.startResize}
         @keydown=${this.onKey}
         @wa-reposition=${this.reposition}

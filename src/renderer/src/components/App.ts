@@ -5,14 +5,19 @@ import { customElement, state } from 'lit/decorators.js'
 import './TopBar'
 import './Tab'
 import { TabDragController } from '../controllers/tab-drag'
+import { groupRowIcon, renderGroupIconPicker, renderGroupMenuIcon } from './group-icons'
 import { chromeKey } from '../state/chrome-selector'
 import './VerticalTabBar'
+import type { VerticalTabBar } from './VerticalTabBar'
 import './RailFrame'
 import './Shell'
 import './Sidebar'
+import './GroupCard'
 import './Background'
 import './DocBar'
 import './Editor'
+import './ai/QuickAi'
+import type { QuickAi } from './ai/QuickAi'
 import './SettingsModal'
 import './WelcomeScreen'
 import './ConflictDialog'
@@ -25,22 +30,17 @@ import { SettingsStore } from '../state/settings'
 import { FileState, type ConflictInfo, type TabDoc, type TabGroup } from '../state/file-state'
 import { COMMANDS, bindingFromEvent, bindingsEqual, effectiveBindings } from '../state/shortcuts'
 import { initAutoHideScrollbars } from '../utils/auto-hide-scrollbars'
+import { showSecondaryDocument } from '../utils/secondary-document'
+import { sameFilePath } from '../utils/paths'
+import { deepActiveElement } from '../utils/links'
+import type { QuickAiContext } from './ai/quick-context'
+import { quickAiReplacement } from './ai/quick-context'
+import type { PreviewChangeView } from './ai/types'
 import {
   applyMotionPreference,
   watchSystemMotionPreference,
   type MotionPreference
 } from '../utils/motion'
-
-const PRESET_COLORS = [
-  'transparent',
-  '#f24e1e',
-  '#3b82f6',
-  '#10b981',
-  '#f59e0b',
-  '#8b5cf6',
-  '#ec4899',
-  '#06b6d4'
-]
 
 interface HorizontalContextMenuState {
   type: 'tab' | 'group'
@@ -62,6 +62,9 @@ export class WriteMdApp extends LitElement {
         width: 100vw;
         background: var(--frame-surface, var(--bg-frame));
         color: var(--text);
+      }
+      :host(.settings-open) {
+        background: transparent;
       }
       /* Transparent so the frame shows through at the window edges and in the
        editor's gutter. Dark theme sets --bg-frame one step darker than --bg,
@@ -168,6 +171,11 @@ export class WriteMdApp extends LitElement {
         color: var(--text);
         background: var(--bg-hover);
       }
+      .tab-add svg {
+        width: var(--icon-size, 18px);
+        height: var(--icon-size, 18px);
+        flex-shrink: 0;
+      }
 
       .h-group-wrap {
         display: inline-flex;
@@ -179,15 +187,17 @@ export class WriteMdApp extends LitElement {
       .h-group-pill {
         display: inline-flex;
         align-items: center;
-        gap: 6px;
+        gap: 8px;
         height: 26px;
-        padding: 0 8px 0 6px;
+        padding: 0 10px 0 11px;
+        box-sizing: border-box;
         border-radius: 5px;
         cursor: pointer;
         color: var(--text-secondary);
-        font-family: 'Geist Mono', monospace;
-        font-size: 12px;
-        font-weight: 500;
+        font-family: var(--font-ui);
+        font-size: 13px;
+        line-height: 18px;
+        font-weight: 400;
         -webkit-app-region: no-drag;
         user-select: none;
         transition:
@@ -199,36 +209,33 @@ export class WriteMdApp extends LitElement {
         background: var(--bg-hover);
       }
       .h-group-pill.drag-over {
-        outline: 1px dashed var(--accent-primary, #f24e1e);
+        background: var(--bg-hover);
+        color: var(--text);
+        outline: 1px dashed var(--accent);
+        outline-offset: -1px;
       }
       [data-drop-target] {
         outline: 1px solid var(--border-focus);
         outline-offset: -1px;
       }
-      .h-group-chevron {
+      .h-group-icon {
         display: flex;
         align-items: center;
         justify-content: center;
-        width: 12px;
-        height: 12px;
-        color: var(--text-muted);
-        transition: transform 140ms ease;
-      }
-      .h-group-chevron.collapsed {
-        transform: rotate(-90deg);
-      }
-      .h-group-color {
-        width: 7px;
-        height: 7px;
-        border-radius: 50%;
+        width: var(--icon-size, 18px);
+        height: var(--icon-size, 18px);
         flex-shrink: 0;
+      }
+      .h-group-icon svg {
+        width: 100%;
+        height: 100%;
       }
       .h-group-label {
         max-width: 120px;
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
-        font-size: 12px;
+        font-size: inherit;
       }
       .h-group-rename-input {
         width: 90px;
@@ -239,7 +246,7 @@ export class WriteMdApp extends LitElement {
         border-radius: 3px;
         color: var(--text);
         font-family: inherit;
-        font-size: 12px;
+        font-size: inherit;
         padding: 1px 4px;
         outline: none;
       }
@@ -257,38 +264,6 @@ export class WriteMdApp extends LitElement {
         margin: 0 4px;
         flex-shrink: 0;
       }
-      .color-palette {
-        display: flex;
-        gap: 6px;
-        padding: 4px 10px;
-      }
-      .color-dot-btn {
-        width: 14px;
-        height: 14px;
-        border-radius: 50%;
-        border: 1px solid var(--border-subtle);
-        cursor: pointer;
-        transition: transform 100ms ease;
-        box-sizing: border-box;
-      }
-      .color-dot-btn:hover {
-        transform: scale(1.2);
-      }
-      .color-dot-btn.none-color {
-        background: transparent !important;
-        border: 1px dashed var(--text-muted);
-        position: relative;
-      }
-      .color-dot-btn.none-color::after {
-        content: '';
-        position: absolute;
-        top: 50%;
-        left: 1px;
-        right: 1px;
-        height: 1px;
-        background: var(--text-muted);
-        transform: rotate(-45deg);
-      }
       .m-panel {
         position: fixed;
         z-index: 100;
@@ -298,11 +273,27 @@ export class WriteMdApp extends LitElement {
 
   @state() private showWelcome = true
   @state() private showSettings = false
-  // Which Settings tab to land on. Set by the AI panel's "not configured"
-  // action so it opens on the section that fixes it.
+  private settingsFocusReturn: HTMLElement | null = null
+  // Which Settings tab to land on, so a deep link can open the exact section
+  // it wants rather than leaving the user to find it.
   @state() private settingsTab = 'general'
   @state() private showPalette = false
   @state() private splitActive = false
+  @state() private aiEnabled = false
+  @state() private aiAutoAcceptEdits = false
+  @state() private aiDockOpen = false
+  @state() private quickAiOpen = false
+  /**
+   * The bar is open but held behind a handle.
+   *
+   * Kept here rather than inside the bar so the AI icon knows which way its
+   * toggle goes: closing it and putting it away are different things, and the
+   * icon has to mean exactly one of them.
+   */
+  @state() private quickAiCollapsed = false
+  /** A question the bar opens with, so Explain and Summarize need no typing. */
+  @state() private quickAiPrompt = ''
+  @state() private quickAiContext: QuickAiContext = { path: null, content: '', selection: null }
   @state() private panelOrientation: 'horizontal' | 'vertical' = 'vertical'
   @state() private verticalPanelCollapsed = false
   /**
@@ -317,12 +308,15 @@ export class WriteMdApp extends LitElement {
   @state() private secondaryDirty = false
   @state() private conflict: ConflictInfo | null = null
   @state() private hContextMenu: HorizontalContextMenuState | null = null
+  @state() private groupCard: { id: string; anchor: HTMLElement } | null = null
   @state() private renamingGroupId: string | null = null
   private tabDrag = new TabDragController(this, 'x')
   private settingsStore = SettingsStore.getInstance()
   private fileState = FileState.getInstance()
   private unsubscribeFileState: (() => void) | null = null
   private unsubscribeOrientation: (() => void) | null = null
+  private unsubscribeAi: (() => void) | null = null
+  private unsubscribeAiAutoAccept: (() => void) | null = null
   private unsubscribeMotion: (() => void) | null = null
   private unsubscribeFileOpen: (() => void) | null = null
   private unsubscribeSettingsOpen: (() => void) | null = null
@@ -404,6 +398,12 @@ export class WriteMdApp extends LitElement {
     this.focusRenameInputHorizontal(id)
   }
 
+  /** The vertical tab bar owns its own rename input, so it creates the group. */
+  private handleCreateGroupVertical = (): void => {
+    const bar = this.renderRoot?.querySelector('writemd-vertical-tab-bar') as VerticalTabBar | null
+    bar?.createGroup()
+  }
+
   private handleRenameGroupSubmit(groupId: string, newName: string): void {
     if (newName.trim()) {
       this.fileState.updateTabGroup(groupId, { label: newName.trim() })
@@ -473,6 +473,16 @@ export class WriteMdApp extends LitElement {
         <div
           class="h-group-pill"
           data-group-id=${g.id}
+          role="button"
+          tabindex="0"
+          aria-label=${g.label}
+          aria-expanded=${!g.collapsed}
+          @keydown=${(event: KeyboardEvent) => {
+            if (event.key !== 'Enter' && event.key !== ' ') return
+            if ((event.target as HTMLElement).tagName === 'INPUT') return
+            event.preventDefault()
+            this.fileState.toggleTabGroupCollapse(g.id)
+          }}
           @click=${() => {
             if (this.tabDrag.suppressClick) return
             if (this.renamingGroupId === g.id) return
@@ -481,29 +491,16 @@ export class WriteMdApp extends LitElement {
           @contextmenu=${(e: MouseEvent) => this.handleHorizontalGroupContextMenu(e, g.id)}
         >
           <div
-            class="h-group-chevron ${g.collapsed ? 'collapsed' : ''}"
+            class="h-group-icon"
+            data-no-drag
             @click=${(e: MouseEvent) => {
               e.stopPropagation()
               if (this.tabDrag.suppressClick) return
               this.fileState.toggleTabGroupCollapse(g.id)
             }}
           >
-            <svg
-              width="10"
-              height="10"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="2.5"
-            >
-              <polyline points="6 9 12 15 18 9"></polyline>
-            </svg>
+            ${groupRowIcon(g)}
           </div>
-          ${
-            g.color && g.color !== 'transparent'
-              ? html`<span class="h-group-color" style="background-color: ${g.color};"></span>`
-              : ''
-          }
           ${
             this.renamingGroupId === g.id
               ? html`
@@ -538,11 +535,15 @@ export class WriteMdApp extends LitElement {
         </div>
         ${
           !g.collapsed
-            ? repeat(
+            ? html`${repeat(
+                this.tabGroups.filter((child) => child.parentId === g.id),
+                (child) => child.id,
+                (child) => this.renderHorizontalGroup(child)
+              )}${repeat(
                 memberTabs,
                 ({ t }) => t.id,
                 ({ t, i }) => this.renderHorizontalTabItem(t, i)
-              )
+              )}`
             : ''
         }
       </div>
@@ -552,6 +553,7 @@ export class WriteMdApp extends LitElement {
   private renderHorizontalContextMenu(): TemplateResult | string {
     if (!this.hContextMenu) return ''
     const { type, index, groupId, x, y } = this.hContextMenu
+    const openGroup = this.tabGroups?.find((group) => group.id === groupId)
 
     return html`
       <writemd-context-menu
@@ -605,14 +607,7 @@ export class WriteMdApp extends LitElement {
                           this.hContextMenu = null
                         }}
                       >
-                        ${
-                          g.color && g.color !== 'transparent'
-                            ? html`<span
-                                class="h-group-color"
-                                style="background-color: ${g.color}; margin-right: 4px;"
-                              ></span>`
-                            : ''
-                        }
+                        ${renderGroupMenuIcon(g)}
                         <span>Move to ${g.label}</span>
                       </div>
                     `
@@ -670,22 +665,24 @@ export class WriteMdApp extends LitElement {
                     <span>Rename group</span>
                   </div>
                   <div class="m-divider"></div>
-                  <div class="color-palette">
-                    ${PRESET_COLORS.map(
-                      (c) => html`
-                        <div
-                          class="color-dot-btn ${c === 'transparent' ? 'none-color' : ''}"
-                          style="background-color: ${c}"
-                          title=${c === 'transparent' ? 'No color' : c}
+                  ${renderGroupIconPicker(openGroup?.icon, (id) => {
+                    this.fileState.updateTabGroup(groupId, { icon: id })
+                    this.hContextMenu = null
+                  })}
+                  <div class="m-divider"></div>
+                  ${
+                    openGroup?.parentId
+                      ? html`<div
+                          class="m-item"
                           @click=${() => {
-                            this.fileState.updateTabGroup(groupId, { color: c })
+                            this.fileState.moveTabGroup(groupId, null)
                             this.hContextMenu = null
                           }}
-                        ></div>
-                      `
-                    )}
-                  </div>
-                  <div class="m-divider"></div>
+                        >
+                          ${menuIcon('external')}<span>Move to Space</span>
+                        </div>`
+                      : ''
+                  }
                   <div
                     class="m-item"
                     @click=${() => {
@@ -726,7 +723,8 @@ export class WriteMdApp extends LitElement {
     this.teardownAutoHideScrollbars = initAutoHideScrollbars()
     this.unsubscribeSettingsOpen = on('settings:open', ({ tab }) => {
       this.settingsTab = tab ?? 'general'
-      this.showSettings = true
+      this.closeQuickAiForDialog()
+      this.openSettings()
     })
     this.unsubscribeFileOpen =
       api()?.onFileOpenExternal?.((path: string) => {
@@ -745,6 +743,18 @@ export class WriteMdApp extends LitElement {
     if (!this.isConnected) return
     this.panelOrientation = this.settingsStore.get('appearance.panelOrientation', 'vertical') as
       'horizontal' | 'vertical'
+    this.aiEnabled = this.settingsStore.get('ai.enabled', true)
+    this.aiAutoAcceptEdits = this.settingsStore.get('ai.autoAcceptEdits', false)
+    this.unsubscribeAiAutoAccept = this.settingsStore.subscribe('ai.autoAcceptEdits', (value) => {
+      this.aiAutoAcceptEdits = Boolean(value)
+    })
+    this.unsubscribeAi = this.settingsStore.subscribe('ai.enabled', (value) => {
+      this.aiEnabled = Boolean(value)
+      if (!this.aiEnabled) {
+        this.fileState.toggleAiDock(false)
+        this.quickAiOpen = false
+      }
+    })
     this.unsubscribeOrientation = this.settingsStore.subscribe(
       'appearance.panelOrientation',
       (v) => {
@@ -764,6 +774,7 @@ export class WriteMdApp extends LitElement {
     })
     this.unsubscribeFileState = this.fileState.subscribeSelector(chromeKey, (_, s) => {
       this.splitActive = s.splitActive
+      this.aiDockOpen = s.aiDockOpen
       this.tabs = s.tabs
       this.tabGroups = s.tabGroups ?? []
       this.activeTab = s.activeTab
@@ -790,6 +801,8 @@ export class WriteMdApp extends LitElement {
     this.unsubscribeSettingsOpen?.()
     this.unsubscribeFileState?.()
     this.unsubscribeOrientation?.()
+    this.unsubscribeAi?.()
+    this.unsubscribeAiAutoAccept?.()
     this.unsubscribeMotion?.()
     this.stripObserver?.disconnect()
     this.stripObserver = null
@@ -798,6 +811,12 @@ export class WriteMdApp extends LitElement {
   }
 
   protected updated(changed: PropertyValues): void {
+    if (
+      this.groupCard &&
+      (!this.verticalPanelCollapsed || this.showSettings || this.panelOrientation !== 'vertical')
+    )
+      this.groupCard = null
+    this.classList.toggle('settings-open', this.showSettings)
     const strip = this.tabStrip
     if (strip) {
       strip.addEventListener('scroll', this.handleStripScroll, { passive: true })
@@ -935,11 +954,32 @@ export class WriteMdApp extends LitElement {
       case 'split-backlinks':
         this.fileState.setSplitSurface('backlinks')
         break
-      case 'split-ai':
-        this.fileState.setSplitSurface('ai')
+      case 'split-document':
+        void showSecondaryDocument(this.fileState)
+        break
+      case 'split-preview':
+        this.fileState.setSplitSurface('preview')
+        break
+      case 'toggle-ai':
+        // The bar is the AI surface the buttons open, so the shortcut follows
+        // them rather than reaching past them to the panel.
+        this.toggleQuickAi()
+        break
+      case 'ai-chat':
+        if (this.aiEnabled) {
+          this.closeQuickAiForDialog()
+          this.fileState.toggleAiDock(true)
+        }
+        break
+      case 'toggle-sidebar':
+        if (this.panelOrientation === 'vertical') this.toggleVerticalPanel()
+        break
+      case 'ai-selection':
+        this.renderRoot.querySelector('writemd-editor')?.openSelectionMenu()
         break
       case 'open-settings':
-        this.showSettings = true
+        this.closeQuickAiForDialog()
+        this.openSettings()
         break
       case 'find':
         emit('find:open', { mode: 'find' })
@@ -999,6 +1039,211 @@ export class WriteMdApp extends LitElement {
     this.verticalPanelCollapsed = !this.verticalPanelCollapsed
   }
 
+  private openSettings = (): void => {
+    if (!this.showSettings) this.settingsFocusReturn = deepActiveElement() as HTMLElement | null
+    this.showSettings = true
+  }
+
+  private closeSettings = (): void => {
+    const target = this.settingsFocusReturn
+    this.settingsFocusReturn = null
+    this.showSettings = false
+    // The editor is inert and hidden while Settings is open. Restore focus
+    // after the shell has removed those states, rather than during teardown.
+    void this.updateComplete.then(() => {
+      requestAnimationFrame(() => {
+        if (!this.showSettings && this.isConnected && target?.isConnected) target.focus()
+      })
+    })
+  }
+
+  private toggleQuickAi = (): void => {
+    if (!this.aiEnabled) return
+    if (this.quickAiOpen) {
+      this.quickAiOpen = false
+      return
+    }
+    this.openQuickAi()
+  }
+
+  /**
+   * Open the bar over the current note.
+   *
+   * The single entry point for everything that used to go straight to the panel:
+   * the AI buttons, the hotkey, and Explain and Summarize from the text menu.
+   * A prompt means the caller already knows the question, so it is typed in for
+   * them - one click does the whole job, which is what those menu items did.
+   */
+  private openQuickAi(action?: { prompt: string; context?: QuickAiContext }): void {
+    if (!this.aiEnabled) return
+    if (this.aiDockOpen) this.fileState.toggleAiDock(false)
+    // A caller that captured its own selection brings that context; anything
+    // else reads whatever is selected in the pane with focus.
+    const editor = this.renderRoot.querySelector('writemd-editor') as
+      (HTMLElement & { getQuickAiContext: () => QuickAiContext }) | null
+    const captured = action?.context ??
+      editor?.getQuickAiContext() ?? { path: null, content: '', selection: null }
+    // The bar reaches the whole vault, so it needs the same things the panel
+    // sends: open tabs by path, and `@` notes resolved at send time.
+    this.quickAiContext = {
+      ...captured,
+      openPaths: [
+        ...new Set(this.tabs.map((tab) => tab.path).filter((path): path is string => !!path))
+      ]
+    }
+    this.quickAiPrompt = action?.prompt ?? ''
+    // A collapsed bar is still open: it is the same conversation, held behind a
+    // handle. Opening from anywhere puts the prompt back.
+    this.quickAiCollapsed = false
+    this.quickAiOpen = true
+  }
+
+  /**
+   * The pane the quick AI bar floats over: the note being written in.
+   *
+   * Null with no document open, which the bar reads as "use the whole content
+   * area" - the welcome screen has no pane to sit inside.
+   */
+  private quickAiPane = (): HTMLElement | null => {
+    const editor = this.renderRoot.querySelector('writemd-editor') as
+      (HTMLElement & { quickAiPane?: HTMLElement | null }) | null
+    return editor?.quickAiPane ?? null
+  }
+
+  private readQuickAiContext = (): QuickAiContext => {
+    const context = this.quickAiContext
+    const state = this.fileState.getState()
+    const doc =
+      state.tabs.find((tab) => sameFilePath(tab.path, context.path)) ??
+      (sameFilePath(state.secondaryDoc?.path, context.path) ? state.secondaryDoc : null)
+    if (!doc) return context
+    const selection = context.selection
+    return {
+      ...context,
+      content: doc.content,
+      selection:
+        selection && doc.content.slice(selection.from, selection.to) === selection.text
+          ? selection
+          : null
+    }
+  }
+
+  /**
+   * Settings and the command bar both want the middle of the window, and the
+   * bar is the higher layer of the two. Closing it means an opening dialog is
+   * never drawn under a prompt the user can no longer see.
+   */
+  private closeQuickAiForDialog(): void {
+    if (this.quickAiOpen) this.quickAiOpen = false
+  }
+
+  private applyQuickAi = (
+    event: CustomEvent<{ change: PreviewChangeView; context: QuickAiContext }>
+  ): Promise<void> =>
+    this.acceptQuickAi(event).catch((error: unknown) => {
+      this.renderRoot
+        .querySelector('writemd-ai-quick')
+        ?.reportApplyError(
+          error instanceof Error ? error.message : 'Could not apply the edit. Try again.',
+          event.detail.change
+        )
+    })
+
+  private async acceptQuickAi(
+    event: CustomEvent<{ change: PreviewChangeView; context: QuickAiContext }>
+  ): Promise<void> {
+    const { change, context } = event.detail
+    const current = this.fileState.getState()
+    const secondary = current.secondaryDoc
+    const isSecondary =
+      !!secondary?.path && !!context.path && sameFilePath(secondary.path, context.path)
+    const currentPath = isSecondary ? (secondary?.path ?? null) : current.path
+    const currentContent = isSecondary ? (secondary?.content ?? '') : current.content
+    const bar = this.renderRoot.querySelector('writemd-ai-quick')
+    /*
+     * Which route this is depends on the file the change is for, not the file
+     * the bar happened to open over. The bar reaches external Markdown too, so
+     * accepting can target a note that is not the one on screen.
+     */
+    const isOpenNote =
+      !!context.path &&
+      !!currentPath &&
+      sameFilePath(context.path, currentPath) &&
+      sameFilePath(change.path, context.path)
+    if (!isOpenNote) {
+      /*
+       * Not the note on screen, so the editor has no state for it. The bar
+       * reaches external Markdown too, so this is a normal case rather than a
+       * refusal: write it the way a manual edit would be written.
+       */
+      void this.writeSuggestedFile(change, bar)
+      return
+    }
+    const replacement = quickAiReplacement(context, change)
+    if (replacement === null || currentContent !== context.content) {
+      bar?.reportApplyError(
+        'This note changed after the suggestion was made. Ask again to get a current suggestion.',
+        change
+      )
+      return
+    }
+    const saved = await this.fileState.applyAiEdit(context.path!, context.content, replacement)
+    if (!saved) {
+      bar?.reportApplyError(
+        'Could not save the edit. The changed text is still in the editor.',
+        change
+      )
+      return
+    }
+    this.quickAiContext = {
+      ...context,
+      content: replacement,
+      selection: context.selection
+        ? {
+            from: context.selection.from,
+            to: context.selection.from + change.content.length,
+            text: change.content
+          }
+        : null
+    }
+    bar?.reportApplySuccess(change, null)
+  }
+
+  /**
+   * Write a suggested change to a file the editor is not holding.
+   *
+   * The user accepted it, so it is written the same way a manual edit would be:
+   * through the bridge, with the result checked. A refusal is reported in the
+   * bar rather than swallowed, because a suggestion that silently does not land
+   * is worse than one that says it could not.
+   */
+  private async writeSuggestedFile(change: PreviewChangeView, bar: QuickAi | null): Promise<void> {
+    const accept = api()?.ai?.acceptPreview
+    if (!accept || !change.previewId) {
+      bar?.reportApplyError('Writing files is unavailable in this build.', change)
+      return
+    }
+    try {
+      const applied = await accept(change.previewId)
+      await this.fileState.refreshFile(change.path)
+      bar?.reportApplySuccess(change, applied)
+    } catch (error) {
+      const name = change.path.replace(/\\/g, '/').split('/').pop() ?? change.path
+      bar?.reportApplyError(
+        error instanceof Error ? error.message : `Could not write ${name}.`,
+        change
+      )
+    }
+  }
+
+  /** Open a folder card beside its icon while the sidebar stays collapsed. */
+  private handleOpenGroup = (e: CustomEvent<{ groupId: string; anchor: HTMLElement }>): void => {
+    this.groupCard =
+      this.groupCard?.id === e.detail.groupId
+        ? null
+        : { id: e.detail.groupId, anchor: e.detail.anchor }
+  }
+
   private async openFileDialog(): Promise<void> {
     const result = await api()?.file?.openDialog?.({
       properties: ['openFile'],
@@ -1006,17 +1251,6 @@ export class WriteMdApp extends LitElement {
     })
     if (result && !result.canceled && result.filePaths[0]) {
       await this.fileState.openFile(result.filePaths[0])
-    }
-  }
-
-  private handleOpenVault = async (): Promise<void> => {
-    const vaultPath = await api()
-      ?.vault?.getPath?.()
-      .catch(() => undefined)
-    if (vaultPath) {
-      await api()
-        ?.shell?.openPath?.(vaultPath)
-        .catch(() => undefined)
     }
   }
 
@@ -1049,9 +1283,12 @@ export class WriteMdApp extends LitElement {
           slot="header"
           .settingsOpen=${this.showSettings}
           .splitActive=${this.splitActive}
+          .showAiButton=${this.aiEnabled && this.panelOrientation === 'horizontal'}
+          .aiOpen=${this.aiDockOpen || this.quickAiOpen}
           .showSplitButton=${!this.showWelcome}
           .documentHeader=${this.panelOrientation === 'vertical'}
           @toggle-split=${() => this.fileState.toggleSplitView()}
+          @toggle-ai=${this.toggleQuickAi}
           @toggle-panel=${this.toggleVerticalPanel}
         >
           <div
@@ -1073,7 +1310,7 @@ export class WriteMdApp extends LitElement {
                         )}
                         ${pinnedTabs.length > 0 ? html`<div class="h-pinned-divider"></div>` : ''}
                         ${repeat(
-                          this.tabGroups,
+                          this.tabGroups.filter((group) => !group.parentId),
                           (g) => g.id,
                           (g) => this.renderHorizontalGroup(g)
                         )}
@@ -1157,15 +1394,20 @@ export class WriteMdApp extends LitElement {
                 .collapsed=${this.verticalPanelCollapsed}
                 @toggle-rail=${this.toggleVerticalPanel}
                 ><writemd-sidebar
+                  .aiEnabled=${this.aiEnabled}
+                  .aiOpen=${this.aiDockOpen || this.quickAiOpen}
                   .collapsed=${this.verticalPanelCollapsed}
                   .welcome=${this.showWelcome}
+                  .tabGroups=${this.tabGroups}
+                  .activeGroupId=${this.groupCard?.id ?? ''}
                   @new-file=${() => void this.fileState.newFile()}
                   @open-file=${() => void this.openFileDialog()}
+                  @new-group=${this.handleCreateGroupVertical}
                   @open-menu=${() => (this.showPalette = true)}
                   @toggle-panel=${this.toggleVerticalPanel}
-                  @open-settings=${() => (this.showSettings = true)}
-                  @open-vault=${() => void this.handleOpenVault()}
-                  @open-ai=${() => this.fileState.setSplitSurface('ai')}
+                  @toggle-ai=${this.toggleQuickAi}
+                  @open-group=${this.handleOpenGroup}
+                  @open-settings=${this.openSettings}
                   >${
                     this.showWelcome
                       ? ''
@@ -1191,19 +1433,52 @@ export class WriteMdApp extends LitElement {
         <div class="main-area" slot="content" ?inert=${this.showSettings}>
           <div class="editor-wrapper">
             ${
-              this.showWelcome
+              this.showWelcome && !this.aiDockOpen
                 ? html`<writemd-welcome-screen
                     .vertical=${this.panelOrientation === 'vertical'}
                     @new-file=${() => void this.fileState.newFile()}
                     @open-file=${() => void this.openFileDialog()}
-                    @open-vault=${() => void this.handleOpenVault()}
-                    @open-settings=${() => (this.showSettings = true)}
+                    @open-settings=${this.openSettings}
                     @open-recent=${(e: CustomEvent<{ path: string }>) =>
                       void this.fileState.openFile(e.detail.path)}
                   ></writemd-welcome-screen>`
-                : html`<writemd-editor></writemd-editor>`
+                : html`<writemd-editor
+                    @ai-open-floating=${(e: CustomEvent<{ path: string | null }>) => {
+                      const editor = e.currentTarget as HTMLElement & {
+                        getQuickAiContext: (path?: string | null) => QuickAiContext
+                      }
+                      this.openQuickAi({
+                        prompt: '',
+                        context: editor.getQuickAiContext(e.detail.path)
+                      })
+                    }}
+                    @open-ai-bar=${(e: CustomEvent<{ prompt: string; context: QuickAiContext }>) =>
+                      this.openQuickAi({ prompt: e.detail.prompt, context: e.detail.context })}
+                  ></writemd-editor>`
             }
           </div>
+          ${
+            // Inside the content slot rather than the shell's overlay, so the
+            // bar centres on the document. Centred on the window it sits off
+            // to the right of the writing by the width of the tab rail.
+            this.quickAiOpen
+              ? html`<writemd-ai-quick
+                  .context=${this.quickAiContext}
+                  .readContext=${this.readQuickAiContext}
+                  .autoAcceptEdits=${this.aiAutoAcceptEdits}
+                  .paneFor=${this.quickAiPane}
+                  .collapsed=${this.quickAiCollapsed}
+                  .initialPrompt=${this.quickAiPrompt}
+                  @quick-ai-close=${() => (this.quickAiOpen = false)}
+                  @quick-ai-collapse=${() => (this.quickAiCollapsed = true)}
+                  @quick-ai-accept=${this.applyQuickAi}
+                  @quick-ai-full-chat=${() => {
+                    this.quickAiOpen = false
+                    this.fileState.toggleAiDock(true)
+                  }}
+                ></writemd-ai-quick>`
+              : null
+          }
         </div>
 
         ${
@@ -1213,7 +1488,7 @@ export class WriteMdApp extends LitElement {
                 .embedded=${true}
                 @settings-section-change=${(event: CustomEvent<{ tab: string }>) => (this.settingsTab = event.detail.tab)}
                 .initialTab=${this.settingsTab}
-                @close=${() => (this.showSettings = false)}
+                @close=${this.closeSettings}
               ></writemd-settings-modal>`
             : ''
         }
@@ -1235,6 +1510,19 @@ export class WriteMdApp extends LitElement {
             : ''
         }
         ${this.renderHorizontalContextMenu()}
+        ${
+          this.groupCard &&
+          this.verticalPanelCollapsed &&
+          !this.showSettings &&
+          this.panelOrientation === 'vertical'
+            ? html`<writemd-group-card
+                slot="overlay"
+                .groupId=${this.groupCard.id}
+                .anchor=${this.groupCard.anchor}
+                @group-card-dismiss=${() => (this.groupCard = null)}
+              ></writemd-group-card>`
+            : null
+        }
       </writemd-shell>
     `
   }

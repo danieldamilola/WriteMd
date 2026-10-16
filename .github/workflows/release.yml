@@ -37,6 +37,11 @@ jobs:
           node-version: '24.15.0'
           cache: pnpm
 
+      - name: Verify release tag
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: node -e "const version = require('./package.json').version; if (process.env.RELEASE_TAG !== 'v' + version) throw new Error('Release tag must match package.json version ' + version)"
+
       - name: Install dependencies
         # Bare `pnpm install` let the lockfile drift on the one path that
         # publishes binaries.

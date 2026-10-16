@@ -97,9 +97,9 @@ describe('settings schema', () => {
             'appearance',
             'files',
             'export',
+            'ai',
             'advanced',
             'shortcuts',
-            'ai',
             'preview'
           ].includes(section)
         ) {

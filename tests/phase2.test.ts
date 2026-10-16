@@ -46,7 +46,7 @@ describe('phase 2 editor core & split view', () => {
     expect(fs.getState().secondaryDoc?.content).toBe('# Secondary Note')
 
     fs.closeSecondaryFile()
-    expect(fs.getState().splitSurface).toBe('launcher')
+    expect(fs.getState().splitSurface).toBe('files')
     expect(fs.getState().secondaryDoc).toBeNull()
   })
 

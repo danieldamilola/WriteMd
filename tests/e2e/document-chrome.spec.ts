@@ -64,7 +64,20 @@ test.describe('Document chrome', () => {
     }
   })
 
-  test('title centers on the full header in both layouts at compact and wide sizes', async () => {
+  test('the inline title accepts real typing and renames the file', async () => {
+    const title = page.locator('.cm-inline-title')
+    await title.click()
+    // Real keystrokes. fill() assigns the value from script, so it would pass
+    // even if the widget swallowed every keystroke and the field was inert.
+    await page.keyboard.press('Control+a')
+    await page.keyboard.type('Typed name')
+    await expect(title).toHaveValue('Typed name')
+    await title.press('Enter')
+    await expect(title).toHaveValue('Typed name')
+    await expect(page.locator('writemd-tab', { hasText: 'Typed name' })).toBeVisible()
+  })
+
+  test('title renders inside the editor and header actions stay on the trailing edge', async () => {
     for (const width of [800, 1200]) {
       await app.evaluate(
         ({ BrowserWindow }, width) => BrowserWindow.getAllWindows()[0].setSize(width, 650),
@@ -77,24 +90,59 @@ test.describe('Document chrome', () => {
           'appearance.surfaceOpacity': 100
         })
         const bar = page.locator('writemd-doc-bar').first()
-        const input = bar.locator('input.title-input')
-        await expect(input).toBeVisible()
+        // The title is no longer chrome. It lives in the document, above the
+        // first line, so it scrolls with the writing instead of staying pinned.
+        await expect(bar.locator('input.title-input')).toHaveCount(0)
+        const title = page.locator('.cm-inline-title')
+        await expect(title).toBeVisible()
+        const firstLine = page.locator('.cm-line').first()
+        const titleBox = await title.boundingBox()
+        const lineBox = await firstLine.boundingBox()
+        expect(titleBox!.y + titleBox!.height).toBeLessThanOrEqual(lineBox!.y + 1)
+
         const reference = orientation === 'vertical' ? page.locator('writemd-top-bar') : bar
         const bounds = await reference.boundingBox()
-        const title = await input.boundingBox()
-        expect(
-          Math.abs(title!.x + title!.width / 2 - (bounds!.x + bounds!.width / 2))
-        ).toBeLessThan(1)
         const reading = await bar.locator('[aria-label="Toggle Reading / Live Mode"]').boundingBox()
         const more = await bar.locator('[aria-label="More Options"]').boundingBox()
-        expect(title!.x + title!.width).toBeLessThanOrEqual(reading!.x)
+        expect(reading!.x).toBeLessThanOrEqual(more!.x)
         expect(more!.x + more!.width).toBeLessThanOrEqual(bounds!.x + bounds!.width)
-        await input.hover()
         await page.screenshot({
           path: `artifacts/ui-review/document-centered-${orientation}-${width}.png`
         })
       }
     }
+  })
+
+  test('the empty top bar drags the window while its controls stay clickable', async () => {
+    await appearance(page, { 'appearance.panelOrientation': 'vertical' })
+
+    // The compact document header fills the middle of the top bar. When it
+    // opted itself out of dragging wholesale, every blank part of the header
+    // became undraggable and the window could only be moved by its edges.
+    await expect(page.locator('writemd-doc-bar[compact]')).toHaveCSS('-webkit-app-region', 'drag')
+    // Its controls still have to take their clicks.
+    for (const control of ['.icon-action', '.menu-wrap']) {
+      await expect(page.locator(`writemd-doc-bar[compact] ${control}`).first()).toHaveCSS(
+        '-webkit-app-region',
+        'no-drag'
+      )
+    }
+    // The header only drags when it is in the top bar. In horizontal tabs it
+    // sits inside the document panel, where a drag region would take text
+    // selection away from the user.
+    await appearance(page, { 'appearance.panelOrientation': 'horizontal' })
+    await expect(page.locator('writemd-doc-bar:not([compact])')).toHaveCSS(
+      '-webkit-app-region',
+      'no-drag'
+    )
+  })
+
+  test('Rename focuses the inline title in the editor', async () => {
+    const bar = page.locator('writemd-doc-bar').first()
+    await bar.locator('[aria-label="More Options"]').click()
+    await page.locator('writemd-context-menu .m-item', { hasText: 'Rename' }).click()
+    const title = page.locator('.cm-inline-title')
+    await expect(title).toBeFocused()
   })
 
   test('document menu stays inside the viewport with readable labels and keyboard navigation', async () => {

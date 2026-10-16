@@ -3,6 +3,8 @@
  * The main process persists this to config.json in the userData directory.
  */
 
+import { validModelPreferences, type ModelPreferences } from './ai/model-options'
+
 export interface WriteMdSettings {
   editor: {
     fontSize: number
@@ -14,6 +16,13 @@ export interface WriteMdSettings {
     autoSaveDelay: number
     showLineNumbers: boolean
     highlightActiveLine: boolean
+    /**
+     * Show the document path on the left of the document footer.
+     *
+     * The path used to live in the document header, which had no way to hide
+     * it. It moved to the footer, so the toggle moved with it.
+     */
+    showFilePath: boolean
     /**
      * Where the user last dragged the floating table toolbar, in pixels from the
      * spot CodeMirror anchors it to. Per-editor while the session lives (so the
@@ -39,9 +48,10 @@ export interface WriteMdSettings {
     motion: 'system' | 'full' | 'reduced'
     paneWidth: number
     railWidth: number
+    aiDockWidth: number
     backgroundId: string
     backgroundEffect: 'none' | 'haze' | 'dither' | 'ascii' | 'halftone' | 'scanlines'
-    backgroundTarget: 'workspace' | 'ai'
+    backgroundTarget: 'workspace'
     backgroundShowOn: 'all' | 'empty'
     backgroundEmptyOpacity: number
     backgroundContentOpacity: number
@@ -65,6 +75,30 @@ export interface WriteMdSettings {
     pdfPageSize: string
     pdfTheme: string
   }
+  ai: {
+    /** Master switch. New profiles show the assistant; a key is still required to send. */
+    enabled: boolean
+    /** Apply completed floating-bar suggestions through the normal acceptance path. */
+    autoAcceptEdits: boolean
+    /** 0 follows the provider default. Other values cap one generated response. */
+    maxOutputTokens: number
+    /** Which preset. See `PRESETS` in src/main/ai/providers. */
+    providerId: string
+    /** Editable, so a self-hosted or proxied endpoint works without a new adapter. */
+    baseUrl: string
+    model: string
+    /**
+     * Whether an API key is stored on this machine. The key itself lives in a
+     * separate safeStorage-encrypted file and never in config.json, which is
+     * plain JSON on disk and is fine to read, copy, and commit.
+     */
+    apiKeySet: boolean
+    /** Previous chat turns replayed with each message. 0 makes each turn stateless. */
+    historyTurns: number
+    /** Model ids the last Fetch returned, so the picker survives a restart. */
+    cachedModels: string[]
+    modelPreferences: ModelPreferences
+  }
   advanced: {
     enableMermaid: boolean
   }
@@ -81,43 +115,12 @@ export interface WriteMdSettings {
   shortcuts: {
     bindings: Record<string, string>
   }
-  ai: {
-    provider: string
-    model: string
-    apiKey: string
-    /**
-     * Whether a key is stored, without revealing it. Derived in the main
-     * process and stripped before the config is written, so the renderer can
-     * show "configured" state without the plaintext ever crossing the bridge.
-     */
-    apiKeySet: boolean
-    /** A key is stored but this install cannot decrypt it; the user must retype. */
-    apiKeyUndecryptable: boolean
-    systemPrompt: string
-    /** Explicit opencode CLI path (e.g. %APPDATA%\npm\opencode.cmd); empty = autodetect. */
-    opencodeCliPath: string
-    /** Ground answers with a keyless web search before sending to the model. */
-    webSearchEnabled: boolean
-  }
 }
 
 /** A nested-partial settings object, e.g. `{ files: { vaultPath: '...' } }`. */
 export type WriteMdSettingsPatch = {
   [K in keyof WriteMdSettings]?: Partial<WriteMdSettings[K]>
 }
-
-/** Default instruction sent with every AI request (file context is appended at runtime). */
-export const DEFAULT_AI_SYSTEM_PROMPT = `You are the AI assistant inside the WriteMd markdown editor. Write direct, concise, human-sounding markdown. No filler openers ("Here is...", "I'll help..."), no exclamations ("Great!", "Perfect!"), no preamble, postamble, or summaries unless asked. If filler slips in, stop, delete, rewrite.
-
-FILE EDITS: when the user asks to change the file, output the entire updated file and nothing else inside one \`\`\`writemd-replace block:
-\`\`\`writemd-replace
-(entire new file content)
-\`\`\`
-The app applies that block to the document automatically.
-
-FILE TRACKING: every user message names its file. If it differs from the file the conversation started in, stop and ask which file to work in before editing anything.
-
-WEB SEARCH: appended live results count as pages you opened: answer from them, cite sources with links. Never discuss search mechanics, tools, or your own capabilities. With no results supplied, answer from your own knowledge.`
 
 export const DEFAULT_SETTINGS: WriteMdSettings = {
   editor: {
@@ -130,6 +133,7 @@ export const DEFAULT_SETTINGS: WriteMdSettings = {
     autoSaveDelay: 500,
     showLineNumbers: false,
     highlightActiveLine: true,
+    showFilePath: true,
     tableToolbarOffset: { x: 0, y: 0 }
   },
   appearance: {
@@ -143,6 +147,7 @@ export const DEFAULT_SETTINGS: WriteMdSettings = {
     motion: 'system',
     paneWidth: 600,
     railWidth: 208,
+    aiDockWidth: 360,
     backgroundId: '',
     backgroundEffect: 'none',
     backgroundTarget: 'workspace',
@@ -169,6 +174,18 @@ export const DEFAULT_SETTINGS: WriteMdSettings = {
     pdfPageSize: 'A4',
     pdfTheme: 'light'
   },
+  ai: {
+    enabled: true,
+    autoAcceptEdits: false,
+    maxOutputTokens: 0,
+    providerId: 'openai',
+    baseUrl: 'https://api.openai.com/v1',
+    model: 'gpt-4o-mini',
+    apiKeySet: false,
+    historyTurns: 8,
+    cachedModels: [],
+    modelPreferences: {}
+  },
   advanced: {
     enableMermaid: true
   },
@@ -179,16 +196,6 @@ export const DEFAULT_SETTINGS: WriteMdSettings = {
   },
   shortcuts: {
     bindings: {}
-  },
-  ai: {
-    provider: 'OpenAI',
-    model: 'gpt-4o',
-    apiKey: '',
-    apiKeySet: false,
-    apiKeyUndecryptable: false,
-    systemPrompt: DEFAULT_AI_SYSTEM_PROMPT,
-    opencodeCliPath: '',
-    webSearchEnabled: false
   }
 }
 
@@ -218,7 +225,8 @@ const ARRAY_ELEMENT_TYPES: Record<string, 'string' | 'number' | 'boolean'> = {
   'files.recentFiles': 'string',
   'files.openTabs': 'string',
   'files.pinnedTabs': 'string',
-  'shortcuts.bindings': 'string'
+  'shortcuts.bindings': 'string',
+  'ai.cachedModels': 'string'
 }
 
 /**
@@ -233,9 +241,23 @@ const STRING_UNIONS: Record<string, readonly string[]> = {
   'appearance.motion': ['system', 'full', 'reduced'],
   'appearance.panelOrientation': ['horizontal', 'vertical'],
   'appearance.backgroundEffect': ['none', 'haze', 'dither', 'ascii', 'halftone', 'scanlines'],
-  'appearance.backgroundTarget': ['workspace', 'ai'],
+  'appearance.backgroundTarget': ['workspace'],
   'appearance.backgroundShowOn': ['all', 'empty'],
-  'appearance.windowMaterial': ['none', 'mica', 'acrylic']
+  'appearance.windowMaterial': ['none', 'mica', 'acrylic'],
+  'ai.providerId': [
+    'chatgpt',
+    'opencode',
+    'openai',
+    'anthropic',
+    'gemini',
+    'openrouter',
+    'deepseek',
+    'groq',
+    'mistral',
+    'xai',
+    'ollama',
+    'lmstudio'
+  ]
 }
 
 const NUMBER_BOUNDS: Record<string, readonly [number, number]> = {
@@ -245,10 +267,13 @@ const NUMBER_BOUNDS: Record<string, readonly [number, number]> = {
   'appearance.themeDarkLightness': [0, 30],
   'appearance.paneWidth': [320, 10000],
   'appearance.railWidth': [160, 360],
+  'appearance.aiDockWidth': [280, 640],
   'appearance.backgroundEmptyOpacity': [0, 100],
   'appearance.backgroundContentOpacity': [0, 100],
   'appearance.surfaceOpacity': [0, 100],
-  'appearance.backgroundBlur': [0, 40]
+  'appearance.backgroundBlur': [0, 40],
+  'ai.historyTurns': [0, 50],
+  'ai.maxOutputTokens': [0, 131072]
 }
 
 /**
@@ -286,14 +311,14 @@ export function validatePatch(patch: unknown): {
         problems.push(`unknown key: ${dotted}`)
         continue
       }
-      // apiKeySet and apiKeyUndecryptable are derived in the main process and
-      // must not be client-set.
-      if (dotted === 'ai.apiKeySet' || dotted === 'ai.apiKeyUndecryptable') {
-        problems.push(`${dotted} is derived and cannot be set`)
-        continue
-      }
       if (value === null || value === undefined) continue
       const fallback = (defaults as Record<string, unknown>)[key]
+      if (dotted === 'ai.modelPreferences' && !validModelPreferences(value)) {
+        problems.push(
+          'ai.modelPreferences must contain valid per-model reasoning and service-tier choices'
+        )
+        continue
+      }
       const bounds = NUMBER_BOUNDS[dotted]
       if (
         typeof value === 'number' &&

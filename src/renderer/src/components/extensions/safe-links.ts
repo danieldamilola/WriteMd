@@ -3,8 +3,8 @@ import { getAPI } from '../../../../shared/electron-api'
 /**
  * Shared handling for links that rendered content can produce.
  *
- * Anchors emitted by the live-preview widgets (table cells) and by the AI
- * panel are not matched by the syntax-tree handler in `link-click.ts`, which
+ * Anchors emitted by the live-preview widgets (table cells) and by Mermaid
+ * diagrams are not matched by the syntax-tree handler in `link-click.ts`, which
  * only understands links the parser knows about. Left alone they would be
  * top-level navigations, and the preload re-exposes the full IPC bridge on
  * whatever origin the renderer lands on. So every such anchor is intercepted

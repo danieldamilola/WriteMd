@@ -66,7 +66,7 @@ test.describe('Split pane sync', () => {
 
   async function openInSecondary(name: string): Promise<void> {
     await window.locator('writemd-icon-button[title="Split view"]').click()
-    await window.locator('writemd-surface-launcher .row', { hasText: 'Files' }).click()
+    // The pane opens on Files, so there is no launcher step to go through.
     const explorer = window.locator('writemd-vault-explorer')
     await expect(explorer).toBeVisible()
     await explorer.locator('.node-row', { hasText: name }).click()

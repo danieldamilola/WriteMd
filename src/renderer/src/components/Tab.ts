@@ -82,12 +82,18 @@ export class WriteMdTab extends LitElement {
       mask-image: linear-gradient(to right, black 80%, transparent 100%);
     }
 
+    svg[data-icon] {
+      width: var(--icon-size, 18px);
+      height: var(--icon-size, 18px);
+      flex-shrink: 0;
+    }
+
     .close-btn {
       display: flex;
       align-items: center;
       justify-content: center;
-      width: 12px;
-      height: 12px;
+      width: 24px;
+      height: 24px;
       flex-shrink: 0;
       border: none;
       background: none;
@@ -221,7 +227,7 @@ export class WriteMdTab extends LitElement {
         @click=${this.handleSelect}
         @keydown=${this.handleKeyDown}
       >
-        ${this.vertical ? chromeIcon('file-text', 14) : ''}
+        ${this.vertical ? chromeIcon('file-text') : ''}
         <span class="label">${this.label}</span>
         ${this.dirty ? html`<span class="dirty-dot" title="Unsaved changes"></span>` : ''}
         ${
@@ -234,17 +240,7 @@ export class WriteMdTab extends LitElement {
                   @click=${this.handleClose}
                   aria-label=${`Close ${this.label}`}
                 >
-                  <svg
-                    width="8"
-                    height="8"
-                    viewBox="0 0 8 8"
-                    fill="none"
-                    stroke="currentColor"
-                    stroke-width="1.2"
-                  >
-                    <line x1="0" y1="8" x2="8" y2="0" />
-                    <line x1="8" y1="8" x2="0" y2="0" />
-                  </svg>
+                  ${chromeIcon('x')}
                 </button>
               `
             : ''

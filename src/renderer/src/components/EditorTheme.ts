@@ -1,6 +1,22 @@
 import { EditorView } from '@codemirror/view'
 import { Extension } from '@codemirror/state'
 
+/**
+ * How far the document fades out above the footer.
+ *
+ * Shared with the footer spec so the two cannot drift apart: the test asserts
+ * the last line of a document stays clear of exactly this band.
+ */
+export const FOOTER_FADE = 56
+
+/**
+ * Top padding of the document text.
+ *
+ * The gutter is a separate column and does not inherit it, so both have to be
+ * set from one value or the line numbers drift away from their lines.
+ */
+export const EDITOR_PADDING_TOP = '24px'
+
 export const writeMDTheme: Extension = EditorView.theme({
   '&': {
     color: 'var(--text)',
@@ -18,7 +34,19 @@ export const writeMDTheme: Extension = EditorView.theme({
     display: 'flex',
     justifyContent: 'center',
     scrollbarWidth: 'thin',
-    scrollbarColor: 'transparent transparent'
+    scrollbarColor: 'transparent transparent',
+    /*
+     * The document dissolves into the footer instead of stopping at a rule.
+     *
+     * This has to be on the scroller, not on `.cm-content`. The content box is
+     * as tall as the whole document, so a percentage there resolves against
+     * thousands of pixels and parks the fade off-screen at the very end. The
+     * scroller is `height: 100%` of the pane, so its percentage resolves
+     * against what is actually on screen and the fade stays pinned to the
+     * footer at any scroll position.
+     */
+    maskImage: `linear-gradient(to bottom, var(--background-mask-solid) 0 calc(100% - ${FOOTER_FADE}px), transparent 100%)`,
+    webkitMaskImage: `linear-gradient(to bottom, var(--background-mask-solid) 0 calc(100% - ${FOOTER_FADE}px), transparent 100%)`
   },
   '.cm-scroller.is-scrolling, .cm-scroller:hover': {
     scrollbarColor: 'var(--border) transparent'
@@ -52,7 +80,7 @@ export const writeMDTheme: Extension = EditorView.theme({
   },
   '.cm-content': {
     caretColor: 'var(--text)',
-    padding: '24px 20px 120px 20px',
+    padding: `${EDITOR_PADDING_TOP} 20px 120px 20px`,
     boxSizing: 'border-box',
     width: '100%',
     maxWidth: '760px'
@@ -68,6 +96,16 @@ export const writeMDTheme: Extension = EditorView.theme({
     backgroundColor: 'transparent',
     color: 'var(--text-muted)',
     border: 'none',
+    /*
+     * No padding-top here on purpose.
+     *
+     * The gutter is a sibling column of `.cm-content`, so it does not inherit
+     * the content's padding and the numbers looked like they were a line high.
+     * CodeMirror already answers that on its own: it measures the offset
+     * between the gutter and the first line and puts `margin-top` on the first
+     * gutter element to match. Adding padding as well double-counts the same
+     * 24px and pushes every number down a full line.
+     */
     paddingRight: '12px',
     userSelect: 'none',
     flexShrink: 0
@@ -87,6 +125,58 @@ export const writeMDTheme: Extension = EditorView.theme({
     lineHeight: '1.3 !important',
     paddingTop: '0.25em !important',
     paddingBottom: '0.15em !important'
+  },
+  /*
+   * The document title, rendered inside the editor above the first line.
+   *
+   * Sized to the h1 so a note whose first line is a heading and a note whose
+   * title sits above it read the same, and aligned to the content's left edge
+   * rather than the gutter so it does not shift when line numbers are on.
+   */
+  '.cm-inline-title': {
+    display: 'block',
+    width: '100%',
+    boxSizing: 'border-box',
+    /*
+     * No outer margin. CodeMirror measures the widget's border box for the
+     * gutter but not its margin, so a bottom margin pushed every line number
+     * 8px above the line it labels. The gap to line 1 is padding instead,
+     * which is inside the measured box.
+     */
+    margin: '0',
+    padding: '0 0 20px',
+    background: 'transparent',
+    border: '0',
+    outline: 'none',
+    /*
+     * Obsidian's inline title: large, and in body text colour rather than the
+     * accent an H1 uses, so it reads as the note's name and not as the first
+     * heading of its content.
+     */
+    color: 'var(--text)',
+    fontFamily: 'inherit',
+    fontSize: '36px',
+    fontWeight: '700',
+    lineHeight: '1.25',
+    letterSpacing: '-0.01em'
+  },
+  '.cm-inline-title:focus': {
+    borderBottom: '1px solid var(--border-subtle)'
+  },
+  /*
+   * Centre the number in the height CodeMirror gives its line box.
+   *
+   * CodeMirror sizes each gutter element to the whole line block, which for a
+   * heading is far taller than the digits. As a plain text line the number
+   * sits at the top of that box while the text sits in the middle of it, so
+   * the two read as different lines. Flex centring keeps the element's own
+   * height, which is what the gutter measures.
+   */
+  '.cm-lineNumbers .cm-gutterElement': {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    boxSizing: 'border-box'
   },
   '.cm-line.cm-live-h2': {
     fontSize: '20px !important',

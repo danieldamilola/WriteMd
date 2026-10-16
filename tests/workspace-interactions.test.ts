@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest'
 import { placeTab } from '../src/renderer/src/state/tab-order'
-import { paneGeometry } from '../src/renderer/src/state/workspace'
+import { paneGeometry, aiDockGeometry } from '../src/renderer/src/state/workspace'
 import { SettingsStore } from '../src/renderer/src/state/settings'
 import { DEFAULT_SETTINGS, validatePatch } from '../src/shared/settings-schema'
 import { chromeKey } from '../src/renderer/src/state/chrome-selector'
@@ -28,6 +28,13 @@ describe('tab placement by identity', () => {
 })
 
 describe('workspace allocation', () => {
+  it('keeps an assistant preference while reserving document space in compact windows', () => {
+    expect(aiDockGeometry(1000, 500).width).toBe(500)
+    expect(aiDockGeometry(592, 500)).toMatchObject({ width: 432, min: 280, max: 432 })
+    expect(aiDockGeometry(440, 500)).toMatchObject({ width: 280, min: 280, max: 280 })
+    expect(aiDockGeometry(1000, 500).width).toBe(500)
+    expect(aiDockGeometry(0, 500).width).toBe(0)
+  })
   it('keeps shell selection stable on document edits and updates it for workspace changes', () => {
     const state = FileState.getInstance().getState()
     expect(chromeKey({ ...state, content: 'More typing' })).toBe(chromeKey(state))

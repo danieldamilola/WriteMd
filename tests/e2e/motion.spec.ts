@@ -2,6 +2,8 @@ import { test, expect, type Page } from '@playwright/test'
 import { writeFileSync, readFileSync } from 'fs'
 import { join } from 'path'
 import { makeFixture, launch, firstWindow, openSettings } from './fixtures'
+import type { FileState } from '../../src/renderer/src/state/file-state'
+import type { SettingsStore } from '../../src/renderer/src/state/settings'
 
 /**
  * Windows reports SPI_GETCLIENTAREAANIMATION = 0 when "Animation effects" is
@@ -64,6 +66,26 @@ async function runningAnimations(page: Page): Promise<number> {
   })
 }
 
+async function openSplitWidths(page: Page): Promise<number[]> {
+  return page.evaluate(async () => {
+    const root = document.querySelector('writemd-app')!.shadowRoot!
+    const pane = root
+      .querySelector('writemd-editor')!
+      .shadowRoot!.querySelector<HTMLElement>('writemd-panel[slot="primary"]')!
+    const button = root
+      .querySelector('writemd-top-bar')!
+      .shadowRoot!.querySelector<HTMLElement>('writemd-icon-button[title="Split view"]')!
+    const widths = [pane.getBoundingClientRect().width]
+    button.click()
+    const start = performance.now()
+    while (performance.now() - start < 400) {
+      await new Promise((resolve) => requestAnimationFrame(resolve))
+      widths.push(pane.getBoundingClientRect().width)
+    }
+    return widths
+  })
+}
+
 test.describe('Motion preference', () => {
   test('reduced holds everything still', async () => {
     const fixture = makeFixture('motion-reduced')
@@ -73,8 +95,10 @@ test.describe('Motion preference', () => {
     await expect(page.locator('writemd-top-bar')).toBeVisible()
     await page.waitForTimeout(1200)
     expect(await motionAttribute(page)).toBe('reduced')
-    await page.locator('writemd-icon-button[title="Split view"]').click()
-    await page.waitForTimeout(50)
+    const widths = await openSplitWidths(page)
+    expect(
+      widths.filter((width) => width < widths[0] - 2 && width > widths.at(-1)! + 2)
+    ).toHaveLength(0)
     expect(await runningAnimations(page)).toBe(0)
     await app.close()
   })
@@ -87,12 +111,10 @@ test.describe('Motion preference', () => {
     await expect(page.locator('writemd-top-bar')).toBeVisible()
     await page.waitForTimeout(1200)
     expect(await motionAttribute(page)).toBe('full')
-    await page.locator('writemd-icon-button[title="Split view"]').click()
-    // Polled rather than sampled once after a fixed sleep. What is under test is
-    // that opening the split animates at all; a 50ms wait races the animation's
-    // own duration, and on a loaded runner the round trip can land after the
-    // pane has finished easing in.
-    await expect.poll(() => runningAnimations(page), { timeout: 5000 }).toBeGreaterThan(0)
+    const widths = await openSplitWidths(page)
+    expect(
+      widths.filter((width) => width < widths[0] - 2 && width > widths.at(-1)! + 2).length
+    ).toBeGreaterThan(1)
     await app.close()
   })
 
@@ -181,10 +203,14 @@ test.describe('Motion preference', () => {
       expect(driver).toMatch(/^CSSTransition:/)
     }
     expect(drivers.filter((d) => d.startsWith('Animation:'))).toEqual([])
+    expect(
+      widths.filter((width) => width < before - 2 && width > samples!.settled + 2).length
+    ).toBeGreaterThan(1)
+    await page.screenshot({ path: 'artifacts/ui-review/split-motion-open.png' })
     await app.close()
   })
 
-  test('closing the split fades the pane out before the space is claimed', async () => {
+  test('closing the split releases width continuously and retains its document until it leaves', async () => {
     const fixture = makeFixture('motion-split-exit')
     await writeConfig(fixture.vault, 'full')
     const app = await launch(fixture)
@@ -192,10 +218,12 @@ test.describe('Motion preference', () => {
     await expect(page.locator('writemd-top-bar')).toBeVisible()
     await page.waitForTimeout(1200)
     await page.locator('writemd-icon-button[title="Split view"]').click()
-    await page.locator('writemd-surface-launcher .row', { hasText: 'Files' }).click()
+    // The pane opens on Files, so there is no launcher step to go through.
+    await expect(page.locator('writemd-vault-explorer')).toBeVisible()
     await page.locator('writemd-vault-explorer').locator('.node-row', { hasText: 'PRD.md' }).click()
     await expect(page.locator('.cm-content')).toHaveCount(2, { timeout: 5000 })
     await page.waitForTimeout(400)
+    await page.screenshot({ path: 'artifacts/ui-review/split-motion-documents.png' })
 
     const trace = await page.evaluate(async () => {
       const app_ = document.querySelector('writemd-app')?.shadowRoot
@@ -206,38 +234,125 @@ test.describe('Motion preference', () => {
       const pane = (): HTMLElement | null =>
         editor.querySelector('writemd-panel.pane-in') as HTMLElement | null
       const left = (): HTMLElement => editor.querySelectorAll<HTMLElement>('writemd-panel.pane')[0]
-      const samples: Array<{ opacity: number | null; leftWidth: number }> = []
+      const before = pane()!.getBoundingClientRect().width
+      const samples: Array<{
+        opacity: number | null
+        transform: string | null
+        rightWidth: number | null
+        leftWidth: number
+        content: string | null
+      }> = []
       button.click()
       const started = performance.now()
       while (performance.now() - started < 500) {
         const live = pane()
         samples.push({
           opacity: live ? Number(getComputedStyle(live).opacity) : null,
-          leftWidth: left().getBoundingClientRect().width
+          transform: live ? getComputedStyle(live).transform : null,
+          rightWidth: live?.getBoundingClientRect().width ?? null,
+          leftWidth: left().getBoundingClientRect().width,
+          content: live?.querySelector('.cm-content')?.textContent ?? null
         })
         await new Promise((r) => requestAnimationFrame(r))
       }
-      return { samples, container: left().parentElement?.getBoundingClientRect().width ?? 0 }
+      return {
+        before,
+        samples,
+        container: left().parentElement?.getBoundingClientRect().width ?? 0
+      }
     })
 
     expect(trace).not.toBeNull()
-    const { samples, container } = trace!
+    const { before, samples, container } = trace!
     const opacities = samples.map((s) => s.opacity)
-    // It was on screen at full opacity, then faded, then it was gone.
     expect(opacities[0]).toBe(1)
     expect(opacities).toContain(null)
-    const partial = opacities.filter((o): o is number => o !== null && o > 0 && o < 1)
+    const partial = samples.filter(
+      (sample) =>
+        sample.rightWidth !== null && sample.rightWidth > 1 && sample.rightWidth < before - 1
+    )
     expect(partial.length).toBeGreaterThan(1)
-    // While it faded, the left pane had not yet claimed the space.
     const firstGone = opacities.findIndex((o) => o === null)
     expect(firstGone).toBeGreaterThan(0)
-    for (const sample of samples.slice(0, firstGone)) {
-      expect(sample.leftWidth).toBeLessThan(container - 10)
+    for (const [index, sample] of samples.slice(0, firstGone).entries()) {
+      expect(sample.opacity).toBe(1)
+      expect(sample.transform).toBe('none')
+      expect(sample.content).toContain('PRD.md')
+      if (index > 0) {
+        expect(sample.leftWidth).toBeGreaterThanOrEqual(samples[index - 1].leftWidth - 1)
+        expect(sample.rightWidth!).toBeLessThanOrEqual(samples[index - 1].rightWidth! + 1)
+      }
     }
-    // And it ended up full width.
+    expect(partial.some((sample) => sample.leftWidth > samples[0].leftWidth + 10)).toBe(true)
     expect(samples[samples.length - 1].leftWidth).toBeGreaterThan(container - 10)
+    await expect(page.locator('.cm-content')).toHaveCount(1)
+    await page.screenshot({ path: 'artifacts/ui-review/split-motion-closed.png' })
     await app.close()
   })
+
+  for (const motion of ['full', 'reduced']) {
+    test(`rapid split reversals finish correctly with ${motion} motion`, async () => {
+      const fixture = makeFixture(`motion-split-reverse-${motion}`)
+      await writeConfig(fixture.vault, motion)
+      const app = await launch(fixture)
+      try {
+        const page = await firstWindow(app)
+        await expect(page.locator('writemd-editor')).toBeVisible()
+        for (const orientation of ['horizontal', 'vertical']) {
+          await page.evaluate((orientation) => {
+            const host = document.querySelector('writemd-app') as unknown as {
+              settingsStore: SettingsStore
+            }
+            host.settingsStore.set('appearance.panelOrientation', orientation)
+          }, orientation)
+          await page.evaluate(async () => {
+            const host = document.querySelector('writemd-app') as unknown as {
+              fileState: FileState
+            }
+            host.fileState.toggleSplitView(true)
+            await new Promise((resolve) => requestAnimationFrame(resolve))
+            await new Promise((resolve) => requestAnimationFrame(resolve))
+            host.fileState.toggleSplitView(false)
+            await new Promise((resolve) => requestAnimationFrame(resolve))
+            await new Promise((resolve) => requestAnimationFrame(resolve))
+            host.fileState.toggleSplitView(true)
+          })
+          const pane = page.locator('writemd-panel[slot="auxiliary"]')
+          await expect(pane).toBeVisible()
+          await expect(pane).not.toHaveAttribute('inert', '')
+          const separator = page.locator('writemd-workspace wa-split-panel')
+          await expect(separator).toHaveJSProperty('disabled', false)
+          await expect
+            .poll(() => pane.evaluate((element) => element.getBoundingClientRect().width))
+            .toBeGreaterThan(300)
+          await page.evaluate(() => {
+            const host = document.querySelector('writemd-app') as unknown as {
+              fileState: FileState
+            }
+            host.fileState.toggleSplitView(false)
+          })
+          await expect(pane).toHaveCount(0)
+          await expect(page.locator('writemd-workspace wa-split-panel')).toHaveClass(/single/)
+        }
+        await app.evaluate(({ BrowserWindow }) =>
+          BrowserWindow.getAllWindows()[0].setSize(800, 700)
+        )
+        await page.evaluate(() => {
+          const host = document.querySelector('writemd-app') as unknown as { fileState: FileState }
+          host.fileState.toggleSplitView(true)
+        })
+        await expect(page.locator('.compact-switch')).toBeVisible()
+        await page.evaluate(() => {
+          const host = document.querySelector('writemd-app') as unknown as { fileState: FileState }
+          host.fileState.toggleSplitView(false)
+        })
+        await expect(page.locator('writemd-panel[slot="auxiliary"]')).toHaveCount(0)
+        await expect(page.locator('.compact-switch')).toHaveCount(0)
+      } finally {
+        await app.close()
+      }
+    })
+  }
 
   test('changing it in the modal re-decides without a restart, and persists', async () => {
     const fixture = makeFixture('motion-change')
@@ -263,12 +378,13 @@ test.describe('Motion preference', () => {
     }
     expect(stored.appearance.motion).toBe('full')
 
-    // And the app really is moving now: close the modal, split, count.
+    // Sample the allocation itself; this motion is driven by numeric widths.
     await modal.locator('.back-btn').click()
     await expect(modal).toHaveCount(0)
-    await page.locator('writemd-icon-button[title="Split view"]').click()
-    await page.waitForTimeout(50)
-    expect(await runningAnimations(page)).toBeGreaterThan(0)
+    const widths = await openSplitWidths(page)
+    expect(
+      widths.filter((width) => width < widths[0] - 2 && width > widths.at(-1)! + 2).length
+    ).toBeGreaterThan(1)
     await app.close()
   })
 })
