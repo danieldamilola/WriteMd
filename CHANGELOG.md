@@ -6,40 +6,7 @@ Release numbering restarts at v0.1.0. Earlier development notes remain in [the a
 
 ## [Unreleased]
 
-## [0.2.0] - 2026-10-16
-
-### Added
-
-- Collapsed Space icons open searchable folder cards with nested folders, notes, New note, and New folder while the sidebar stays collapsed.
-- Per-model reasoning and service-tier choices in the AI composer and Settings, with supported options sent to each provider and saved separately for each model.
-- Provider logos in connection and model pickers, bundled locally and adapted to the active theme.
-- A compact Development badge in the title bar identifies local builds and previews in both tab layouts and Settings. Installed release builds hide it.
-- OpenCode browser sign-in, workspace model discovery, encrypted credentials, and assistant responses using each model's API format. No API key is needed for this connection.
-- ChatGPT accounts can be switched beside the model picker in the AI chat panel. Switching refreshes available models and preserves the unsent prompt.
-- Space groups can be nested by dropping one onto another. Drops at a group's edge reorder siblings; Move to Space returns a nested group to the top level. Nested groups persist across restarts and retain their tabs and edits.
-
-### Fixed
-
-- Closing AI Settings releases account listeners, preventing closed settings pages from fetching models after account changes.
-- Closing Settings restores keyboard focus to the editor or control that opened it, after the workspace becomes active again.
-- Slash suggestions show only installed personal skills, including after leading spaces or newlines. Empty, unavailable, and failed skill discovery no longer fall back to vault files; file references use `@`.
-- New notes choose an unused filename instead of selecting another open untitled note or replacing an existing default-named file.
-- Escape closes a model-options drawer in Settings before closing the Settings page.
-- OpenCode's free-model access restriction is explained directly instead of being presented as an API-key permissions problem.
-- Personal skills up to 256 KB load in full, including flat Markdown files larger than the previous 16 KB limit. Oversized-file warnings describe skill instructions rather than always naming SKILL.md.
-- ChatGPT sign-in and session renewal can use OpenAI's published production endpoints when discovery returns a gateway error, while retaining identity verification. Other discovery failures still stop the connection.
-- Structured ChatGPT authorization errors retain their error codes so unusable refresh credentials trigger a fresh sign-in.
-
-### Changed
-
-- Updated Electron, CodeMirror, Mermaid, Hugeicons, TypeScript, and test tooling. Icon rendering accepts the updated catalogue's readonly data.
-- Rewrote the README for the current editor, workspace, AI connections, skills, privacy, and source-build workflow. Removed obsolete screenshots while replacements are prepared, and corrected the linked privacy and skill-size documentation.
-- The compact, single-row sidebar update card follows MonoCode's wording: Update to the target version, Downloading with progress, or Restart to update. Upcoming release fixes open on hover or keyboard focus, and the details and Skip action remain accessible while moving into the card.
-- Folder cards, update details, and AI option drawers share the existing menu spacing, surfaces, borders, and dismissal behavior.
-- The AI panel prompt has a rounded input with Send or Stop inside, and a compact control row beneath for attachments, account switching, and model selection.
-- AI settings group provider, credentials, and model under Connection, with edit behavior and history under Conversation. Related controls stay together, skill rows are more compact, and ChatGPT hides its fixed endpoint field.
-
-## [0.1.0] - 2026-10-14
+## [0.1.0] - 2026-10-16
 
 ### Added
 
@@ -53,6 +20,13 @@ Release numbering restarts at v0.1.0. Earlier development notes remain in [the a
 - An AI setting to automatically accept completed floating-bar edits.
 - An "Open in floating bar" action in the AI side panel that continues the same conversation, including a running response.
 - Sign in to ChatGPT with your own account and use your plan, as a provider separate from API keys. Sign-in opens the system browser, supports multiple accounts and rotating refresh tokens, and keeps tokens encrypted in the main process with no API-key fallback.
+- Collapsed Space icons open searchable folder cards with nested folders, notes, New note, and New folder while the sidebar stays collapsed.
+- Per-model reasoning and service-tier choices in the AI composer and Settings, with supported options sent to each provider and saved separately for each model.
+- Provider logos in connection and model pickers, bundled locally and adapted to the active theme.
+- A compact Development badge in the title bar identifies local builds and previews in both tab layouts and Settings. Installed release builds hide it.
+- OpenCode browser sign-in, workspace model discovery, encrypted credentials, and assistant responses using each model's API format. No API key is needed for this connection.
+- ChatGPT accounts can be switched beside the model picker in the AI chat panel. Switching refreshes available models and preserves the unsent prompt.
+- Space groups can be nested by dropping one onto another. Drops at a group's edge reorder siblings; Move to Space returns a nested group to the top level. Nested groups persist across restarts and retain their tabs and edits.
 
 ### Changed
 
@@ -60,6 +34,12 @@ Release numbering restarts at v0.1.0. Earlier development notes remain in [the a
 - AI output limits default to Automatic. Compatible providers and Gemini use their own limits; Anthropic uses its required fallback. Custom limits are configurable in AI Settings.
 - Accepting a floating-bar edit updates the document and starts an atomic save immediately, even when typing autosave is disabled or delayed.
 - Committed AI edits and undo changes notify open documents immediately. External changes refresh without a typing debounce.
+- Updated Electron, CodeMirror, Mermaid, Hugeicons, TypeScript, and test tooling. Icon rendering accepts the updated catalogue's readonly data.
+- Rewrote the README for the current editor, workspace, AI connections, skills, privacy, and source-build workflow. Removed obsolete screenshots while replacements are prepared, and corrected the linked privacy and skill-size documentation.
+- The compact, single-row sidebar update card follows MonoCode's wording: Update to the target version, Downloading with progress, or Restart to update. Upcoming release fixes open on hover or keyboard focus, and the details and Skip action remain accessible while moving into the card.
+- Folder cards, update details, and AI option drawers share the existing menu spacing, surfaces, borders, and dismissal behavior.
+- The AI panel prompt has a rounded input with Send or Stop inside, and a compact control row beneath for attachments, account switching, and model selection.
+- AI settings group provider, credentials, and model under Connection, with edit behavior and history under Conversation. Related controls stay together, skill rows are more compact, and ChatGPT hides its fixed endpoint field.
 
 ### Fixed
 
@@ -81,3 +61,12 @@ Release numbering restarts at v0.1.0. Earlier development notes remain in [the a
 - Settings follows the selected theme, opacity, background, and native window appearance.
 - Provider model fetching uses the configured provider's catalog rather than inventing unavailable models.
 - Gemini tool calls retain their required thought signatures across tool rounds.
+- Closing AI Settings releases account listeners, preventing closed settings pages from fetching models after account changes.
+- Closing Settings restores keyboard focus to the editor or control that opened it, after the workspace becomes active again.
+- Slash suggestions show only installed personal skills, including after leading spaces or newlines. Empty, unavailable, and failed skill discovery no longer fall back to vault files; file references use `@`.
+- New notes choose an unused filename instead of selecting another open untitled note or replacing an existing default-named file.
+- Escape closes a model-options drawer in Settings before closing the Settings page.
+- OpenCode's free-model access restriction is explained directly instead of being presented as an API-key permissions problem.
+- Personal skills up to 256 KB load in full, including flat Markdown files larger than the previous 16 KB limit. Oversized-file warnings describe skill instructions rather than always naming SKILL.md.
+- ChatGPT sign-in and session renewal can use OpenAI's published production endpoints when discovery returns a gateway error, while retaining identity verification. Other discovery failures still stop the connection.
+- Structured ChatGPT authorization errors retain their error codes so unusable refresh credentials trigger a fresh sign-in.

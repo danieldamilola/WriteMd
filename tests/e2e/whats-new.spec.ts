@@ -1,5 +1,5 @@
 import { test, expect, type ElectronApplication, type Page } from '@playwright/test'
-import { writeFileSync } from 'fs'
+import { readFileSync, writeFileSync } from 'fs'
 import { join } from 'path'
 import { makeFixture, launch, firstWindow, openSettings } from './fixtures'
 
@@ -25,7 +25,8 @@ test('whats new reads the changelog', async () => {
   // The host has no box of its own, so the dialog is asserted from inside it.
   const dialog = page.locator('writemd-whats-new .dialog')
   await expect(dialog).toBeVisible()
-  await expect(dialog.locator('h2')).toContainText('v0.2.0')
+  const version = JSON.parse(readFileSync('package.json', 'utf8')).version
+  await expect(dialog.locator('h2')).toContainText(`v${version}`)
   const notes = dialog.locator('.notes')
   await expect(notes.locator('h3').first()).toHaveText('Added')
   await expect(notes).toContainText('OpenCode browser sign-in')

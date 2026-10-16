@@ -1,10 +1,10 @@
 # WriteMd implementation roadmap
 
-The current release baseline is v0.2.0. Release numbering restarted at v0.1.0 on 2026-10-13 without removing existing features or user data. [CHANGELOG.md](../CHANGELOG.md) contains the active release notes. [The archived roadmap](legacy-phases.md) preserves earlier implementation and verification records.
+The current release baseline is v0.1.0. Release numbering restarted on 2026-10-13 without removing existing features or user data. [CHANGELOG.md](../CHANGELOG.md) contains the active release notes. [The archived roadmap](legacy-phases.md) preserves earlier implementation and verification records.
 
 ## Current work
 
-- [x] Review and integrate dependency PRs #24 through #28 with workspace PR #30. Resolve the TypeScript 7 tooling compatibility issue, retain jsdom 30.1.1 after focus regressions, release account listeners when Settings closes, restore editor focus, and prepare the v0.2.0 package and dated changelog.
+- [x] Review and integrate dependency PRs #24 through #28 with workspace PR #30. Resolve the TypeScript 7 tooling compatibility issue, retain jsdom 30.1.1 after focus regressions, release account listeners when Settings closes, restore editor focus, and prepare the v0.1.0 package and dated changelog.
 - [x] Reserve `/` suggestions for installed personal skills and `@` for vault files in both composers. Accept leading whitespace for skill commands, explain empty or unavailable discovery without listing notes, and discard stale results when changing triggers.
 - [x] Rewrite the README around current editor, workspace, AI, privacy, and source-build behavior. Remove obsolete screenshots pending the user's replacements, correct linked skill and privacy guidance, and validate local links and commands against the repository.
 - [x] Open folder cards from collapsed Space icons with nested navigation, search, keyboard support, and New note/New folder actions. Keep the sidebar collapsed and choose unused note filenames.
