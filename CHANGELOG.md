@@ -6,6 +6,14 @@ Release numbering restarts at v0.1.0. Earlier development notes remain in [the a
 
 ## [Unreleased]
 
+### Added
+
+- A hardware acceleration switch in Settings → System, with a restart action to apply the saved choice.
+
+### Changed
+
+- Reorganized Settings into writing, workspace, assistant, and application groups. New-note defaults now live with vault and saving options, PDF preferences have an Export page, personal instructions have a Skills page, and performance and resets live in System. Mermaid is under Editor, document-path visibility is under Appearance, and update controls are grouped within About.
+
 ## [0.1.0] - 2026-10-16
 
 ### Added

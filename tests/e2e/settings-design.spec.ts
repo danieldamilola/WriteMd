@@ -155,7 +155,7 @@ test.describe('Settings and flat workspace layout', () => {
           await search.fill('word wrap')
           await expect(modal.locator('.content-panel')).toHaveAttribute('data-tab', 'editor')
           await search.fill('')
-          await modal.locator('.nav-btn', { hasText: 'New notes' }).click()
+          await modal.locator('.nav-btn', { hasText: 'Files & vault' }).click()
           await window.screenshot({
             path: `artifacts/ui-review/settings-sidebar-${theme}-${orientation}.png`
           })

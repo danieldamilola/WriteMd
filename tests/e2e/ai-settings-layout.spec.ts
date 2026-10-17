@@ -72,7 +72,6 @@ test('AI settings group connection and conversation controls and fit both window
       'Assistant',
       'Connection',
       'Conversation',
-      'Skills',
       'Privacy'
     ])
     const connection = modal
@@ -87,7 +86,6 @@ test('AI settings group connection and conversation controls and fit both window
       conversation.getByRole('switch', { name: 'Automatically accept AI edits' })
     ).toBeVisible()
     await expect(conversation.locator('wa-select[aria-label="Output limit"]')).toBeVisible()
-    await expect(modal.getByRole('list', { name: 'Available skills' })).toContainText('/youtube')
     await expect(modal).not.toContainText('16 KB')
     await modal.getByLabel('API Key', { exact: true }).fill('fixture-key-not-a-real-credential')
     await modal.getByRole('button', { name: 'Save', exact: true }).click()
@@ -137,9 +135,12 @@ test('AI settings group connection and conversation controls and fit both window
     })
     await modal.locator('wa-select[aria-label="Provider"]').scrollIntoViewIfNeeded()
     await page.screenshot({ path: 'artifacts/ui-review/ai-settings-organized-paper.png' })
+    await modal.getByRole('button', { name: 'Skills', exact: true }).click()
+    await expect(modal.getByRole('list', { name: 'Available skills' })).toContainText('/youtube')
     await modal.getByRole('list', { name: 'Available skills' }).scrollIntoViewIfNeeded()
     await page.screenshot({ path: 'artifacts/ui-review/ai-settings-organized-skills.png' })
 
+    await modal.getByRole('button', { name: 'AI assistant', exact: true }).click()
     await resizeWindow(app, 800, 700)
     await modal.locator('wa-select[aria-label="ChatGPT account"]').scrollIntoViewIfNeeded()
     await checkControls(page)

@@ -488,7 +488,7 @@ export class AiComposer extends LitElement {
           error ??
           (skills.length
             ? 'No matching skills.'
-            : 'No personal skills found. Add one in AI Settings.')
+            : 'No personal skills found. Add one in Settings > Skills.')
       }
       return
     }

@@ -437,7 +437,7 @@ test.describe('workspace UI', () => {
     })
     expect(result.isEditor).toBe(false)
     expect(result.inSettings).toBe(true)
-    await modal.locator('.nav-btn', { hasText: 'Advanced' }).click()
+    await modal.locator('.nav-btn', { hasText: 'System' }).click()
     await modal.locator('button.danger-btn', { hasText: 'Reset All' }).click()
     const confirmation = page.locator('writemd-confirm wa-dialog dialog')
     await expect(confirmation).toBeVisible()

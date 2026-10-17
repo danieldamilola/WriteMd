@@ -52,14 +52,12 @@ test.describe('Settings search', () => {
     const search = modal.locator('.sidebar-search writemd-search-bar input')
 
     await search.fill('page size')
-    await expect
-      .poll(() => modal.locator('.content-panel').getAttribute('data-tab'))
-      .toBe('advanced')
+    await expect.poll(() => modal.locator('.content-panel').getAttribute('data-tab')).toBe('export')
     await expect(
       modal.locator('.setting-row.search-hit', { hasText: 'PDF page size' })
     ).toHaveCount(1)
 
-    // "pdf" hits three rows in Advanced; ArrowDown walks them.
+    // "pdf" hits three rows in Export; ArrowDown walks them.
     await search.fill('pdf')
     await expect(modal.locator('.setting-row.search-hit')).toHaveCount(3)
     await expect(modal.locator('.setting-row.search-hit-active')).toHaveCount(1)
@@ -87,8 +85,8 @@ test.describe('Settings search', () => {
     await expect(modal.locator('.nav-section:visible')).toHaveCount(1)
     await expect(modal.locator('.nav-group:visible')).toHaveText('Workspace')
     await search.fill('new notes')
-    await expect(modal.locator('.content-panel')).toHaveAttribute('data-tab', 'general')
-    await expect(modal.locator('.nav-btn:visible')).toHaveText('New notes')
+    await expect(modal.locator('.content-panel')).toHaveAttribute('data-tab', 'files')
+    await expect(modal.locator('.nav-btn:visible')).toHaveText('Files & vault')
     await expect(modal.locator('.search-status')).toHaveText('1 matching section')
     await search.fill('')
     await expect(modal.locator('.nav-section:visible')).toHaveCount(GROUP_COUNT)

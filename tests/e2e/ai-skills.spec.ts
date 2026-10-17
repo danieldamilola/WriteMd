@@ -68,7 +68,7 @@ for (const surface of ['panel', 'floating'] as const) {
       })
       await textarea.fill('/')
       await expect(composer.getByRole('status')).toHaveText(
-        'No personal skills found. Add one in AI Settings.'
+        'No personal skills found. Add one in Settings > Skills.'
       )
       await expect(composer.getByRole('option')).toHaveCount(0)
       await page.screenshot({ path: `artifacts/ui-review/ai-${surface}-slash-empty.png` })
@@ -158,7 +158,7 @@ test('personal skills are selectable, discoverable in Settings, and sent only on
     await expect(page.locator('writemd-editor')).toBeVisible()
     await page.keyboard.press('Control+,')
     const settings = page.locator('writemd-settings-modal')
-    await settings.getByRole('button', { name: 'AI assistant', exact: true }).click()
+    await settings.getByRole('button', { name: 'Skills', exact: true }).click()
     await expect(
       settings.getByRole('button', { name: 'Open skills folder', exact: true })
     ).toBeVisible()

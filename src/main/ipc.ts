@@ -64,6 +64,7 @@ import { statOrNull } from './ai/paths'
 import { chatgptAuth, cancelChatgptLogin, CHATGPT_API_BASE } from './ai/chatgpt-auth'
 import { chatgptModels } from './ai/providers/chatgpt'
 import { cancelAll } from './ai/service'
+import { getHardwareAccelerationSetting } from './hardware-acceleration'
 
 /** A model listing is a single small GET; anything slower is a wrong endpoint. */
 const MODEL_LIST_TIMEOUT_MS = 20_000
@@ -124,6 +125,13 @@ export function setupIpc(getWindow: () => BrowserWindow | null): void {
     app.getPath(name)
   )
   ipcMain.handle('app:quit', () => app.quit())
+  ipcMain.handle('app:get-hardware-acceleration-setting', getHardwareAccelerationSetting)
+  ipcMain.handle('app:restart', async () => {
+    // Join the serialized settings queue before replacing the process.
+    await setSettings({})
+    app.relaunch()
+    app.quit()
+  })
 
   ipcMain.handle('window:minimize', () => getWindow()?.minimize())
   ipcMain.handle('window:maximize', () => {

@@ -4,12 +4,13 @@ import type { SettingsStore } from '../../src/renderer/src/state/settings'
 
 const fixture = makeFixture('settings-consistency')
 const categories = [
-  'New notes',
   'Editor',
   'Files & vault',
   'Appearance',
   'Keyboard shortcuts',
-  'Advanced',
+  'Export',
+  'Skills',
+  'System',
   'About WriteMd'
 ]
 const fonts = ['Inter', 'Manrope', 'DM Sans', 'Space Grotesk', 'JetBrains Mono', 'Geist Mono']
@@ -152,7 +153,7 @@ test.describe('Settings consistency', () => {
   test('custom dropdown supports selection, keyboard input, Escape, and persistence', async () => {
     await openSettings(page)
     const modal = page.locator('writemd-settings-modal')
-    await modal.locator('.nav-btn', { hasText: 'Advanced' }).click()
+    await modal.locator('.nav-btn', { hasText: 'Export' }).click()
     await chooseSettingsOption(page, 'PDF page size', 'Letter')
     const size = modal.locator('wa-select[aria-label="PDF page size"]')
     await expect(size).toHaveJSProperty('value', 'Letter')

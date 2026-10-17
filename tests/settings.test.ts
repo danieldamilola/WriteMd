@@ -23,6 +23,25 @@ describe('settings persistence', () => {
     vi.resetModules()
   })
 
+  it('keeps GPU acceleration on for existing profiles and persists an explicit opt-out', async () => {
+    mockElectron()
+    writeFileSync(CONFIG, JSON.stringify({ advanced: { enableMermaid: false } }))
+    const { getSettings, setSettings } = await import('../src/main/settings')
+    expect(getSettings().advanced.hardwareAcceleration).toBe(true)
+    await setSettings({ advanced: { hardwareAcceleration: false } })
+    vi.resetModules()
+    const reloaded = await import('../src/main/settings')
+    expect(reloaded.getSettings().advanced.hardwareAcceleration).toBe(false)
+    expect(reloaded.getSettings().advanced.enableMermaid).toBe(false)
+  })
+
+  it.each(['false', 0, null])('ignores malformed GPU preference %j', async (value) => {
+    mockElectron()
+    writeFileSync(CONFIG, JSON.stringify({ advanced: { hardwareAcceleration: value } }))
+    const { getSettings } = await import('../src/main/settings')
+    expect(getSettings().advanced.hardwareAcceleration).toBe(true)
+  })
+
   it.each(['openrouter', 'deepseek', 'groq', 'mistral', 'xai'])(
     'loads and persists the %s provider',
     async (providerId) => {

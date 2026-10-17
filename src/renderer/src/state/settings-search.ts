@@ -1,23 +1,32 @@
 export type SettingsTab =
-  'general' | 'appearance' | 'editor' | 'files' | 'ai' | 'shortcuts' | 'advanced' | 'about'
+  'editor' | 'files' | 'export' | 'appearance' | 'shortcuts' | 'ai' | 'skills' | 'system' | 'about'
 
 /** Human labels used both by the nav buttons and by search filtering. */
 export const TAB_LABELS: Record<SettingsTab, string> = {
-  general: 'New notes',
-  appearance: 'Appearance',
   editor: 'Editor',
   files: 'Files & vault',
-  ai: 'AI assistant',
+  export: 'Export',
+  appearance: 'Appearance',
   shortcuts: 'Keyboard shortcuts',
-  advanced: 'Advanced',
+  ai: 'AI assistant',
+  skills: 'Skills',
+  system: 'System',
   about: 'About WriteMd'
 }
 
 export const SETTINGS_NAV_GROUPS: { label: string; tabs: SettingsTab[] }[] = [
-  { label: 'Writing', tabs: ['general', 'editor', 'files'] },
+  { label: 'Writing', tabs: ['editor', 'files', 'export'] },
   { label: 'Workspace', tabs: ['appearance', 'shortcuts'] },
-  { label: 'Application', tabs: ['ai', 'advanced', 'about'] }
+  { label: 'Assistant', tabs: ['ai', 'skills'] },
+  { label: 'Application', tabs: ['system', 'about'] }
 ]
+
+/** Keep existing section links useful after reorganizing the navigation. */
+export function resolveSettingsTab(tab: string): SettingsTab {
+  if (tab === 'general') return 'files'
+  if (tab === 'advanced') return 'system'
+  return Object.hasOwn(TAB_LABELS, tab) ? (tab as SettingsTab) : 'editor'
+}
 
 /**
  * Section keywords: words that mean "this section is worth a look" even when
@@ -25,15 +34,19 @@ export const SETTINGS_NAV_GROUPS: { label: string; tabs: SettingsTab[] }[] = [
  * SETTINGS_ROW_INDEX, which is what routes a search to the right section.
  */
 export const SETTINGS_SEARCH_INDEX: Record<SettingsTab, string> = {
-  general: 'general new files default file name untitled workspace',
   appearance:
-    'appearance theme dark graphite nord midnight light paper dracula accent color panel orientation horizontal vertical tabs side rail top bar layout window full screen shell',
-  editor: 'editor font family size word wrap line numbers source mode highlight active line',
-  files: 'files vault location path storage folder recent tabs open disk',
+    'appearance theme dark graphite nord midnight light paper dracula accent color panel orientation horizontal vertical tabs side rail top bar layout window full screen shell file path footer',
+  editor:
+    'editor font family size word wrap line numbers source mode highlight active line markdown preview mermaid diagrams',
+  files:
+    'files vault location path storage folder recent tabs open disk general new notes default file name untitled saving auto save',
+  export: 'export pdf page size theme margin paper a4 a5 letter legal tabloid',
   ai: 'ai assistant model provider openai anthropic gemini openrouter deepseek groq mistral xai grok ollama lmstudio api key endpoint fetch models history privacy local cloud',
   shortcuts: 'shortcuts keyboard keys bindings commands rebind reset',
-  advanced:
-    'advanced features mermaid diagrams export pdf page size theme margin paper a4 letter legal danger reset preferences factory defaults',
+  skills:
+    'skills personal instructions skill.md slash commands writing proofread vault folder refresh',
+  system:
+    'system advanced performance hardware acceleration gpu graphics rendering restart reset preferences factory defaults',
   about: 'about version updates release notes whats new auto check download restart install'
 }
 
@@ -54,9 +67,9 @@ export interface SettingsRowEntry {
 
 export const SETTINGS_ROW_INDEX: SettingsRowEntry[] = [
   {
-    tab: 'general',
+    tab: 'files',
     label: 'Default file name',
-    terms: 'new vault files name untitled'
+    terms: 'new notes vault files name untitled'
   },
   {
     tab: 'appearance',
@@ -84,7 +97,7 @@ export const SETTINGS_ROW_INDEX: SettingsRowEntry[] = [
     terms: 'gutter show source mode'
   },
   {
-    tab: 'editor',
+    tab: 'appearance',
     label: 'File Path',
     terms: 'footer hide path location breadcrumb'
   },
@@ -114,7 +127,7 @@ export const SETTINGS_ROW_INDEX: SettingsRowEntry[] = [
     terms: 'maximum response length tokens reasoning thinking automatic draft article'
   },
   {
-    tab: 'ai',
+    tab: 'skills',
     label: 'Personal skills',
     terms: 'skill.md writing instructions slash commands open skills folder refresh'
   },
@@ -150,27 +163,32 @@ export const SETTINGS_ROW_INDEX: SettingsRowEntry[] = [
     terms: 'restore all bindings defaults rebind'
   },
   {
-    tab: 'advanced',
+    tab: 'system',
+    label: 'Hardware acceleration',
+    terms: 'performance gpu graphics rendering restart'
+  },
+  {
+    tab: 'editor',
     label: 'Enable Mermaid',
     terms: 'render diagrams live preview features'
   },
   {
-    tab: 'advanced',
+    tab: 'export',
     label: 'PDF page size',
     terms: 'export paper a4 a5 letter legal tabloid'
   },
   {
-    tab: 'advanced',
+    tab: 'export',
     label: 'PDF theme',
     terms: 'export color scheme light dark'
   },
   {
-    tab: 'advanced',
+    tab: 'export',
     label: 'PDF margin',
     terms: 'export page millimeters'
   },
   {
-    tab: 'advanced',
+    tab: 'system',
     label: 'Reset Preferences',
     terms: 'restore all options factory defaults danger zone'
   },
@@ -204,6 +222,8 @@ function includesAll(haystack: string, tokens: string[]): boolean {
 /** A named category takes precedence over incidental words in row descriptions. */
 export function exactSettingsTab(query: string): SettingsTab | undefined {
   const normalized = searchTokens(query).join(' ')
+  if (normalized === 'general' || normalized === 'new notes') return 'files'
+  if (normalized === 'advanced') return 'system'
   return (Object.keys(TAB_LABELS) as SettingsTab[]).find(
     (tab) => searchTokens(TAB_LABELS[tab]).join(' ') === normalized
   )

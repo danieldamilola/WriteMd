@@ -11,6 +11,9 @@ import { seedWelcomeNote } from './welcome-note'
 import { registerFileAssociations } from './file-associations'
 import { setupUpdater } from './updater'
 import { applyWindowMaterial } from './appearance'
+import { configureHardwareAcceleration } from './hardware-acceleration'
+
+configureHardwareAcceleration()
 
 let mainWindow: BrowserWindow | null = null
 

@@ -276,7 +276,7 @@ export class WriteMdApp extends LitElement {
   private settingsFocusReturn: HTMLElement | null = null
   // Which Settings tab to land on, so a deep link can open the exact section
   // it wants rather than leaving the user to find it.
-  @state() private settingsTab = 'general'
+  @state() private settingsTab = 'editor'
   @state() private showPalette = false
   @state() private splitActive = false
   @state() private aiEnabled = false
@@ -722,7 +722,7 @@ export class WriteMdApp extends LitElement {
     window.addEventListener('drop', this.handleWindowDrop)
     this.teardownAutoHideScrollbars = initAutoHideScrollbars()
     this.unsubscribeSettingsOpen = on('settings:open', ({ tab }) => {
-      this.settingsTab = tab ?? 'general'
+      this.settingsTab = tab ?? 'editor'
       this.closeQuickAiForDialog()
       this.openSettings()
     })

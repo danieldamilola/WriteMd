@@ -21,10 +21,10 @@ async function settle(element: SettingsModal): Promise<void> {
   await element.updateComplete
 }
 
-async function mount(): Promise<SettingsModal> {
+async function mount(tab: 'ai' | 'skills' = 'ai'): Promise<SettingsModal> {
   const element = new SettingsModal()
   element.embedded = true
-  element.initialTab = 'ai'
+  element.initialTab = tab
   document.body.append(element)
   await settle(element)
   return element
@@ -146,7 +146,7 @@ describe('AI model discovery in Settings', () => {
       skills: [],
       warnings: []
     })
-    const element = await mount()
+    const element = await mount('skills')
     listSkills.mockResolvedValueOnce({
       folder: 'C:/vault/Skills',
       skills: [{ name: 'proofread', description: 'Keep my voice' }],
@@ -173,7 +173,7 @@ describe('AI model discovery in Settings', () => {
   })
 
   it('shows restart guidance instead of a raw missing skills folder handler error', async () => {
-    const element = await mount()
+    const element = await mount('skills')
     openSkillsFolder.mockRejectedValueOnce(
       new Error(
         "Error invoking remote method 'ai:open-skills-folder': Error: No handler registered for 'ai:open-skills-folder'"
@@ -193,7 +193,7 @@ describe('AI model discovery in Settings', () => {
 
   it('sanitizes missing list handlers and general skill discovery failures', async () => {
     listSkills.mockRejectedValueOnce(new Error("No handler registered for 'ai:list-skills'"))
-    const element = await mount()
+    const element = await mount('skills')
     expect(element.shadowRoot!.querySelector('[role="alert"]')?.textContent).toBe(
       'Restart WriteMd to finish enabling skills, then try again.'
     )

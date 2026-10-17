@@ -65,7 +65,7 @@ Available models, usage limits, and service tiers depend on the provider and you
 
 ### Add your own skills
 
-Open **Settings > AI assistant > Skills > Open skills folder**. Add a Markdown instruction file, or a folder containing `SKILL.md`, then select it by typing `/` at the start of a prompt.
+Open **Settings > Skills > Open skills folder**. Add a Markdown instruction file, or a folder containing `SKILL.md`, then select it by typing `/` at the start of a prompt.
 
 ```text
 Your vault/

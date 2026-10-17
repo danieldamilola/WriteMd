@@ -82,6 +82,10 @@ function dropRemovedFeatures(settings: WriteMdSettings): WriteMdSettings {
   const next = {
     ...settings,
     appearance: { ...settings.appearance },
+    advanced: {
+      ...settings.advanced,
+      hardwareAcceleration: settings.advanced.hardwareAcceleration !== false
+    },
     ai: {
       ...settings.ai,
       autoAcceptEdits: settings.ai.autoAcceptEdits === true,

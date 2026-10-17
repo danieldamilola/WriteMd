@@ -20,6 +20,7 @@ import type { AiSkillsView } from '../../../shared/ai/skills'
 import { deepActiveElement } from '../utils/links'
 import { MOTION_LABELS, MOTION_PREFERENCES, type MotionPreference } from '../utils/motion'
 import { SettingsStore } from '../state/settings'
+import { FileState } from '../state/file-state'
 import { ChatgptState } from '../state/chatgpt'
 import { EMPTY_CHATGPT_AUTH, type ChatgptAuthView } from '../../../shared/ai/chatgpt'
 import { showConfirm } from './ConfirmDialog'
@@ -39,6 +40,7 @@ import {
   TAB_LABELS,
   SETTINGS_NAV_GROUPS,
   exactSettingsTab,
+  resolveSettingsTab,
   searchSettingsRows,
   searchSettingsTabs,
   searchTargetTab,
@@ -74,13 +76,14 @@ const FONT_FAMILIES = [
 ]
 
 const NAV_ICONS: Record<SettingsTab, string> = {
-  general: 'file-text',
+  export: 'download',
+  skills: 'file-text',
   editor: 'pencil',
   files: 'folder-open',
   appearance: 'palette',
   ai: 'ai',
   shortcuts: 'keyboard',
-  advanced: 'settings',
+  system: 'settings',
   about: 'info'
 }
 
@@ -823,12 +826,12 @@ export class SettingsModal extends LitElement {
     `
   ]
 
-  @state() private tab: SettingsTab = 'general'
+  @state() private tab: SettingsTab = 'editor'
   @state() private searchQuery = ''
 
   /** Jump to a tab from outside, e.g. a deep link from another component. */
   @property({ type: Boolean }) embedded = false
-  @property({ type: String }) initialTab: SettingsTab = 'general'
+  @property({ type: String }) initialTab: SettingsTab | 'general' | 'advanced' = 'editor'
 
   /**
    * `willUpdate`, not `connectedCallback`: Lit commits `.prop` bindings when it
@@ -836,7 +839,7 @@ export class SettingsModal extends LitElement {
    * reading `initialTab` there always saw the default.
    */
   protected willUpdate(changed: PropertyValues<this>): void {
-    if (changed.has('initialTab')) this.tab = this.initialTab
+    if (changed.has('initialTab')) this.tab = resolveSettingsTab(this.initialTab)
   }
 
   // Settings State
@@ -850,6 +853,10 @@ export class SettingsModal extends LitElement {
   @state() private lineNumbers = false
   @state() private showFilePath = true
   @state() private enableMermaid = true
+  @state() private hardwareAcceleration = true
+  @state() private startupHardwareAcceleration: boolean | null = null
+  @state() private restarting = false
+  @state() private restartError = ''
   @state() private defaultNewFileName = 'Untitled.md'
   @state() private pdfPageSize = 'A4'
   @state() private pdfTheme = 'light'
@@ -901,6 +908,10 @@ export class SettingsModal extends LitElement {
   connectedCallback(): void {
     super.connectedCallback()
     this.loadCurrentSettings()
+    void api()
+      ?.app?.getHardwareAccelerationSetting?.()
+      .then((enabled) => (this.startupHardwareAcceleration = enabled))
+      .catch(() => undefined)
     void this.loadAiPresets()
     void this.loadAiSkills()
     this.settingsSubscriptions = [
@@ -929,6 +940,7 @@ export class SettingsModal extends LitElement {
         }
       }),
       this.settingsStore.subscribeSaveStatus(() => this.requestUpdate()),
+      this.settingsStore.subscribe('advanced', () => this.loadCurrentSettings()),
       this.settingsStore.subscribe('ai', () => {
         const changed =
           this.aiProviderId !== this.settingsStore.get('ai.providerId', 'openai') ||
@@ -1019,6 +1031,7 @@ export class SettingsModal extends LitElement {
     this.showFilePath = s.get('editor.showFilePath', true)
     this.vaultPath = s.get('files.vaultPath', '')
     this.enableMermaid = s.get('advanced.enableMermaid', true)
+    this.hardwareAcceleration = s.get('advanced.hardwareAcceleration', true)
     this.defaultNewFileName = s.get('files.defaultNewFileName', 'Untitled.md')
     this.pdfPageSize = s.get('export.pdfPageSize', 'A4')
     this.pdfTheme = s.get('export.pdfTheme', 'light')
@@ -1485,13 +1498,14 @@ export class SettingsModal extends LitElement {
 
           <div class="content-panel" data-tab=${this.tab}>
             <div class="content-inner">
-              ${this.tab === 'general' ? this.renderGeneral() : ''}
+              ${this.tab === 'export' ? this.renderExport() : ''}
               ${this.tab === 'appearance' ? this.renderAppearance() : ''}
               ${this.tab === 'editor' ? this.renderEditor() : ''}
               ${this.tab === 'files' ? this.renderFiles() : ''}
               ${this.tab === 'ai' ? this.renderAi() : ''}
               ${this.tab === 'shortcuts' ? this.renderShortcuts() : ''}
-              ${this.tab === 'advanced' ? this.renderAdvanced() : ''}
+              ${this.tab === 'system' ? this.renderSystem() : ''}
+              ${this.tab === 'skills' ? this.renderSkills() : ''}
               ${this.tab === 'about' ? this.renderAbout() : ''}
             </div>
           </div>
@@ -1505,23 +1519,21 @@ export class SettingsModal extends LitElement {
         >`
   }
 
-  private renderGeneral(): unknown {
+  private renderNewNoteDefaults(): unknown {
     return html`
-      <div class="section-title">New notes</div>
-      <div class="section">
-        <div class="setting-row">
-          <div>
-            <div class="setting-label">Default file name</div>
-            <div class="setting-desc">Name used for new vault files</div>
-          </div>
-          <input
-            type="text"
-            class="text-input"
-            .value=${this.defaultNewFileName}
-            @change=${(e: Event) =>
-              this.updateSetting('files.defaultNewFileName', (e.target as HTMLInputElement).value)}
-          />
+      <div class="setting-row">
+        <div>
+          <div class="setting-label">Default file name</div>
+          <div class="setting-desc">Name used for new vault files</div>
         </div>
+        <input
+          type="text"
+          class="text-input"
+          aria-label="Default file name"
+          .value=${this.defaultNewFileName}
+          @change=${(e: Event) =>
+            this.updateSetting('files.defaultNewFileName', (e.target as HTMLInputElement).value)}
+        />
       </div>
     `
   }
@@ -1555,7 +1567,7 @@ export class SettingsModal extends LitElement {
         </div>
       </div>
 
-      <div class="section-title">Accent Color</div>
+      <div class="section-title">Accent color</div>
       <div class="section">
         <div class="color-row">
           ${ACCENT_COLORS.map(
@@ -1628,6 +1640,19 @@ export class SettingsModal extends LitElement {
             ${MOTION_PREFERENCES.map((preference) => html`<wa-option value=${preference}>${MOTION_LABELS[preference]}</wa-option>`)}
           </wa-select>
         </div>
+        <div class="setting-row">
+          <div>
+            <div class="setting-label">File Path</div>
+            <div class="setting-desc">Show the document path on the left of the footer</div>
+          </div>
+          <button
+            class="toggle-switch"
+            role="switch"
+            aria-checked="${this.showFilePath}"
+            aria-label="File path"
+            @click=${() => this.updateSetting('editor.showFilePath', !this.showFilePath)}
+          ></button>
+        </div>
       </div>
     `
   }
@@ -1670,10 +1695,6 @@ export class SettingsModal extends LitElement {
             `
           )}
         </div>
-      </div>
-
-      <div class="section-title">Preferences</div>
-      <div class="section">
         <div class="setting-row">
           <div>
             <div class="setting-label">Font Size</div>
@@ -1688,7 +1709,10 @@ export class SettingsModal extends LitElement {
               this.updateSetting('editor.fontSize', parseInt((e.target as HTMLInputElement).value))}
           />
         </div>
+      </div>
 
+      <div class="section-title">Editing</div>
+      <div class="section">
         <div class="setting-row">
           <div>
             <div class="setting-label">Word Wrap</div>
@@ -1716,18 +1740,21 @@ export class SettingsModal extends LitElement {
             @click=${() => this.updateSetting('editor.showLineNumbers', !this.lineNumbers)}
           ></button>
         </div>
+      </div>
 
+      <div class="section-title">Markdown preview</div>
+      <div class="section">
         <div class="setting-row">
           <div>
-            <div class="setting-label">File Path</div>
-            <div class="setting-desc">Show the document path on the left of the footer</div>
+            <div class="setting-label">Enable Mermaid</div>
+            <div class="setting-desc">Render Mermaid diagrams in live preview</div>
           </div>
           <button
             class="toggle-switch"
             role="switch"
-            aria-checked="${this.showFilePath}"
-            aria-label="File path"
-            @click=${() => this.updateSetting('editor.showFilePath', !this.showFilePath)}
+            aria-checked="${this.enableMermaid}"
+            aria-label="Enable Mermaid"
+            @click=${() => this.updateSetting('advanced.enableMermaid', !this.enableMermaid)}
           ></button>
         </div>
       </div>
@@ -1736,7 +1763,7 @@ export class SettingsModal extends LitElement {
 
   private renderFiles(): unknown {
     return html`
-      <div class="section-title">Storage</div>
+      <div class="section-title">Vault</div>
       <div class="section">
         <div class="setting-row">
           <div>
@@ -1745,7 +1772,11 @@ export class SettingsModal extends LitElement {
           </div>
           <button class="control-btn" @click=${this.handleVaultSelect}>Change</button>
         </div>
+      </div>
 
+      <div class="section-title">Notes</div>
+      <div class="section">
+        ${this.renderNewNoteDefaults()}
         <div class="setting-row">
           <div>
             <div class="setting-label">Auto-save</div>
@@ -1767,7 +1798,7 @@ export class SettingsModal extends LitElement {
     const overrides = this.shortcutOverrides()
     const categories = [...new Set(COMMANDS.map((c) => c.category))]
     return html`
-      <div class="section-title">Keyboard Shortcuts</div>
+      <div class="section-title">Keyboard shortcuts</div>
       <div class="section">
         <div class="setting-desc" style="margin-bottom: 8px;">
           Click a binding to rebind it. Backspace clears, Esc cancels.
@@ -2424,50 +2455,6 @@ export class SettingsModal extends LitElement {
           </div>
         </div>
 
-        <div class="section-title">Skills</div>
-        <div class="section">
-          <div class="setting-row">
-            <div>
-              <div class="setting-label">Personal skills</div>
-              <div class="setting-desc">
-                Add <code>proofread.md</code> or <code>proofread/SKILL.md</code> in your vault's
-                <code>Skills</code> folder. Start a prompt with <code>/proofread</code> to use it.
-                Instructions only; scripts are not run.
-              </div>
-            </div>
-            <div class="control-group ai-skills-actions">
-              <button class="control-btn" @click=${() => void this.openAiSkillsFolder()}>
-                Open skills folder
-              </button>
-              <button class="control-btn" @click=${() => void this.loadAiSkills()}>
-                Refresh skills
-              </button>
-            </div>
-          </div>
-          ${
-            this.aiSkills
-              ? html`<div class="setting-desc ai-skills-path">${this.aiSkills.folder}</div>
-                  ${
-                    this.aiSkills.skills.length
-                      ? html`<ul class="ai-skill-list" aria-label="Available skills">
-                          ${this.aiSkills.skills.map(
-                            (skill) =>
-                              html` <li>
-                                <div class="setting-label"><code>/${skill.name}</code></div>
-                                <div class="setting-desc">${skill.description}</div>
-                              </li>`
-                          )}
-                        </ul>`
-                      : html`<div class="setting-desc">
-                          No skills added yet. Files are read fresh when you send a prompt.
-                        </div>`
-                  }
-                  ${this.aiSkills.warnings.map((warning) => html`<div class="setting-desc ai-skill-warning" role="status">${warning}</div>`)}`
-              : ''
-          }
-          ${this.aiSkillsError ? html`<div class="setting-desc" role="alert">${this.aiSkillsError}</div>` : ''}
-        </div>
-
         <div class="section-title">Privacy</div>
         <div class="section">
           <div class="setting-desc">
@@ -2480,26 +2467,140 @@ export class SettingsModal extends LitElement {
     `
   }
 
-  private renderAdvanced(): unknown {
-    return html`
-      <div class="section-title">Features</div>
+  private renderSkills(): unknown {
+    return html`<div class="ai-settings">
+      <div class="section-title">Skills</div>
       <div class="section">
         <div class="setting-row">
           <div>
-            <div class="setting-label">Enable Mermaid</div>
-            <div class="setting-desc">Render Mermaid diagrams in live preview</div>
+            <div class="setting-label">Personal skills</div>
+            <div class="setting-desc">
+              Add <code>proofread.md</code> or <code>proofread/SKILL.md</code> in your vault's
+              <code>Skills</code> folder. Start a prompt with <code>/proofread</code> to use it.
+              Instructions only; scripts are not run.
+            </div>
+          </div>
+          <div class="control-group ai-skills-actions">
+            <button class="control-btn" @click=${() => void this.openAiSkillsFolder()}>
+              Open skills folder
+            </button>
+            <button class="control-btn" @click=${() => void this.loadAiSkills()}>
+              Refresh skills
+            </button>
+          </div>
+        </div>
+        ${
+          this.aiSkills
+            ? html`<div class="setting-desc ai-skills-path">${this.aiSkills.folder}</div>
+                ${
+                  this.aiSkills.skills.length
+                    ? html`<ul class="ai-skill-list" aria-label="Available skills">
+                        ${this.aiSkills.skills.map(
+                          (skill) =>
+                            html` <li>
+                              <div class="setting-label"><code>/${skill.name}</code></div>
+                              <div class="setting-desc">${skill.description}</div>
+                            </li>`
+                        )}
+                      </ul>`
+                    : html`<div class="setting-desc">
+                        No skills added yet. Files are read fresh when you send a prompt.
+                      </div>`
+                }
+                ${this.aiSkills.warnings.map((warning) => html`<div class="setting-desc ai-skill-warning" role="status">${warning}</div>`)}`
+            : ''
+        }
+        ${this.aiSkillsError ? html`<div class="setting-desc" role="alert">${this.aiSkillsError}</div>` : ''}
+      </div>
+    </div>`
+  }
+
+  private async restartForGraphics(): Promise<void> {
+    if (this.restarting) return
+    this.restarting = true
+    this.restartError = ''
+    try {
+      if (!(await this.settingsStore.whenSaved())) {
+        this.restartError = 'Settings could not be saved. Retry saving before restarting.'
+        return
+      }
+      const files = FileState.getInstance().getState()
+      if (files.dirty || files.tabs.some((tab) => tab.dirty) || files.secondaryDoc?.dirty) {
+        this.restartError = 'Save your notes before restarting WriteMd.'
+        return
+      }
+      const restart = api()?.app?.restart
+      if (!restart) throw new Error('Restart is unavailable')
+      await restart()
+    } catch {
+      this.restartError = 'Could not restart WriteMd. Close and reopen it to apply this change.'
+    } finally {
+      this.restarting = false
+    }
+  }
+
+  private renderSystem(): unknown {
+    return html`
+      <div class="section-title">Performance</div>
+      <div class="section">
+        <div class="setting-row">
+          <div>
+            <div class="setting-label">Hardware acceleration</div>
+            <div class="setting-desc">
+              Use the GPU to render the interface. Turn off to troubleshoot graphics issues.
+              Requires a restart.
+            </div>
           </div>
           <button
             class="toggle-switch"
             role="switch"
-            aria-checked="${this.enableMermaid}"
-            aria-label="Enable Mermaid"
-            @click=${() => this.updateSetting('advanced.enableMermaid', !this.enableMermaid)}
+            aria-checked=${this.hardwareAcceleration}
+            aria-label="Hardware acceleration"
+            ?disabled=${this.restarting}
+            @click=${() => {
+              this.restartError = ''
+              this.updateSetting('advanced.hardwareAcceleration', !this.hardwareAcceleration)
+            }}
           ></button>
         </div>
+        ${
+          this.startupHardwareAcceleration !== null &&
+          this.hardwareAcceleration !== this.startupHardwareAcceleration
+            ? html`<div class="setting-row">
+                <div class="setting-desc" role="status">Restart WriteMd to apply this change.</div>
+                <button
+                  class="control-btn"
+                  ?disabled=${this.restarting}
+                  @click=${this.restartForGraphics}
+                >
+                  ${this.restarting ? 'Restarting…' : 'Restart WriteMd'}
+                </button>
+              </div>`
+            : ''
+        }
+        ${
+          this.restartError
+            ? html`<div class="setting-desc" role="alert">${this.restartError}</div>`
+            : ''
+        }
       </div>
 
-      <div class="section-title">Export</div>
+      <div class="section-title">Reset preferences</div>
+      <div class="section">
+        <div class="setting-row">
+          <div>
+            <div class="setting-label">Reset Preferences</div>
+            <div class="setting-desc">Restore all options to their factory defaults</div>
+          </div>
+          <button class="control-btn danger-btn" @click=${this.handleReset}>Reset All</button>
+        </div>
+      </div>
+    `
+  }
+
+  private renderExport(): unknown {
+    return html`
+      <div class="section-title">PDF export</div>
       <div class="section">
         <div class="setting-row">
           <div>
@@ -2554,17 +2655,6 @@ export class SettingsModal extends LitElement {
           />
         </div>
       </div>
-
-      <div class="section-title">Danger Zone</div>
-      <div class="section">
-        <div class="setting-row">
-          <div>
-            <div class="setting-label">Reset Preferences</div>
-            <div class="setting-desc">Restore all options to their factory defaults</div>
-          </div>
-          <button class="control-btn danger-btn" @click=${this.handleReset}>Reset All</button>
-        </div>
-      </div>
     `
   }
 
@@ -2605,6 +2695,17 @@ export class SettingsModal extends LitElement {
         </div>
         <div class="setting-row">
           <div>
+            <div class="setting-label">Release notes</div>
+            <div class="setting-desc">See what changed in this version</div>
+          </div>
+          <button class="control-btn" @click=${this.handleShowWhatsNew}>What's new</button>
+        </div>
+      </div>
+
+      <div class="section-title">Updates</div>
+      <div class="section">
+        <div class="setting-row">
+          <div>
             <div class="setting-label">Auto-check for updates</div>
             <div class="setting-desc">Quietly check for updates in the background</div>
           </div>
@@ -2615,13 +2716,6 @@ export class SettingsModal extends LitElement {
             aria-label="Auto-check for updates"
             @click=${() => this.updateSetting('updates.autoCheckForUpdates', !this.autoCheckForUpdates)}
           ></button>
-        </div>
-        <div class="setting-row">
-          <div>
-            <div class="setting-label">Release notes</div>
-            <div class="setting-desc">See what changed in this version</div>
-          </div>
-          <button class="control-btn" @click=${this.handleShowWhatsNew}>What's new</button>
         </div>
         <div class="setting-row">
           <div>

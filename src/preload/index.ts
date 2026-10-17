@@ -26,6 +26,9 @@ const writemdAPI = {
   },
   app: {
     getBuildInfo: () => ipcRenderer.invoke('app:get-build-info'),
+    getHardwareAccelerationSetting: () =>
+      ipcRenderer.invoke('app:get-hardware-acceleration-setting'),
+    restart: () => ipcRenderer.invoke('app:restart'),
     getVersion: () => ipcRenderer.invoke('app:get-version'),
     getPath: (name: 'home' | 'documents' | 'downloads' | 'temp') =>
       ipcRenderer.invoke('app:get-path', name),

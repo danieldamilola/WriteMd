@@ -208,6 +208,8 @@ export interface ElectronAPI {
   }
   app: {
     getBuildInfo: () => Promise<AppBuildInfo>
+    getHardwareAccelerationSetting: () => Promise<boolean>
+    restart: () => Promise<void>
     getVersion: () => Promise<string>
     getPath: (name: 'home' | 'documents' | 'downloads' | 'temp') => Promise<string>
     quit: () => Promise<void>

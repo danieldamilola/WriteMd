@@ -1,6 +1,6 @@
 # Personal AI skills
 
-Open **Settings > AI assistant > Skills > Open skills folder**.
+Open **Settings > Skills > Open skills folder**.
 WriteMd creates a visible `Skills` folder inside your vault when it starts or you change vaults.
 Skills stay with that vault.
 

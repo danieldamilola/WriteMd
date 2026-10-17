@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   TAB_LABELS,
+  resolveSettingsTab,
   searchSettingsRows,
   searchSettingsTabs,
   searchTargetTab,
@@ -8,6 +9,24 @@ import {
 } from '../src/renderer/src/state/settings-search'
 
 describe('searchSettingsTabs', () => {
+  it('keeps existing section links and moved settings reachable', () => {
+    expect(resolveSettingsTab('general')).toBe('files')
+    expect(resolveSettingsTab('advanced')).toBe('system')
+    expect(resolveSettingsTab('export')).toBe('export')
+    expect(resolveSettingsTab('unknown')).toBe('editor')
+    for (const [query, tab] of [
+      ['mermaid', 'editor'],
+      ['file path', 'appearance'],
+      ['new notes', 'files'],
+      ['pdf margin', 'export'],
+      ['personal skills', 'skills'],
+      ['gpu', 'system'],
+      ['updates', 'about']
+    ]) {
+      expect(searchTargetTab(query), query).toBe(tab)
+    }
+  })
+
   it('returns every tab on an empty query', () => {
     // Counted from TAB_LABELS rather than hardcoded, so adding a section does
     // not fail here for a reason unrelated to what this test is about.
@@ -27,15 +46,15 @@ describe('searchSettingsTabs', () => {
   })
 
   it('finds renamed categories and keeps the previous General search term', () => {
-    expect(searchTargetTab('new notes')).toBe('general')
-    expect(searchTargetTab('general')).toBe('general')
+    expect(searchTargetTab('new notes')).toBe('files')
+    expect(searchTargetTab('general')).toBe('files')
     expect(searchTargetTab('keyboard shortcuts')).toBe('shortcuts')
     expect(searchTargetTab('about writemd')).toBe('about')
   })
 
   it('matches keywords without matching everything', () => {
     const tabs = searchSettingsTabs('mermaid')
-    expect(tabs).toEqual(['advanced'])
+    expect(tabs).toEqual(['editor'])
   })
 
   it('returns no tabs when nothing matches', () => {
@@ -44,7 +63,7 @@ describe('searchSettingsTabs', () => {
 
   it('requires every word of a multi-word query', () => {
     expect(searchSettingsTabs('vault disk')).toEqual(['files'])
-    expect(searchSettingsTabs('page size')).toEqual(['advanced'])
+    expect(searchSettingsTabs('page size')).toEqual(['export'])
     // Words in one section cannot be borrowed from another.
     expect(searchSettingsTabs('vault zzz-no-such-setting')).toEqual([])
   })

@@ -101,6 +101,7 @@ export interface WriteMdSettings {
   }
   advanced: {
     enableMermaid: boolean
+    hardwareAcceleration: boolean
   }
   updates: {
     autoCheckForUpdates: boolean
@@ -187,7 +188,8 @@ export const DEFAULT_SETTINGS: WriteMdSettings = {
     modelPreferences: {}
   },
   advanced: {
-    enableMermaid: true
+    enableMermaid: true,
+    hardwareAcceleration: true
   },
   updates: {
     autoCheckForUpdates: true,
