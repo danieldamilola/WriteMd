@@ -36,6 +36,16 @@ export class BacklinksPanel extends LitElement {
         padding: 12px 8px;
         font-family: 'Geist Mono', monospace;
         color: var(--text);
+        animation: backlinks-in var(--motion-base) var(--motion-ease-out);
+      }
+      @keyframes backlinks-in {
+        from {
+          opacity: 0;
+          transform: translateX(8px);
+        }
+      }
+      :host-context([data-motion='reduced']) {
+        animation: none;
       }
       .toolbar {
         display: flex;

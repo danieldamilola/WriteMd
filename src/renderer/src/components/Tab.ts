@@ -16,6 +16,19 @@ export class WriteMdTab extends LitElement {
       box-sizing: border-box;
       user-select: none;
       -webkit-app-region: no-drag;
+      animation: tab-in var(--motion-base) var(--motion-ease-out);
+    }
+
+    /* A tab arrives by growing into its slot rather than appearing in it. */
+    @keyframes tab-in {
+      from {
+        opacity: 0;
+        transform: translateY(4px);
+      }
+    }
+
+    :host-context([data-motion='reduced']) {
+      animation: none;
     }
 
     .tab-btn {

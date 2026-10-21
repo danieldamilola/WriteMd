@@ -93,6 +93,10 @@ const writemdAPI = {
     openExternal: (url: string) => ipcRenderer.invoke('shell:open-external', url),
     showInFolder: (path: string) => ipcRenderer.invoke('shell:show-in-folder', path)
   },
+  github: {
+    status: () => ipcRenderer.invoke('github:status'),
+    star: () => ipcRenderer.invoke('github:star')
+  },
   export: {
     pdf: (markdown: string, docPath: string | null) =>
       ipcRenderer.invoke('export:pdf', markdown, docPath),

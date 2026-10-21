@@ -65,6 +65,7 @@ import { chatgptAuth, cancelChatgptLogin, CHATGPT_API_BASE } from './ai/chatgpt-
 import { chatgptModels } from './ai/providers/chatgpt'
 import { cancelAll } from './ai/service'
 import { getHardwareAccelerationSetting } from './hardware-acceleration'
+import { githubStatus, starRepository } from './github'
 
 /** A model listing is a single small GET; anything slower is a wrong endpoint. */
 const MODEL_LIST_TIMEOUT_MS = 20_000
@@ -398,6 +399,12 @@ export function setupIpc(getWindow: () => BrowserWindow | null): void {
     if (!canProbePath(filePath)) return
     shell.showItemInFolder(filePath)
   })
+
+  // The star action lives in main because the token it needs is in the GitHub
+  // CLI's keychain entry. The renderer asks whether starring is possible and
+  // then asks for the star; neither call carries a secret in either direction.
+  ipcMain.handle('github:status', () => githubStatus())
+  ipcMain.handle('github:star', () => starRepository())
 
   ipcMain.handle('file:delete', async (_, filePath: string) => {
     if (!canAccessPath(filePath)) {

@@ -240,6 +240,25 @@ export function conceal(el: HTMLElement | null | undefined): Promise<void> {
 }
 
 /**
+ * Play a surface's exit, then let its owner unmount it.
+ *
+ * Menus and popovers are removed by whoever rendered them, so this is the one
+ * place that knows to hold the element for the exit first. Under reduced motion,
+ * or in a DOM that cannot animate, the removal happens immediately: there is
+ * nothing to wait for, and a menu that lingered for 80ms with no visible change
+ * would just feel unresponsive.
+ */
+export function closeSurface(el: Element | null | undefined, remove: () => void): void {
+  const target = el as HTMLElement | null
+  if (!target || reducedMotionNow() || typeof target.animate !== 'function') {
+    remove()
+    return
+  }
+  target.style.pointerEvents = 'none'
+  void conceal(target).then(remove)
+}
+
+/**
  * A press is a scale, not a colour. Applied on pointer-down and released on the
  * next frame so a held button stays pressed and a click never leaves it stuck.
  */

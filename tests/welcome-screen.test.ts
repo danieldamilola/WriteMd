@@ -3,8 +3,19 @@ import { SettingsStore } from '../src/renderer/src/state/settings'
 import '../src/renderer/src/components/WelcomeScreen'
 import type { WelcomeScreen } from '../src/renderer/src/components/WelcomeScreen'
 
-const { listFiles } = vi.hoisted(() => ({ listFiles: vi.fn() }))
-vi.mock('../src/renderer/src/api', () => ({ api: () => ({ vault: { listFiles } }) }))
+const { listFiles, openExternal, starGithub, githubStatus } = vi.hoisted(() => ({
+  listFiles: vi.fn(),
+  openExternal: vi.fn(),
+  starGithub: vi.fn(),
+  githubStatus: vi.fn()
+}))
+vi.mock('../src/renderer/src/api', () => ({
+  api: () => ({
+    vault: { listFiles },
+    shell: { openExternal },
+    github: { star: starGithub, status: githubStatus }
+  })
+}))
 
 describe('welcome screen data and actions', () => {
   let settings: SettingsStore
@@ -12,6 +23,14 @@ describe('welcome screen data and actions', () => {
     document.body.replaceChildren()
     vi.restoreAllMocks()
     listFiles.mockReset().mockResolvedValue([])
+    openExternal.mockReset().mockResolvedValue(undefined)
+    starGithub.mockReset().mockResolvedValue({ ok: false, reason: 'no-cli', message: '' })
+    githubStatus.mockReset().mockResolvedValue({
+      connected: false,
+      login: null,
+      starred: null,
+      reason: 'no-cli'
+    })
     settings = new SettingsStore()
     vi.spyOn(SettingsStore, 'getInstance').mockReturnValue(settings)
   })
@@ -27,7 +46,12 @@ describe('welcome screen data and actions', () => {
       expect(element.shadowRoot?.querySelector('.recent')?.getAttribute('aria-busy')).toBe('false')
     )
     expect(element.shadowRoot!.querySelector('.empty-state')!.textContent).toBe('Nothing')
-    expect(element.shadowRoot!.querySelector('.utilities')).toBeNull()
+    // Vertical mode leaves Settings to the sidebar; the repo link is still here.
+    expect(
+      Array.from(element.shadowRoot!.querySelectorAll<HTMLButtonElement>('.utility')).map(
+        (button) => button.textContent?.trim()
+      )
+    ).toEqual(['Star on GitHub'])
     expect(element.shadowRoot!.textContent).not.toContain('Open vault folder')
     for (const [label, event] of [
       ['New note', 'new-file'],
@@ -81,6 +105,37 @@ describe('welcome screen data and actions', () => {
     await element.updateComplete
     expect(element.shadowRoot!.querySelector('.file-name')!.textContent).toBe('New')
     expect(element.shadowRoot!.querySelector('h2')!.textContent).toBe('Recent notes')
+  })
+
+  it('falls back to the repository page when starring is unavailable', async () => {
+    const element = mount()
+    await element.updateComplete
+    const star = Array.from(
+      element.shadowRoot!.querySelectorAll<HTMLButtonElement>('.utility')
+    ).find((button) => button.textContent?.includes('Star on GitHub'))!
+    star.click()
+    await vi.waitFor(() =>
+      expect(openExternal).toHaveBeenCalledWith('https://github.com/danieldamilola/WriteMd')
+    )
+  })
+
+  it('stars in place and shows the starred state', async () => {
+    starGithub.mockResolvedValue({ ok: true, starred: true })
+    const element = mount()
+    await element.updateComplete
+    const star = element.shadowRoot!.querySelector<HTMLButtonElement>('.repo-link')!
+    star.click()
+    await vi.waitFor(() => expect(star.textContent).toContain('Starred'))
+    expect(openExternal).not.toHaveBeenCalled()
+  })
+
+  it('opens showing the starred state when the account already starred the repo', async () => {
+    githubStatus.mockResolvedValue({ connected: true, login: 'danieldamilola', starred: true })
+    const element = mount()
+    await vi.waitFor(() =>
+      expect(element.shadowRoot!.querySelector('.repo-link')!.textContent).toContain('Starred')
+    )
+    expect(starGithub).not.toHaveBeenCalled()
   })
 
   it('updates shortcut hints and removes a hint when its action is unbound', async () => {

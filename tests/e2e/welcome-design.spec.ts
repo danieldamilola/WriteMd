@@ -61,6 +61,12 @@ test.describe('Welcome screen design', () => {
     await expect(welcome.locator('.recent-item')).toHaveCount(4)
     await expect(welcome.locator('writemd-panel')).toHaveJSProperty('empty', true)
     await expect(welcome.locator('.top-bar, .split-view, .watermark')).toHaveCount(0)
+    // The repo link is the one utility vertical mode keeps; Settings lives in
+    // the sidebar there. It reads "Starred" on a machine whose GitHub CLI login
+    // already starred the repo, which is the state this app is developed in.
+    await expect
+      .poll(async () => (await welcome.locator('.utility').innerText()).trim())
+      .toMatch(/^(Star on GitHub|Starred)$/)
     await expect(page.locator('writemd-top-bar .window-controls writemd-icon-button')).toHaveCount(
       3
     )

@@ -1,6 +1,7 @@
-import { describe, it, expect, afterEach } from 'vitest'
+import { describe, it, expect, afterEach, vi } from 'vitest'
 import {
   applyMotionPreference,
+  closeSurface,
   reducedMotionNow,
   watchSystemMotionPreference,
   type MotionPreference
@@ -116,5 +117,61 @@ describe('motion preference', () => {
     applyMotionPreference(preference)
     expect(reducedMotionNow()).toBe(false)
     expect(() => watchSystemMotionPreference()).not.toThrow()
+  })
+})
+
+describe('closing a surface', () => {
+  let restore: (() => void) | undefined
+
+  afterEach(() => {
+    restore?.()
+    restore = undefined
+    applyMotionPreference('system')
+  })
+
+  function animatable(el: HTMLElement): { finish: () => void } {
+    let finish = (): void => {}
+    ;(el as unknown as { animate: () => unknown }).animate = () => ({
+      finished: new Promise<void>((resolve) => (finish = resolve)),
+      cancel: () => {},
+      commitStyles: () => {}
+    })
+    return { finish: () => finish() }
+  }
+
+  it('waits for the exit before unmounting when motion is allowed', async () => {
+    restore = osAsksForLess(false)
+    applyMotionPreference('full')
+    const el = document.createElement('div')
+    const animation = animatable(el)
+    let removed = false
+    closeSurface(el, () => (removed = true))
+    expect(removed).toBe(false)
+    // The element stays on screen but must not catch the click that dismissed it.
+    expect(el.style.pointerEvents).toBe('none')
+    animation.finish()
+    await vi.waitFor(() => expect(removed).toBe(true))
+  })
+
+  it('unmounts at once under reduced motion, with no wait to sit through', () => {
+    applyMotionPreference('reduced')
+    const el = document.createElement('div')
+    animatable(el)
+    let removed = false
+    closeSurface(el, () => (removed = true))
+    expect(removed).toBe(true)
+  })
+
+  it('unmounts at once where the DOM cannot animate', () => {
+    applyMotionPreference('full')
+    let removed = false
+    closeSurface(document.createElement('div'), () => (removed = true))
+    expect(removed).toBe(true)
+  })
+
+  it('tolerates a missing element', () => {
+    let removed = false
+    closeSurface(null, () => (removed = true))
+    expect(removed).toBe(true)
   })
 })

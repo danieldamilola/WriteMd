@@ -18,7 +18,7 @@ import { api } from '../api'
 import type { ProviderPresetView } from '../../../shared/electron-api'
 import type { AiSkillsView } from '../../../shared/ai/skills'
 import { deepActiveElement } from '../utils/links'
-import { MOTION_LABELS, MOTION_PREFERENCES, type MotionPreference } from '../utils/motion'
+import { MOTION_LABELS, MOTION_PREFERENCES, reveal, type MotionPreference } from '../utils/motion'
 import { SettingsStore } from '../state/settings'
 import { FileState } from '../state/file-state'
 import { ChatgptState } from '../state/chatgpt'
@@ -27,6 +27,7 @@ import { showConfirm } from './ConfirmDialog'
 import { icon } from './icons'
 import { scrollbarStyles } from './scrollbars'
 import { summarizeNotesForVersion } from '../services/whats-new'
+import { repoStarred, starRepo } from '../utils/project-links'
 import {
   COMMANDS,
   commandTitle,
@@ -586,6 +587,21 @@ export class SettingsModal extends LitElement {
       .control-btn:hover {
         background: var(--bg-active);
       }
+      .control-btn.is-starred {
+        background: transparent;
+        border-color: var(--border);
+        color: var(--accent);
+        cursor: default;
+      }
+      .control-btn.is-starred:hover {
+        background: transparent;
+      }
+      /* A state, not an unavailable action: the dimmed disabled treatment would
+         make the confirmation look like the button had failed. */
+      .control-btn.is-starred:disabled {
+        opacity: 1;
+        cursor: default;
+      }
 
       .ai-settings .section {
         margin-bottom: 20px;
@@ -857,6 +873,7 @@ export class SettingsModal extends LitElement {
   @state() private startupHardwareAcceleration: boolean | null = null
   @state() private restarting = false
   @state() private restartError = ''
+  @state() private githubStarred = false
   @state() private defaultNewFileName = 'Untitled.md'
   @state() private pdfPageSize = 'A4'
   @state() private pdfTheme = 'light'
@@ -960,6 +977,9 @@ export class SettingsModal extends LitElement {
       ?.app?.getVersion?.()
       .then((v) => (this.appVersion = v))
       .catch(() => undefined)
+    void repoStarred().then((starred) => {
+      if (this.isConnected) this.githubStarred = starred
+    })
 
     const updater = api()?.updater
     if (updater) {
@@ -1214,7 +1234,7 @@ export class SettingsModal extends LitElement {
    */
   protected updated(changed: Map<string, unknown>): void {
     super.updated(changed)
-    if (changed.has('tab'))
+    if (changed.has('tab')) {
       this.dispatchEvent(
         new CustomEvent('settings-section-change', {
           detail: { tab: this.tab },
@@ -1222,6 +1242,10 @@ export class SettingsModal extends LitElement {
           composed: true
         })
       )
+      // The panel is one element reused across tabs, so the page change is
+      // announced with a short lift instead of a hard swap.
+      void reveal(this.renderRoot.querySelector<HTMLElement>('.content-panel'))
+    }
     this.hitRows = this.hitsInPanel()
     if (this.hitIndex >= this.hitRows.length) this.hitIndex = 0
     this.paintHits()
@@ -2515,6 +2539,16 @@ export class SettingsModal extends LitElement {
     </div>`
   }
 
+  /**
+   * Star in place. When the app cannot do it (no GitHub CLI login, offline),
+   * `starRepo` falls back to the browser, so the button is never a dead end.
+   */
+  private async starOnGithub(): Promise<void> {
+    if (this.githubStarred) return
+    const result = await starRepo()
+    if (result === 'starred' && this.isConnected) this.githubStarred = true
+  }
+
   private async restartForGraphics(): Promise<void> {
     if (this.restarting) return
     this.restarting = true
@@ -2699,6 +2733,19 @@ export class SettingsModal extends LitElement {
             <div class="setting-desc">See what changed in this version</div>
           </div>
           <button class="control-btn" @click=${this.handleShowWhatsNew}>What's new</button>
+        </div>
+        <div class="setting-row">
+          <div>
+            <div class="setting-label">GitHub</div>
+            <div class="setting-desc">Star the project if it is useful</div>
+          </div>
+          <button
+            class="control-btn ${this.githubStarred ? 'is-starred' : ''}"
+            ?disabled=${this.githubStarred}
+            @click=${this.starOnGithub}
+          >
+            ${this.githubStarred ? 'Starred' : 'Star on GitHub'}
+          </button>
         </div>
       </div>
 

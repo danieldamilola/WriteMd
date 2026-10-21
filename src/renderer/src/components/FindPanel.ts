@@ -28,6 +28,16 @@ export class FindPanel extends LitElement {
     :host {
       z-index: 400;
       width: min(440px, calc(100% - 32px));
+      animation: find-panel-in var(--motion-fast) var(--motion-ease-out);
+    }
+    @keyframes find-panel-in {
+      from {
+        opacity: 0;
+        transform: translateY(-8px) scale(0.99);
+      }
+    }
+    :host-context([data-motion='reduced']) {
+      animation: none;
     }
     .bar {
       background: var(--bg-elevated);

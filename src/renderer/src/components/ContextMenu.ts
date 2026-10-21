@@ -2,6 +2,7 @@ import { css, html, LitElement } from 'lit'
 import { customElement, property } from 'lit/decorators.js'
 import '@awesome.me/webawesome/dist/components/popup/popup.js'
 import { deepActiveElement } from '../utils/links'
+import { closeSurface } from '../utils/motion'
 import { emit, on } from '../events/bus'
 
 @customElement('writemd-context-menu')
@@ -33,6 +34,7 @@ export class ContextMenu extends LitElement {
   private previous: HTMLElement | null = null
   private unsubscribe: (() => void) | null = null
   private restoreFocus = true
+  private closing = false
   connectedCallback(): void {
     super.connectedCallback()
     this.previous = deepActiveElement() as HTMLElement | null
@@ -73,7 +75,11 @@ export class ContextMenu extends LitElement {
     this.items()[0]?.focus({ preventScroll: true })
   }
   private dismiss(): void {
-    this.dispatchEvent(new CustomEvent('menu-dismiss', { bubbles: true, composed: true }))
+    if (this.closing) return
+    this.closing = true
+    closeSurface(this.querySelector('.m-panel'), () =>
+      this.dispatchEvent(new CustomEvent('menu-dismiss', { bubbles: true, composed: true }))
+    )
   }
   private outside = (event: PointerEvent): void => {
     if (!event.composedPath().includes(this)) {

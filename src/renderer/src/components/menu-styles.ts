@@ -6,6 +6,22 @@ import { icon } from './icons'
  * in the light, paper, dracula, nord, graphite and midnight themes.
  */
 export const menuStyles = css`
+  /*
+   * Every dropdown in the app arrives the same way: a short fade. It is one
+   * rule on the shared panel so a group menu, the mode picker and a document
+   * menu cannot drift apart.
+   *
+   * Fade only, and deliberately no transform. Menus are positioned by a
+   * Web Awesome popup that measures its anchor, and a transform on the panel
+   * during the entrance puts the hover bridge and any submenu at coordinates
+   * taken from the moved box: the format submenu opened while the menu was
+   * still fading collapsed to nothing. A fade cannot move anything it measures.
+   */
+  @keyframes m-panel-in {
+    from {
+      opacity: 0;
+    }
+  }
   .m-panel {
     position: absolute;
     min-width: 220px;
@@ -15,6 +31,10 @@ export const menuStyles = css`
     box-shadow: var(--shadow-3);
     padding: 4px;
     z-index: 100;
+    animation: m-panel-in var(--motion-fast) var(--motion-ease-out);
+  }
+  :host-context([data-motion='reduced']) .m-panel {
+    animation: none;
   }
   writemd-context-menu > .m-panel {
     position: relative;

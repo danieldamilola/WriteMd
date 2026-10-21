@@ -9,10 +9,13 @@ Release numbering restarts at v0.1.0. Earlier development notes remain in [the a
 ### Added
 
 - A hardware acceleration switch in Settings → System, with a restart action to apply the saved choice.
+- A "Star on GitHub" link on the home screen and in Settings → About.
 
 ### Changed
 
+- "Star on GitHub" now stars the repository in place when the GitHub CLI is signed in, using that sign-in from the main process so no browser opens and no token is stored by the app. Without a CLI sign-in it still opens the repository page, and both entry points show "Starred" once the account has starred it.
 - Reorganized Settings into writing, workspace, assistant, and application groups. New-note defaults now live with vault and saving options, PDF preferences have an Export page, personal instructions have a Skills page, and performance and resets live in System. Mermaid is under Editor, document-path visibility is under Appearance, and update controls are grouped within About.
+- Menus, popovers, the find bar, backlinks, tabs, and Settings pages now arrive with a short transition, and a dismissed menu fades before it leaves. Menus and popovers fade rather than move, because the popup that positions them measures the box it places. Everything still follows Settings → Appearance → Animation.
 
 ## [0.1.0] - 2026-10-16
 

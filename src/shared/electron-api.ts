@@ -199,6 +199,23 @@ export interface UpdaterState {
   releaseNotes?: string
 }
 
+/**
+ * Whether the app can star its own repository.
+ *
+ * `connected` is true when the GitHub CLI login was accepted. `starred` is
+ * null when that could not be checked, which is different from false.
+ */
+export interface GithubStatus {
+  connected: boolean
+  login: string | null
+  starred: boolean | null
+  reason?: 'no-cli' | 'offline' | 'rejected'
+}
+
+export type GithubStarResult =
+  | { ok: true; starred: true }
+  | { ok: false; reason: 'no-cli' | 'offline' | 'rejected'; message: string }
+
 export interface ElectronAPI {
   appearance: {
     importBackground: () => Promise<BackgroundAsset | null>
@@ -331,6 +348,14 @@ export interface ElectronAPI {
     listSessions: () => Promise<PersistedSessionView[]>
     saveSession: (session: PersistedSessionView) => Promise<void>
     deleteSession: (id: string) => Promise<void>
+  }
+  /**
+   * Starring the project. Failures come back as values rather than exceptions:
+   * the caller's fallback is to open the repository in the browser.
+   */
+  github: {
+    status: () => Promise<GithubStatus>
+    star: () => Promise<GithubStarResult>
   }
   updater: {
     /**

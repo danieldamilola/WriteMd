@@ -3,8 +3,10 @@ import { customElement, property, state } from 'lit/decorators.js'
 import { api } from '../api'
 import { SettingsStore } from '../state/settings'
 import { chromeIcon } from '../design/icons'
+import { icon } from './icons'
 import { controlStyles } from '../design/controls'
 import { displayTitle, shortPath } from '../utils/links'
+import { repoStarred, starRepo } from '../utils/project-links'
 import { effectiveBinding, formatBinding } from '../state/shortcuts'
 import './Panel'
 
@@ -153,6 +155,28 @@ export class WelcomeScreen extends LitElement {
         font-size: 12px;
         color: var(--text-secondary);
       }
+      /* Always the far end of the row: in vertical mode it is the only utility,
+         so space-between alone would park it under the recent notes. */
+      .repo-link {
+        margin-left: auto;
+        transition: color var(--motion-fast) var(--motion-ease);
+      }
+      .repo-link.is-starred {
+        color: var(--accent);
+      }
+      .repo-link.is-starred svg {
+        animation: star-pop var(--motion-base) var(--motion-ease);
+      }
+      @keyframes star-pop {
+        50% {
+          transform: scale(1.18);
+        }
+      }
+      :host-context([data-motion='reduced']) .repo-link,
+      :host-context([data-motion='reduced']) .repo-link.is-starred svg {
+        transition: none;
+        animation: none;
+      }
       @container (max-width: 440px) {
         .actions .secondary {
           flex: 1 1 100%;
@@ -171,6 +195,7 @@ export class WelcomeScreen extends LitElement {
   @state() private recentFiles: RecentFile[] = []
   @state() private recentLoading = true
   @state() private fromVault = false
+  @state() private starred = false
   private settingsStore = SettingsStore.getInstance()
   private unsubscribes: Array<() => void> = []
   private loadVersion = 0
@@ -183,6 +208,9 @@ export class WelcomeScreen extends LitElement {
       this.settingsStore.subscribe('shortcuts.bindings', () => this.requestUpdate())
     ]
     void this.loadRecentFiles()
+    void repoStarred().then((starred) => {
+      if (this.isConnected) this.starred = starred
+    })
   }
 
   disconnectedCallback(): void {
@@ -222,6 +250,17 @@ export class WelcomeScreen extends LitElement {
   private shortcut(id: string): string {
     const binding = effectiveBinding(id, this.settingsStore.get('shortcuts.bindings', {}))
     return binding ? formatBinding(binding) : ''
+  }
+
+  /**
+   * Star in place. The button already reads "Starred" when the account has
+   * starred the repo, so a second click is a no-op rather than a duplicate
+   * request.
+   */
+  private async starOnGithub(): Promise<void> {
+    if (this.starred) return
+    const result = await starRepo()
+    if (result === 'starred' && this.isConnected) this.starred = true
   }
 
   render(): unknown {
@@ -267,15 +306,26 @@ export class WelcomeScreen extends LitElement {
                   </ul>`
           }
         </section>
-        ${
-          this.vertical
-            ? ''
-            : html`<div class="utilities">
-                <button class="nav-row utility" @click=${() => this.emit('open-settings')}>
+        <div class="utilities">
+          ${
+            this.vertical
+              ? ''
+              : html`<button class="nav-row utility" @click=${() => this.emit('open-settings')}>
                   ${chromeIcon('settings')}Settings
-                </button>
-              </div>`
-        }
+                </button>`
+          }
+          <button
+            class="nav-row utility repo-link ${this.starred ? 'is-starred' : ''}"
+            title=${
+              this.starred
+                ? 'You have starred WriteMd on GitHub'
+                : 'Star the WriteMd repository on GitHub'
+            }
+            @click=${this.starOnGithub}
+          >
+            ${icon('star')}<span>${this.starred ? 'Starred' : 'Star on GitHub'}</span>
+          </button>
+        </div>
       </main>
     </writemd-panel>`
   }

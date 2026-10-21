@@ -39,7 +39,7 @@ import {
 import { makeLinkClickHandler } from './extensions/link-click'
 import { mermaidEnabledFacet } from './extensions/mermaid-toggle'
 import { on } from '../events/bus'
-import { DURATION, reducedMotionNow } from '../utils/motion'
+import { closeSurface, DURATION, reducedMotionNow } from '../utils/motion'
 import { mathPlugin } from './extensions/math-plugin'
 import { frontmatterPlugin } from './extensions/frontmatter-plugin'
 import { wikiLinkPlugin } from './extensions/wiki-link-plugin'
@@ -638,6 +638,12 @@ export class Editor extends LitElement {
   } | null = null
   @state() private findPane: 'primary' | 'secondary' = 'primary'
   @state() private findOpen = false
+  /*
+   * Bumped on every open so a close that is still playing cannot switch off a
+   * panel the user reopened while it was fading. Without it, Ctrl+F within the
+   * exit would leave the panel mounted but marked closed.
+   */
+  private findEpoch = 0
   @state() private findMode: 'find' | 'replace' = 'find'
   @state() private findQuery = ''
   @state() private findWholeWord = false
@@ -1005,7 +1011,7 @@ export class Editor extends LitElement {
             key: 'Escape',
             run: () => {
               if (this.findOpen) {
-                this.findOpen = false
+                this.closeFindPanel()
                 this.editorView?.focus()
                 return true
               }
@@ -1484,7 +1490,23 @@ export class Editor extends LitElement {
     }
     this.findQuery = seed
     this.findMode = mode
+    this.findEpoch++
     this.findOpen = true
+  }
+
+  /**
+   * Hold the panel for its exit, then unmount it.
+   *
+   * The epoch check matters more here than anywhere else in the app: Escape is
+   * also how you get back to the editor, so a Ctrl+F that lands during the fade
+   * must win.
+   */
+  private closeFindPanel(): void {
+    if (!this.findOpen) return
+    const epoch = this.findEpoch
+    closeSurface(this.findPanelEl, () => {
+      if (epoch === this.findEpoch) this.findOpen = false
+    })
   }
 
   private handleFindClose = (
@@ -1496,7 +1518,7 @@ export class Editor extends LitElement {
       this.findCaseSensitive = flags.caseSensitive
       this.findRegex = flags.regexp
     }
-    this.findOpen = false
+    this.closeFindPanel()
   }
 
   private handleFindToggle = (e: CustomEvent<{ mode: 'find' | 'replace' }>): void => {

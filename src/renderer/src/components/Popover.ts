@@ -2,6 +2,7 @@ import { css, html, LitElement } from 'lit'
 import { customElement, property } from 'lit/decorators.js'
 import '@awesome.me/webawesome/dist/components/popup/popup.js'
 import { emit, on } from '../events/bus'
+import { closeSurface } from '../utils/motion'
 
 /** Shared anchored cards. Contents keep their native input and button semantics. */
 @customElement('writemd-popover')
@@ -13,12 +14,27 @@ export class Popover extends LitElement {
   private unsubscribe?: () => void
   private restoreFocus = false
   private focused = false
+  private closing = false
   static styles = css`
     :host {
       display: contents;
     }
     wa-popup::part(popup) {
       z-index: 1000;
+    }
+    /* Fade only, for the same reason menus fade only: the anchored popup
+       measures the box it places, and a transform during the entrance hands it
+       a moved rectangle. */
+    [role='dialog'] {
+      animation: popover-in var(--motion-fast) var(--motion-ease-out);
+    }
+    @keyframes popover-in {
+      from {
+        opacity: 0;
+      }
+    }
+    :host-context([data-motion='reduced']) [role='dialog'] {
+      animation: none;
     }
     slot {
       display: contents;
@@ -54,7 +70,11 @@ export class Popover extends LitElement {
     target?.focus({ preventScroll: true })
   }
   private dismiss(): void {
-    this.dispatchEvent(new CustomEvent('popover-dismiss', { bubbles: true, composed: true }))
+    if (this.closing) return
+    this.closing = true
+    closeSurface(this.renderRoot.querySelector('[role="dialog"]'), () =>
+      this.dispatchEvent(new CustomEvent('popover-dismiss', { bubbles: true, composed: true }))
+    )
   }
   private outside = (event: Event): void => {
     if (

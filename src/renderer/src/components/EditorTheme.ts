@@ -353,6 +353,31 @@ export const writeMDTheme: Extension = EditorView.theme({
   '.cm-frontmatter-dim': {
     color: 'var(--text-muted)'
   },
+  /* Frontmatter: fields edit in place, like the table. Fields carry their own
+     cursor; the delete buttons sit quiet until the row or pill is hovered. */
+  '.cm-frontmatter-widget[data-editable="true"] .cm-frontmatter-field': {
+    cursor: 'text'
+  },
+  '.cm-frontmatter-widget .cm-frontmatter-editing': {
+    outline: '2px solid var(--border-focus)',
+    outlineOffset: '-2px',
+    borderRadius: '4px',
+    backgroundColor: 'var(--bg-hover)'
+  },
+  '.cm-frontmatter-row-del, .cm-frontmatter-tag-del': {
+    opacity: '0',
+    cursor: 'pointer',
+    color: 'var(--text-muted)',
+    fontSize: '13px',
+    lineHeight: '1',
+    transition: 'opacity 0.1s ease'
+  },
+  '.cm-frontmatter-widget [data-editable="true"] .cm-frontmatter-row:hover .cm-frontmatter-row-del, .cm-frontmatter-tag:hover .cm-frontmatter-tag-del': {
+    opacity: '1'
+  },
+  '.cm-frontmatter-row-del:hover, .cm-frontmatter-tag-del:hover': {
+    color: 'var(--text)'
+  },
   /* Math and Code Widgets - transparent like table, no box */
   '.cm-live-math': {
     display: 'inline-block',
